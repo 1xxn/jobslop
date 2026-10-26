@@ -112,7 +112,7 @@ class Application(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"), index=True)
     status: Mapped[str] = mapped_column(String(20), default="running", index=True)
-    # running, needs_input, needs_review, ready, submitted, failed, skipped, manual, interview, rejected, offer
+    # running, needs_input, needs_review, ready, paused (Abo-Limit), submitted, failed, skipped, manual, interview, rejected, offer
     origin: Mapped[str] = mapped_column(String(20), default="jobpilot")  # jobpilot, manual, import
     mode: Mapped[str] = mapped_column(String(10), default="review")
     started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

@@ -387,7 +387,7 @@ class GenericPageSource:
 
     async def fetch(self, client: httpx.AsyncClient) -> list[RawPosting]:
         if self.llm is None:
-            raise SourceError("Generische Quellen brauchen ANTHROPIC_API_KEY")
+            raise SourceError("Generische Quellen brauchen Claude Code (angemeldet)")
         text, links = await self.render(self.page.url)
         link_lines = "\n".join(f"- {link['text'][:140]} -> {link['href']}" for link in links[:400])
         result = await self.llm.parse(
