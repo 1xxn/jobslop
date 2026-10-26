@@ -173,6 +173,7 @@ def _config(config):
     )
     s.workday = [WorkdaySite(company="Zeta AG", host="wd.example.com", tenant="ten", site="Careers")]
     s.amazon_queries, s.generic = ["engineer"], []
+    s.arbeitnow, s.himalayas_queries = False, []
     return config
 
 
@@ -206,6 +207,7 @@ async def test_crawl_filters_upserts_and_tracks_history(settings, config):
         titles = set(jobs)
         assert titles == {
             "Site Reliability Engineer",
+            "Senior Site Reliability Engineer",  # Senior ist Stretch, nicht ausgeschlossen
             "(Senior) Platform Engineer",
             "DevOps Engineer",
             "Cloud Engineer (m/w/d)",
@@ -218,6 +220,8 @@ async def test_crawl_filters_upserts_and_tracks_history(settings, config):
         assert sre.alt_urls == ["https://www.linkedin.com/jobs/view/1/"]
         assert sre.category == "SRE" and sre.fit == 3 and sre.where == "B"
         assert jobs["(Senior) Platform Engineer"].level == "S"
+        assert jobs["Senior Site Reliability Engineer"].level == "S"
+        assert jobs["Senior Site Reliability Engineer"].score < sre.score
         devops = next(j for j in all_jobs if j.source == "ashby:beta")
         workday = next(j for j in all_jobs if j.source.startswith("workday:"))
         assert workday.workplace == "Hybrid" and "GitLab" in workday.description
@@ -225,7 +229,7 @@ async def test_crawl_filters_upserts_and_tracks_history(settings, config):
         assert jobs["Systems Engineer Kubernetes"].apply_url.endswith("/apply")  # Details nachgeladen
         assert "Kubernetes" in jobs["Systems Engineer Kubernetes"].description
         assert jobs["Systems Engineer/DevOps Eng, Managed Operations"].company == "AWS"
-        assert len(report.merged_seeds) == 1 and len(report.new) == 7
+        assert len(report.merged_seeds) == 1 and len(report.new) == 8
 
     # Zweiter Lauf: Ashby-Stelle verschwindet, Greenhouse-Titel ändert sich
     gh2 = {"jobs": [dict(GH_JOBS["jobs"][0], title="Site Reliability Engineer II")]}
@@ -266,6 +270,157 @@ async def test_source_failure_does_not_close_jobs(settings, config):
         )
         report = await run_crawl(settings, config, enrich=False, use_browser=False)
     assert report.closed == []  # ausgefallene Quelle schließt keine Stellen
+
+
+ARBEITNOW = {
+    "data": [
+        {
+            "slug": "sre-acme-1",
+            "company_name": "Acme Cloud GmbH",
+            "title": "Site Reliability Engineer",
+            "description": "<p>Kubernetes</p>",
+            "remote": False,
+            "url": "https://www.arbeitnow.com/jobs/acme/sre",
+            "job_types": [],
+            "location": "Berlin",
+            "created_at": 1792900000,
+        },
+        {
+            "slug": "linux-omega-2",
+            "company_name": "Omega GmbH",
+            "title": "Linux Administrator (m/w/d)",
+            "description": "<p>Linux, Bash, Ansible</p>",
+            "remote": True,
+            "url": "https://www.arbeitnow.com/jobs/omega/linux",
+            "job_types": [],
+            "location": "Hamburg",
+            "created_at": 1792900000,
+        },
+        {
+            "slug": "audit-3",
+            "company_name": "Prüf AG",
+            "title": "Audit Engineer",
+            "description": "",
+            "remote": False,
+            "url": "https://www.arbeitnow.com/jobs/pruef/audit",
+            "job_types": [],
+            "location": "Berlin",
+            "created_at": 1792900000,
+        },
+    ],
+    "links": {"next": None},
+}
+HIMALAYAS = {
+    "jobs": [
+        {
+            "guid": "https://himalayas.app/companies/acme/jobs/sre",
+            "title": "Site Reliability Engineer",
+            "companyName": "Acme Cloud",
+            "locationRestrictions": ["Germany"],
+            "applicationLink": "https://himalayas.app/companies/acme/jobs/sre",
+            "description": "",
+            "pubDate": 1792900000,
+        },
+        {
+            "guid": "https://himalayas.app/companies/remote-co/jobs/k8s",
+            "title": "Kubernetes Engineer",
+            "companyName": "Remote Co",
+            "locationRestrictions": [],
+            "applicationLink": "https://himalayas.app/companies/remote-co/jobs/k8s",
+            "description": "<p>Kubernetes, Terraform</p>",
+            "pubDate": 1792900000,
+        },
+    ]
+}
+
+
+async def test_job_boards_add_jobs_without_duplicates(settings, config):
+    config = _config(config)
+    s = config.sources
+    s.greenhouse, s.ashby, s.lever, s.smartrecruiters, s.personio, s.workday, s.amazon_queries = (
+        ["acme"],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+    )
+    s.arbeitnow, s.himalayas_queries = True, ["sre"]
+    with respx.mock(assert_all_called=False) as router:
+        _mock(router)
+        router.get("https://www.arbeitnow.com/api/job-board-api").respond(json=ARBEITNOW)
+        router.get("https://himalayas.app/jobs/api/search").respond(json=HIMALAYAS)
+        report = await run_crawl(settings, config, enrich=False, use_browser=False)
+    assert report.errors == []
+    assert report.rejected["Dublette"] == 2  # Acme-SRE kommt aus Arbeitnow und Himalayas noch einmal
+    with session_scope(settings.db_path) as db:
+        jobs = {j.title: j for j in db.execute(select(Job)).scalars()}
+        sres = [j for j in jobs.values() if j.title == "Site Reliability Engineer"]
+        assert len(sres) == 1 and sres[0].source == "greenhouse:acme"
+        assert jobs["Linux Administrator (m/w/d)"].where == "R"  # Remote in Deutschland
+        assert jobs["Kubernetes Engineer"].where == "R" and jobs["Kubernetes Engineer"].source == "himalayas"
+        assert "Audit Engineer" not in jobs  # "it engineer" darf nicht in "audit engineer" treffen
+
+    # Zweiter Lauf: beide Börsen liefern nichts mehr. Arbeitnow war vollständig → schließen;
+    # Himalayas ist eine gedeckelte Suche → Stelle bleibt offen, bis sie lange nicht mehr auftaucht.
+    with respx.mock(assert_all_called=False) as router:
+        _mock(router)
+        router.get("https://www.arbeitnow.com/api/job-board-api").respond(json={"data": [], "links": {}})
+        router.get("https://himalayas.app/jobs/api/search").respond(json={"jobs": []})
+        report2 = await run_crawl(settings, config, enrich=False, use_browser=False)
+    with session_scope(settings.db_path) as db:
+        status = {j.title: j.status for j in db.execute(select(Job)).scalars()}
+    assert status["Linux Administrator (m/w/d)"] == "closed"
+    assert status["Kubernetes Engineer"] == "open"
+    assert status["Site Reliability Engineer"] == "open"
+    assert len(report2.closed) == 1
+
+
+async def test_arbeitnow_throttling_keeps_loaded_pages(settings, config, monkeypatch):
+    from jobpilot.crawl import base
+    from jobpilot.crawl.sources import ArbeitnowSource
+
+    monkeypatch.setattr(base, "wait_exponential", lambda **_: lambda _state: 0)
+    page2 = dict(ARBEITNOW, links={"next": "https://www.arbeitnow.com/api/job-board-api?page=2"})
+    with respx.mock() as router:
+        router.get("https://www.arbeitnow.com/api/job-board-api", params={"page": "1"}).respond(json=page2)
+        router.get("https://www.arbeitnow.com/api/job-board-api", params={"page": "2"}).respond(
+            status_code=429
+        )
+        src = ArbeitnowSource(max_pages=5, pause_s=0)
+        async with base.make_client() as client:
+            postings = await src.fetch(client)
+    assert len(postings) == 3
+    assert src.complete is False  # gedrosselt → keine Schließungen aus diesem Lauf
+
+
+async def test_company_board_replaces_job_board_entry(settings, config):
+    config = _config(config)
+    s = config.sources
+    s.greenhouse, s.ashby, s.lever, s.smartrecruiters, s.personio, s.workday, s.amazon_queries = (
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+    )
+    s.arbeitnow = True
+    with respx.mock(assert_all_called=False) as router:
+        router.get("https://www.arbeitnow.com/api/job-board-api").respond(json=ARBEITNOW)
+        await run_crawl(settings, config, enrich=False, use_browser=False)
+    s.greenhouse = ["acme"]
+    with respx.mock(assert_all_called=False) as router:
+        _mock(router)
+        router.get("https://www.arbeitnow.com/api/job-board-api").respond(json=ARBEITNOW)
+        await run_crawl(settings, config, enrich=False, use_browser=False)
+    with session_scope(settings.db_path) as db:
+        sres = [j for j in db.execute(select(Job)).scalars() if j.title == "Site Reliability Engineer"]
+    assert len(sres) == 1
+    assert sres[0].source == "greenhouse:acme" and sres[0].url.startswith("https://job-boards.greenhouse.io")
+    assert sres[0].alt_urls == ["https://www.arbeitnow.com/jobs/acme/sre"]
 
 
 class _BatchLLM:

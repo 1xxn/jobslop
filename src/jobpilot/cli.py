@@ -285,6 +285,13 @@ def crawl(
         f"[yellow]↺{len(report.reopened)} wieder offen[/yellow]  [red]−{len(report.closed)} geschlossen[/red]  "
         f"⇄{len(report.merged_seeds)} Startlisten-Einträge auf Firmen-URL umgestellt"
     )
+    if report.rejected.get("Dublette"):
+        console.print(f"  [dim]{report.rejected['Dublette']} Dubletten aus Jobbörsen übersprungen[/dim]")
+    if report.enrich_skipped:
+        console.print(
+            f"  [dim]{report.enrich_skipped} neue Stellen nur nach Regeln bewertet (Abo schonen) – "
+            "Claude-Bewertung später mit `jobpilot jobs enrich`[/dim]"
+        )
     if report.errors:
         console.print(f"[yellow]{len(report.errors)} Quellen mit Fehlern:[/yellow]")
         for err in report.errors[:15]:
@@ -435,7 +442,9 @@ def _print_jobs(ids: list[int] | None = None, rows: list[Job] | None = None, tit
             t.add_row(*(cells[col] for col, _ in columns if col in keep))
     console.print(t)
     if compact:
-        console.print("[dim]Schmales Fenster: Rolle, Level, Ort und Stack ausgeblendet – Fenster breiter ziehen.[/dim]")
+        console.print(
+            "[dim]Schmales Fenster: Rolle, Level, Ort und Stack ausgeblendet – Fenster breiter ziehen.[/dim]"
+        )
 
 
 @jobs_app.command("list")
@@ -510,6 +519,9 @@ def jobs_enrich(
     all_open: Annotated[
         bool, typer.Option("--all", help="Alle offenen Stellen mit Beschreibung neu bewerten")
     ] = False,
+    max_jobs: Annotated[
+        int, typer.Option("--max", help="Höchstens so viele Stellen (die besten zuerst; 6 pro Claude-Aufruf)")
+    ] = 60,
 ) -> None:
     """Stellen mit Claude einordnen (echtes Level aus den Anforderungen, Stack-Match, Hinweise)."""
     from .crawl.pipeline import enrich_jobs
@@ -517,8 +529,10 @@ def jobs_enrich(
     r = rt()
     llm = need_claude(r)
     with session_scope(r.settings.db_path) as s:
-        rows = s.execute(select(Job).where(Job.status == "open", Job.description != "")).scalars()
-        ids = [j.id for j in rows if all_open or not j.enrichment]
+        rows = s.execute(
+            select(Job).where(Job.status == "open", Job.description != "").order_by(Job.score.desc())
+        ).scalars()
+        ids = [j.id for j in rows if all_open or not j.enrichment][: max(0, max_jobs)]
     with console.status(f"Bewerte {len(ids)} Stellen …"):
         n = asyncio.run(enrich_jobs(r.settings, r.config, llm, r.profile, ids))
     console.print(f"[green]✓[/green] {n} Stellen bewertet")

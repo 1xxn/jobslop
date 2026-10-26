@@ -13,12 +13,24 @@ def test_title_filter(config):
     f = config.filters
     assert title_allowed("Site Reliability Engineer (m/w/d)", f)[0]
     assert title_allowed("(Senior) Cloud Site Reliability Engineer (Platform)", f)[0]
-    assert not title_allowed("Senior Site Reliability Engineer", f)[0]
+    assert title_allowed("Senior Site Reliability Engineer", f)[0]  # Stretch statt Ausschluss
+    assert level_of("Senior Site Reliability Engineer", f) == "S"
     assert not title_allowed("Staff Platform Engineer", f)[0]
+    assert not title_allowed("Lead DevOps Engineer", f)[0]
     assert not title_allowed("Werkstudent DevOps", f)[0]
     assert not title_allowed("Data Platform Engineer", f)[0]
     assert not title_allowed("Account Executive", f)[0]
     assert title_allowed("SRE / Platform Engineer – Remote Germany", f)[0]
+    # breitere Zielrollen
+    assert title_allowed("Linux Administrator (m/w/d)", f)[0]
+    assert title_allowed("Netzwerkadministrator (m/w/d)", f)[0]
+    assert title_allowed("IT-Systemadministrator Rechenzentrum", f)[0]
+    assert title_allowed("IT Engineer Infrastructure & Operations", f)[0]
+    assert title_allowed("Fachinformatiker für Systemintegration (m/w/d)", f)[0]
+    assert title_allowed("Test Automation Engineer", f)[0]
+    assert not title_allowed("Audit Engineer", f)[0]  # "it engineer" nicht mitten im Wort
+    assert not title_allowed("Salesforce Administrator", f)[0]
+    assert not title_allowed("SAP Basis Administrator", f)[0]
 
 
 def test_level_category_where(config):

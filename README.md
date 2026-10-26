@@ -87,7 +87,7 @@ Alles, was jobpilot an Claude schickt, zählt zum Nutzungslimit deines Claude-Ab
 |---|---|---|
 | Formularseite planen | `sonnet` | 1 pro Seite, typisch 2–6 pro Bewerbung |
 | Anschreiben (nur wenn verlangt und `cover_letter: auto`) | `sonnet` | 1 |
-| Stellen bewerten (`crawl`, `jobs enrich`) | `haiku` | 1 pro 6 Stellen |
+| Stellen bewerten (`crawl`, `jobs enrich`) | `haiku` | 1 pro 6 Stellen, höchstens 60 Stellen pro Crawl bzw. `--max` |
 | Generische Karriereseite auslesen | `haiku` | 1 pro Seite |
 
 Echte Testläufe: Ein einseitiges Greenhouse-artiges Formular brauchte 2 Aufrufe in 14 Sekunden, eine zweistufige Bewerbung mit Anzeige, neuem Tab und iframe 3 Aufrufe in 14 Sekunden. Profil und Lebenslauf kamen dabei jeweils aus dem Prompt-Cache.
@@ -98,6 +98,7 @@ Stellschrauben (Umgebung oder `.env`, siehe `.env.example`): `JOBPILOT_LLM_MODEL
 
 ## Wie das Ausfüllen funktioniert
 
+0. **Vorbereiten** (ohne Claude): Cookie-Banner werden selbst geschlossen („Nur notwendige“/„Ablehnen“ bevorzugt, auch im Shadow DOM und in iframes). Beim ersten Besuch einer Seite scrollt jobpilot einmal durch, damit nachgeladene Formulare und eingebettete Bewerbungssysteme (Greenhouse, Personio …) laden. Gibt es einen **Autofill-Button**, wird er benutzt: Lebenslauf-Autofill bekommt deinen Lebenslauf, Portal-Autofill wie MyGreenhouse wird nur genutzt, wenn du dort angemeldet bist. Verlangt es einen Login, macht jobpilot normal weiter und nennt dir den passenden `jobpilot login …`-Befehl. LinkedIn-, Indeed- und XING-Autofill wird nie benutzt.
 1. **Erfassen**: Ein Skript läuft in jedem Frame der Seite, auch in iframes eingebetteter Bewerbungssysteme und in offenen Shadow Roots. Es findet Textfelder, Selects, Radio- und Checkbox-Gruppen, Custom-Dropdowns (`role=combobox`), Rich-Text-Felder und versteckte Datei-Inputs. Für jedes Feld ermittelt es Label (aria-labelledby, label[for], umgebender Text, Legend), Pflicht-Status, Optionen und aktuellen Wert und vergibt eine stabile ID.
 2. **Planen**: Claude Code bekommt die Felder, die Buttons, Fehlermeldungen und den Stellentext; Profil und Lebenslauf stehen im gecachten System-Prompt. Zurück kommt ein schema-validierter Plan: pro Feld eine Aktion mit Wert, Quelle und Sicherheit, dazu offene Fragen und der nächste Button.
 3. **Ausfüllen**: Der Executor füllt jeden Feldtyp passend aus: native Felder, Masken (tippt, wenn `fill` umformatiert wird), Custom-Dropdowns (öffnen, tippen, beste Option wählen), visuell versteckte Radios (über das Label), Uploads (Input oder File-Chooser). Jeder Wert wird zurückgelesen und geprüft.
@@ -119,9 +120,10 @@ Die Quellen stehen in `~/.jobpilot/search.toml`:
 
 - **Greenhouse, Ashby, Lever, SmartRecruiters, Personio, Workday**: öffentliche Job-Board-APIs der Bewerbungssysteme. Ein neues Unternehmen fügst du hinzu, indem du den Board-Namen aus der URL der Karriereseite einträgst, z. B. `job-boards.greenhouse.io/<board>`.
 - **amazon.jobs**: Suchabfragen für Deutschland.
+- **Jobbörsen**: [Arbeitnow](https://www.arbeitnow.com) (Stellen in Deutschland, viele direkt aus Greenhouse, Personio, Join …) und [Himalayas](https://himalayas.app) (Remote-Stellen, die für Deutschland offen sind). Dieselbe Stelle aus Börse und Firmen-Board wird nur einmal geführt; die Firmen-URL hat Vorrang. Da Börsen-Suchen gedeckelt sind, schließt jobpilot Börsen-Stellen erst, wenn sie drei Wochen lang nicht mehr auftauchen.
 - **Beliebige Karriereseiten** (`[[sources.generic]]`): Die Seite wird im Browser gerendert, und Claude liest die Stellen heraus.
 
-Filter (Titel, Ausschlussbegriffe, Berlin oder Remote in Deutschland), Segmente und Stack-Begriffe sind dort ebenfalls einstellbar. Jeder Lauf schreibt Snapshots: `new`, `updated` (mit Diff), `closed`, `reopened`. Eine Stelle gilt nur dann als geschlossen, wenn ihre Quelle erfolgreich abgefragt wurde und die Stelle darin fehlt. Fällt eine Quelle aus, wird also nichts geschlossen.
+Filter (Titel, Ausschlussbegriffe, Berlin oder Remote in Deutschland), Segmente und Stack-Begriffe sind dort ebenfalls einstellbar. Die Zielrollen reichen von SRE, Platform, DevOps und Cloud über System-/Linux-/Netzwerk-Administration bis zu IT-Operations und Testautomatisierung. „Senior“ fliegt nicht raus, sondern landet als Stretch weiter unten im Ranking. Jeder Lauf schreibt Snapshots: `new`, `updated` (mit Diff), `closed`, `reopened`. Eine Stelle gilt nur dann als geschlossen, wenn ihre Quelle erfolgreich abgefragt wurde und die Stelle darin fehlt. Fällt eine Quelle aus, wird also nichts geschlossen.
 
 ```powershell
 uv run jobpilot history                 # alle Läufe

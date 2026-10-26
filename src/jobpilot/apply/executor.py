@@ -14,8 +14,13 @@ from typing import Any
 
 from .extract import PageState
 from .planner import FieldAction
+from .prepare import robust_click
 
 log = logging.getLogger(__name__)
+
+
+class ElementGone(RuntimeError):
+    """Das geplante Element existiert nicht mehr (Seite hat sich inzwischen verändert)."""
 
 
 @dataclass
@@ -117,7 +122,10 @@ class Executor:
                 raise RuntimeError("Kein Anschreiben-Text verfügbar")
 
         if a.action == "click":
-            await self._loc(state, a.field_id).click(timeout=8000)
+            loc = self._loc(state, a.field_id)
+            if await loc.count() == 0:
+                raise ElementGone(f"Element {a.field_id} ist nicht mehr auf der Seite")
+            await robust_click(loc)
             return "geklickt"
         if a.action == "upload":
             return await self._upload(state, a, f)
@@ -266,11 +274,9 @@ async def click_element(page: Any, state: PageState, element_id: str) -> Any:
     before = list(context.pages)
     frame = state.frame_for(element_id) or page.main_frame
     loc = frame.locator(f'[data-jp="{element_id}"]').first
-    await loc.scroll_into_view_if_needed(timeout=5000)
-    try:
-        await loc.click(timeout=10_000)
-    except Exception:
-        await loc.evaluate("e => e.click()")
+    if await loc.count() == 0:
+        raise ElementGone(f"Button {element_id} ist nicht mehr auf der Seite")
+    await robust_click(loc, wait_ms=10_000)
     await asyncio.sleep(1.5)
     new_pages = [p for p in context.pages if p not in before]
     if new_pages:
