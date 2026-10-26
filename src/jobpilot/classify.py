@@ -49,6 +49,9 @@ def _contains_term(text: str, term: str) -> bool:
         return False
     if re.fullmatch(r"[a-z0-9]+", term) and len(term) <= 4:
         return re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text) is not None
+    if len(re.split(r"[\s\-]", term, maxsplit=1)[0]) <= 3:
+        # "it engineer" darf nicht in "audit engineer" treffen; lange Begriffe dürfen in Komposita stecken
+        return re.search(rf"(?<![a-z0-9]){re.escape(term)}", text) is not None
     return term in text
 
 

@@ -29,6 +29,28 @@
     const r = el.getBoundingClientRect();
     return r.width > 2 && r.height > 2;
   };
+  // Hilfsfelder für Screenreader/Validierung (z. B. react-select "requiredInput") sind keine echten Eingaben.
+  const ariaHidden = (el) => el.getAttribute("aria-hidden") === "true" || !!(el.closest && el.closest('[aria-hidden="true"]'));
+  const shimInput = (el) => el.tabIndex < 0 && parseFloat(getComputedStyle(el).opacity || "1") === 0;
+  // Datei-Inputs sind oft selbst unsichtbar. Liegen sie aber in einem ausgeblendeten Formularbereich
+  // (z. B. Formular erst nach Klick auf "Apply" sichtbar), gehören sie noch nicht zur aktuellen Seite.
+  const inHiddenSection = (el) => {
+    for (let e = el.parentElement; e && e !== document.body; e = e.parentElement) {
+      const st = getComputedStyle(e);
+      if (st.display === "none" || st.visibility === "hidden") {
+        return e.querySelectorAll('input:not([type="file"]):not([type="hidden"]), textarea, select').length > 0;
+      }
+    }
+    return false;
+  };
+  const COOKIE_RX = /cookie|consent|gdpr|dsgvo|onetrust|usercentrics|didomi|cookiebot|sp_message|truste|borlabs|klaro|iubenda|cmp-|cmp_|\bcmp\b|cc-banner|cookiefirst|axeptio/i;
+  const inCookieBanner = (el) => {
+    for (let e = el, i = 0; e && e.nodeType === 1 && i < 15; i++, e = e.parentElement || (e.getRootNode && e.getRootNode().host)) {
+      const sig = `${e.id || ""} ${typeof e.className === "string" ? e.className : ""} ${e.getAttribute("aria-label") || ""}`;
+      if (COOKIE_RX.test(sig)) return true;
+    }
+    return false;
+  };
 
   const tag = (el) => {
     let id = el.getAttribute("data-jp");
@@ -103,6 +125,19 @@
     return clean(parts.join(" | ")).slice(0, 300);
   };
 
+  // Upload-Felder heißen oft nur "Attach"/"Hochladen" – worum es geht (Lebenslauf, Anschreiben), steht drumherum.
+  const GENERIC_UPLOAD_RX = /^(\+\s*)?(attach( a)?( file)?|upload( a)?( file)?|datei (auswählen|hochladen|anhängen)|choose file|browse|durchsuchen|hochladen|auswählen|select (a )?file|drop (your )?files? here|dateien? hierher ziehen|anhängen)$/i;
+  const uploadContext = (el) => {
+    let c = el.parentElement;
+    for (let hops = 0; c && hops < 6; hops++, c = c.parentElement) {
+      const t = textOf(c);
+      if (t.length > 300) break;
+      const core = clean(t.replace(/attach|dropbox|google drive|enter manually|manuell eingeben|upload|hochladen|datei|choose file|browse|durchsuchen|accepted file types?:?[^.]*\.?|max(imum)?\.? (file )?size[^.]*\.?|\+/gi, " "));
+      if (core.length >= 4) return t.slice(0, 200);
+    }
+    return "";
+  };
+
   const isRequired = (el, label) =>
     !!(el.required || el.getAttribute("aria-required") === "true" || /\*\s*$|\*\s*\||\(required\)|pflicht/i.test(label));
 
@@ -140,8 +175,11 @@
       const type = (el.getAttribute("type") || "").toLowerCase();
       if (["hidden", "submit", "button", "image", "reset"].includes(type)) continue;
       if (type === "file") {
-        const label = labelOf(el) || contextLabel(el.parentElement || el);
+        if (inHiddenSection(el)) continue;
+        let label = labelOf(el) || contextLabel(el.parentElement || el);
+        if (!label || GENERIC_UPLOAD_RX.test(label.split(" | ")[0].trim())) label = uploadContext(el) || label;
         fields.push({ id: tag(el), kind: "file", label, required: isRequired(el, label), accept: el.accept || "",
+          name: el.name || "", html_id: el.id || "",
           multiple: !!el.multiple, value: el.files && el.files.length ? Array.from(el.files).map((f) => f.name).join(", ") : "",
           hint: describedBy(el) });
         continue;
@@ -170,7 +208,7 @@
           value: options.filter((o) => o.checked).map((o) => o.label).join("; ") });
         continue;
       }
-      if (!visible(el)) continue;
+      if (!visible(el) || ariaHidden(el) || shimInput(el)) continue;
       if (type === "password") {
         fields.push({ id: tag(el), kind: "password", label: labelOf(el), required: !!el.required, value: "" });
         continue;
@@ -184,7 +222,7 @@
         autocomplete: el.getAttribute("autocomplete") || "", name: el.name || "",
         max_length: el.maxLength > 0 ? el.maxLength : 0, invalid: el.getAttribute("aria-invalid") === "true" });
     } else if (t === "TEXTAREA") {
-      if (!visible(el)) continue;
+      if (!visible(el) || ariaHidden(el) || shimInput(el)) continue;
       const label = labelOf(el);
       fields.push({ id: tag(el), kind: "textarea", label, required: isRequired(el, label), value: el.value || "",
         hint: describedBy(el), max_length: el.maxLength > 0 ? el.maxLength : 0, name: el.name || "",
@@ -218,8 +256,9 @@
   }
 
   // Buttons und Links, die den Ablauf steuern
-  const ACTION_RX = /apply|bewerb|submit|absenden|senden|send|weiter|next|continue|fortfahren|review|überprüf|ueberpruef|start|jetzt|interessiert|upload|hochladen|lebenslauf|resume|cv|manuell|manually|accept|akzeptier|zustimm|agree|allow|alle|cookie|ok\b|got it|verstanden|schließen|close/i;
-  const buttons = [];
+  const ACTION_RX = /apply|bewerb|submit|absenden|senden|send|weiter|next|continue|fortfahren|review|überprüf|ueberpruef|start|jetzt|interessiert|upload|hochladen|lebenslauf|resume|cv|manuell|manually|accept|akzeptier|zustimm|agree|allow|alle|cookie|ok\b|got it|verstanden|schließen|close|autofill|ausfüllen/i;
+  const AUTOFILL_RX = /auto-?fill|automatisch ausfüllen|(aus|mit) (dem |meinem )?lebenslauf (ausfüllen|befüllen|übernehmen|bewerben)|lebenslauf (importieren|hochladen und ausfüllen)|import (from )?(your )?(resume|cv)|(resume|cv) (import|parsing|autofill)|fill (out )?(the form )?(from|with) (your )?(resume|cv)|apply with (your )?(resume|cv)|mit lebenslauf bewerben|quick ?apply/i;
+  const found = [];
   for (const el of all) {
     const t = el.tagName;
     const role = el.getAttribute && el.getAttribute("role");
@@ -229,10 +268,16 @@
     const text = clean(textOf(el) || el.value || el.getAttribute("aria-label") || el.title || "").slice(0, 120);
     if (!text) continue;
     if (t === "A" && !ACTION_RX.test(text)) continue;
-    buttons.push({ id: tag(el), text, kind: t === "A" ? "link" : (el.type === "submit" || /submit/i.test(el.getAttribute("type") || "") ? "submit" : "button"),
-      href: t === "A" ? (el.href || "").slice(0, 300) : "", disabled: !!el.disabled || el.getAttribute("aria-disabled") === "true" });
-    if (buttons.length >= 80) break;
+    const btn = { id: tag(el), text, kind: t === "A" ? "link" : (el.type === "submit" || /submit/i.test(el.getAttribute("type") || "") ? "submit" : "button"),
+      href: t === "A" ? (el.href || "").slice(0, 300) : "", disabled: !!el.disabled || el.getAttribute("aria-disabled") === "true",
+      form: !!(el.closest && el.closest("form")), autofill: AUTOFILL_RX.test(text), cookie: inCookieBanner(el) };
+    // Wichtiges zuerst: Formular-Buttons, Autofill, Ablauf-Buttons; Navigation zuletzt.
+    btn._rank = (btn.form ? 0 : 2) + (btn.autofill ? -2 : 0) + (ACTION_RX.test(text) ? 0 : 1) + (btn.cookie ? 1 : 0);
+    found.push(btn);
+    if (found.length >= 400) break;
   }
+  const buttons = found.map((b, i) => [b, i]).sort((a, b) => a[0]._rank - b[0]._rank || a[1] - b[1]).slice(0, 80)
+    .sort((a, b) => a[1] - b[1]).map(([b]) => { delete b._rank; return b; });
 
   // Fehlermeldungen
   const errors = [];
