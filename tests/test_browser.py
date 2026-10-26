@@ -6,12 +6,12 @@ import pytest
 from sqlalchemy import select
 
 from conftest import ScriptedInteractor, add_job
-from jobpilot.apply.engine import ApplyEngine, BrowserSession
-from jobpilot.apply.executor import Executor, Files
-from jobpilot.apply.extract import extract_state
-from jobpilot.apply.planner import FieldAction, HeuristicPlanner
-from jobpilot.apply.prepare import dismiss_cookie_banners, reveal_lazy_content, try_autofill
-from jobpilot.db import Answer, Application, ApplicationEvent, session_scope
+from jobslop.apply.engine import ApplyEngine, BrowserSession
+from jobslop.apply.executor import Executor, Files
+from jobslop.apply.extract import extract_state
+from jobslop.apply.planner import FieldAction, HeuristicPlanner
+from jobslop.apply.prepare import dismiss_cookie_banners, reveal_lazy_content, try_autofill
+from jobslop.db import Answer, Application, ApplicationEvent, session_scope
 
 pytestmark = pytest.mark.browser
 
@@ -93,8 +93,7 @@ async def test_executor_handles_custom_widgets(settings, site, profile):
         assert await page.input_value("#hear-value") == "Company website"
         assert await page.is_checked("#privacy")
         assert (
-            await page.evaluate("document.getElementById('resume').files[0].name")
-            == "Max_Mustermann_CV_SRE.pdf"
+            await page.evaluate("document.getElementById('resume').files[0].name") == "Max_Mustermann_CV.pdf"
         )
     finally:
         await session.__aexit__(None, None, None)
@@ -120,11 +119,13 @@ async def test_engine_single_page_with_questions(settings, site, profile, config
     assert outcome.status == "submitted", outcome.message
     sub = site.submissions[before]
     assert (
-        sub["first_name"] == "Max" and sub["last_name"] == "Mustermann" and sub["email"] == "max.mustermann@example.com"
+        sub["first_name"] == "Max"
+        and sub["last_name"] == "Mustermann"
+        and sub["email"] == "max.mustermann@example.com"
     )
     assert sub["visa"] == "no" and sub["salary"] == "70000" and sub["hear"] == "Company website"
     assert sub["country"] == "Deutschland" and sub["privacy"] is True
-    assert sub["resume"] == "Max_Mustermann_CV_SRE.pdf"
+    assert sub["resume"] == "Max_Mustermann_CV.pdf"
     assert sub["linkedin"] == "https://www.linkedin.com/in/max-mustermann-example"
     with session_scope(settings.db_path) as s:
         app = s.get(Application, outcome.application_id)
@@ -167,7 +168,7 @@ async def test_engine_multistep_iframe_new_tab(settings, site, profile, config):
         "nachname": "Mustermann",
         "mail": "max.mustermann@example.com",
         "tel": "+49 30 12345678",
-        "cv": "Max_Mustermann_CV_SRE.pdf",
+        "cv": "Max_Mustermann_CV.pdf",
         "datenschutz": True,
         "talentpool": False,
     }
@@ -251,7 +252,7 @@ async def test_engine_toggle_form_behind_cookie_overlay(settings, site, profile,
         "firstName": "Max",
         "lastName": "Mustermann",
         "email": "max.mustermann@example.com",
-        "resume": "Max_Mustermann_CV_SRE.pdf",
+        "resume": "Max_Mustermann_CV.pdf",
         "consent": True,
         "cookie": "essential",
     }
@@ -278,10 +279,10 @@ async def test_autofill_from_resume_then_corrects_wrong_values(settings, site, p
         outcome = await _engine(settings, config, profile, browser).apply(job_id)
     assert outcome.status == "submitted", outcome.message
     sub = site.submissions[before]
-    assert sub["autofill"] == "Max_Mustermann_CV_SRE.pdf"  # Autofill-Button wurde mit dem Lebenslauf bedient
+    assert sub["autofill"] == "Max_Mustermann_CV.pdf"  # Autofill-Button wurde mit dem Lebenslauf bedient
     assert sub["first"] == "Max" and sub["last"] == "Mustermann"
     assert sub["mail"] == "max.mustermann@example.com"  # falscher Autofill-Wert durch Profilwert ersetzt
-    assert sub["cv"] == "Max_Mustermann_CV_SRE.pdf" and sub["privacy"] is True
+    assert sub["cv"] == "Max_Mustermann_CV.pdf" and sub["privacy"] is True
     with session_scope(settings.db_path) as s:
         events = (
             s.execute(select(ApplicationEvent).where(ApplicationEvent.kind == "autofill")).scalars().all()
@@ -310,7 +311,7 @@ class _StaleTargetPlanner(HeuristicPlanner):
         self.calls = 0
 
     async def plan(self, data):
-        from jobpilot.apply.planner import PagePlan
+        from jobslop.apply.planner import PagePlan
 
         self.calls += 1
         if self.calls > 1:
@@ -346,7 +347,7 @@ class _LimitPlanner:
     """Simuliert ein erschöpftes Abo-Kontingent beim ersten Planungsschritt."""
 
     async def plan(self, data):
-        from jobpilot.llm import LLMLimitReached
+        from jobslop.llm import LLMLimitReached
 
         raise LLMLimitReached("You've hit your session limit · resets 5pm")
 
@@ -355,8 +356,8 @@ class _LimitPlanner:
 
 
 async def test_usage_limit_pauses_and_requeues(settings, site, profile, config):
-    from jobpilot.apply.engine import run_batch
-    from jobpilot.db import Job
+    from jobslop.apply.engine import run_batch
+    from jobslop.db import Job
 
     first = add_job(settings, f"{site.base_url}/greenhouse_like.html", company="Erste GmbH")
     second = add_job(settings, f"{site.base_url}/greenhouse_like.html?b=2", company="Zweite GmbH")
@@ -378,7 +379,7 @@ async def test_usage_limit_pauses_and_requeues(settings, site, profile, config):
         assert app.status == "paused" and "limit" in app.confirmation.lower()
         assert not s.execute(select(Application).where(Application.job_id == second)).scalars().all()
     # pausierte Bewerbung blockiert keinen neuen Versuch
-    from jobpilot.guard import check_job
+    from jobslop.guard import check_job
 
     with session_scope(settings.db_path) as s:
         assert check_job(s, s.get(Job, first), config.limits).ok

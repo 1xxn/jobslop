@@ -1,10 +1,22 @@
 [project]
-name = "jobpilot"
-version = "2.0.0"
-description = "Lokaler Bewerbungs-Autopilot: Jobs crawlen, bewerten und Bewerbungsformulare mit Playwright und Claude Code (Abo) ausfüllen."
+name = "jobslop"
+version = "1.0.0"
+description = "Local, AI-driven job application autopilot: finds jobs, ranks them against your profile and fills out application forms in a real browser – powered by your own Claude subscription."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
-authors = [{ name = "Max Mustermann" }]
+authors = [{ name = "1xxn" }]
+keywords = ["job-search", "automation", "playwright", "claude", "ai-agent", "job-application"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business",
+]
 dependencies = [
     "playwright>=1.50",
     "typer>=0.15",
@@ -15,16 +27,20 @@ dependencies = [
     "httpx>=0.28",
     "tenacity>=9.0",
     "pyyaml>=6.0.2",
+    "tomli-w>=1.0",
     "fastapi>=0.115",
     "uvicorn>=0.32",
-    "jinja2>=3.1",
     "python-multipart>=0.0.18",
     "pillow>=11.0",
     "pypdf>=5.1",
 ]
 
+[project.urls]
+Homepage = "https://github.com/1xxn/jobslop"
+Issues = "https://github.com/1xxn/jobslop/issues"
+
 [project.scripts]
-jobpilot = "jobpilot.cli:main"
+jobslop = "jobslop.cli:main"
 
 [dependency-groups]
 dev = [
@@ -35,16 +51,22 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling>=1.25"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/jobpilot"]
+packages = ["src/jobslop"]
+# Die gebaute Oberfläche (frontend/ → src/jobslop/web/dist) gehört ins Paket
+artifacts = ["src/jobslop/web/dist/**"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["frontend/node_modules", "docs/screenshots"]
 
 [tool.ruff]
 line-length = 110
 target-version = "py312"
 src = ["src", "tests"]
+extend-exclude = ["frontend"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "ASYNC", "RUF"]
@@ -56,5 +78,5 @@ asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 markers = [
     "browser: Tests, die einen echten Chromium starten",
-    "live: Tests, die das echte Claude Code aufrufen (Abo-Kontingent; nur mit JOBPILOT_LIVE=1)",
+    "live: Tests, die das echte Claude Code aufrufen (Abo-Kontingent; nur mit JOBSLOP_LIVE=1)",
 ]
