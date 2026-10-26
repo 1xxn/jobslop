@@ -398,36 +398,44 @@ def _print_jobs(ids: list[int] | None = None, rows: list[Job] | None = None, tit
             rows = list(
                 s.execute(select(Job).where(Job.id.in_(ids or [])).order_by(Job.score.desc())).scalars()
             )
+        # In schmalen Terminals bekäme der Titel sonst nur ein Zeichen pro Zeile.
+        compact = console.width < 110
         t = Table(title=f"{title} ({len(rows)})", expand=True)
-        for col, kw in (
-            ("ID", {"justify": "right"}),
-            ("Score", {"justify": "right"}),
-            ("Rolle", {}),
-            ("Level", {}),
-            ("Firma", {"overflow": "fold"}),
-            ("Titel", {"overflow": "fold", "ratio": 3}),
-            ("Ort", {}),
-            ("Stack", {}),
-            ("Status", {}),
-        ):
-            t.add_column(col, **kw)
+        columns = [
+            ("ID", {"justify": "right", "no_wrap": True}),
+            ("Score", {"justify": "right", "no_wrap": True}),
+            ("Rolle", {"no_wrap": True}),
+            ("Level", {"no_wrap": True}),
+            ("Firma", {"overflow": "fold", "min_width": 8}),
+            ("Titel", {"overflow": "fold", "ratio": 3, "min_width": 20}),
+            ("Ort", {"no_wrap": True}),
+            ("Stack", {"no_wrap": True}),
+            ("Status", {"no_wrap": True}),
+        ]
+        keep = {"ID", "Score", "Firma", "Titel", "Status"} if compact else {c for c, _ in columns}
+        for col, kw in columns:
+            if col in keep:
+                t.add_column(col, **kw)
         for j in rows:
             j = s.merge(j)
             st = _app_status(j)
-            t.add_row(
-                str(j.id),
-                f"{j.score:.1f}",
-                f"[{CAT_STYLE.get(j.category, 'white')}]{j.category}[/]",
-                LEVEL_LABEL.get(j.level, j.level),
-                j.company,
-                j.title,
-                _where(j.where) + (f" · {j.workplace}" if j.workplace else ""),
-                "●" * j.fit + "○" * (3 - j.fit),
-                f"[{STATUS_STYLE.get(st, 'white')}]{st}[/]"
+            cells = {
+                "ID": str(j.id),
+                "Score": f"{j.score:.1f}",
+                "Rolle": f"[{CAT_STYLE.get(j.category, 'white')}]{j.category}[/]",
+                "Level": LEVEL_LABEL.get(j.level, j.level),
+                "Firma": j.company,
+                "Titel": j.title,
+                "Ort": _where(j.where) + (f" · {j.workplace}" if j.workplace else ""),
+                "Stack": "●" * j.fit + "○" * (3 - j.fit),
+                "Status": f"[{STATUS_STYLE.get(st, 'white')}]{st}[/]"
                 if st
                 else ("[dim]geschlossen[/dim]" if j.status == "closed" else ""),
-            )
+            }
+            t.add_row(*(cells[col] for col, _ in columns if col in keep))
     console.print(t)
+    if compact:
+        console.print("[dim]Schmales Fenster: Rolle, Level, Ort und Stack ausgeblendet – Fenster breiter ziehen.[/dim]")
 
 
 @jobs_app.command("list")
