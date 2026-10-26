@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from typing import Any
 
@@ -12,6 +13,9 @@ class PageRenderer:
     def __init__(self) -> None:
         self._pw: Any = None
         self._browser: Any = None
+        # Mehrere Quellen rendern parallel; ohne Lock startet jede ihren eigenen Playwright-Treiber,
+        # und nur der zuletzt gestartete wird in __aexit__ wieder beendet.
+        self._lock = asyncio.Lock()
 
     async def __aenter__(self) -> PageRenderer:
         return self
@@ -23,11 +27,12 @@ class PageRenderer:
             await self._pw.stop()
 
     async def _ensure(self) -> Any:
-        if self._browser is None:
-            from playwright.async_api import async_playwright
+        async with self._lock:
+            if self._browser is None:
+                from playwright.async_api import async_playwright
 
-            self._pw = await async_playwright().start()
-            self._browser = await self._pw.chromium.launch(headless=True)
+                self._pw = await async_playwright().start()
+                self._browser = await self._pw.chromium.launch(headless=True)
         return self._browser
 
     async def __call__(self, url: str) -> tuple[str, list[dict[str, str]]]:
