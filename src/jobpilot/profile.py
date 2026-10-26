@@ -6,12 +6,17 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 TODO = "TODO"
 
 
-class Personal(BaseModel):
+class _Model(BaseModel):
+    # In der YAML stehen Zahlen oft ohne Anführungszeichen (75000, 10115) – als Text übernehmen.
+    model_config = ConfigDict(coerce_numbers_to_str=True)
+
+
+class Personal(_Model):
     first_name: str = ""
     last_name: str = ""
     email: str = ""
@@ -31,7 +36,7 @@ class Personal(BaseModel):
         return f"{self.first_name} {self.last_name}".strip()
 
 
-class Work(BaseModel):
+class Work(_Model):
     current_title: str = ""
     current_employer: str = ""
     years_experience_total: str = TODO
@@ -48,12 +53,12 @@ class Work(BaseModel):
     drivers_license: str = ""
 
 
-class Language(BaseModel):
+class Language(_Model):
     language: str
     level: str
 
 
-class Experience(BaseModel):
+class Experience(_Model):
     company: str
     title: str
     start: str
@@ -62,7 +67,7 @@ class Experience(BaseModel):
     highlights: list[str] = Field(default_factory=list)
 
 
-class Education(BaseModel):
+class Education(_Model):
     institution: str
     degree: str
     start: str = ""
@@ -71,7 +76,7 @@ class Education(BaseModel):
     grade: str = ""
 
 
-class Documents(BaseModel):
+class Documents(_Model):
     cv: str = ""
     cv_en: str = ""
     certificates: list[str] = Field(default_factory=list)
@@ -86,7 +91,7 @@ class Documents(BaseModel):
         return path
 
 
-class Preferences(BaseModel):
+class Preferences(_Model):
     cover_letter_language: Literal["auto", "de", "en"] = "auto"
     diversity_questions: Literal["decline", "answer"] = "decline"
     diversity_answers: dict[str, str] = Field(default_factory=dict)
@@ -97,7 +102,7 @@ class Preferences(BaseModel):
     tone: str = "sachlich, freundlich, konkret, ohne Floskeln"
 
 
-class Profile(BaseModel):
+class Profile(_Model):
     personal: Personal = Field(default_factory=Personal)
     work: Work = Field(default_factory=Work)
     summary: str = ""
