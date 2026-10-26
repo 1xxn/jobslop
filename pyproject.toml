@@ -1,12 +1,11 @@
 [project]
 name = "jobpilot"
-version = "1.0.0"
-description = "Lokaler Bewerbungs-Autopilot: Jobs crawlen, bewerten und Bewerbungsformulare mit Playwright und Claude ausfüllen."
+version = "2.0.0"
+description = "Lokaler Bewerbungs-Autopilot: Jobs crawlen, bewerten und Bewerbungsformulare mit Playwright und Claude Code (Abo) ausfüllen."
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "Max Mustermann" }]
 dependencies = [
-    "anthropic>=2.0",
     "playwright>=1.50",
     "typer>=0.15",
     "rich>=13.9",
@@ -21,6 +20,7 @@ dependencies = [
     "jinja2>=3.1",
     "python-multipart>=0.0.18",
     "pillow>=11.0",
+    "pypdf>=5.1",
 ]
 
 [project.scripts]
@@ -54,4 +54,7 @@ ignore = ["E501", "RUF001", "RUF002", "RUF003", "B008"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
-markers = ["browser: Tests, die einen echten Chromium starten"]
+markers = [
+    "browser: Tests, die einen echten Chromium starten",
+    "live: Tests, die das echte Claude Code aufrufen (Abo-Kontingent; nur mit JOBPILOT_LIVE=1)",
+]

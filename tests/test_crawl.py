@@ -266,3 +266,54 @@ async def test_source_failure_does_not_close_jobs(settings, config):
         )
         report = await run_crawl(settings, config, enrich=False, use_browser=False)
     assert report.closed == []  # ausgefallene Quelle schließt keine Stellen
+
+
+class _BatchLLM:
+    """Bewertet Stapel; der zweite Stapel scheitert am Abo-Limit."""
+
+    def __init__(self):
+        from jobpilot.llm import Usage
+
+        self.usage = Usage()
+        self.prompts: list[str] = []
+
+    async def parse(self, schema, *, system, content, model=None, max_tokens=4096, cache_system=True):
+        import re
+
+        from jobpilot.llm import LLMLimitReached
+
+        self.prompts.append(content)
+        if len(self.prompts) > 1:
+            raise LLMLimitReached("You've hit your session limit")
+        ids = [int(x) for x in re.findall(r"job_id=(\d+)", content)]
+        item = {
+            "required_years": 2,
+            "seniority": "mid",
+            "fit": 3,
+            "fit_reason": "GCP + Kubernetes",
+            "german_required": False,
+            "workplace": "Hybrid",
+            "red_flags": [],
+            "summary": "passt",
+        }
+        return schema.model_validate(
+            {"items": [item | {"job_id": i} for i in ids] + [item | {"job_id": 9999}]}
+        )
+
+
+async def test_enrich_batches_and_stops_at_limit(settings, config, profile):
+    from conftest import add_job
+    from jobpilot.crawl.pipeline import ENRICH_BATCH, enrich_jobs
+
+    settings.claude_parallel = 1  # Reihenfolge deterministisch
+    ids = [add_job(settings, f"https://x/{i}", company=f"Firma {i}") for i in range(ENRICH_BATCH * 3)]
+    with session_scope(settings.db_path) as s:
+        for j in s.execute(select(Job)).scalars():
+            j.description = "Kubernetes, Terraform, GCP"
+    llm = _BatchLLM()
+    count = await enrich_jobs(settings, config, llm, profile, ids)
+    assert count == ENRICH_BATCH  # erster Stapel bewertet, fremde job_id ignoriert
+    assert len(llm.prompts) == 2  # dritter Stapel wird nach dem Limit gar nicht mehr gestartet
+    with session_scope(settings.db_path) as s:
+        rated = [j for j in s.execute(select(Job)).scalars() if j.enrichment]
+        assert len(rated) == ENRICH_BATCH and all(j.fit == 3 and j.workplace == "Hybrid" for j in rated)
