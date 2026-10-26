@@ -1,8 +1,18 @@
+# Python
 .venv/
 __pycache__/
 *.pyc
 .pytest_cache/
 .ruff_cache/
-.env
-dist/
 *.egg-info/
+/build/
+/dist/
+
+# Frontend (die gebaute Oberfläche in src/jobslop/web/dist wird bewusst eingecheckt)
+frontend/node_modules/
+
+# Lokale Daten und Werkzeuge
+.env
+.demo-home/
+.claude/
+*.log

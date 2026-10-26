@@ -1,4 +1,4 @@
-"""Ende-zu-Ende mit echtem Claude Code (Abo) gegen das lokale Testformular. Nur mit JOBPILOT_LIVE=1."""
+"""Ende-zu-Ende mit echtem Claude Code (Abo) gegen das lokale Testformular. Nur mit JOBSLOP_LIVE=1."""
 
 from __future__ import annotations
 
@@ -7,15 +7,15 @@ import os
 import pytest
 
 from conftest import ScriptedInteractor, add_job
-from jobpilot.apply.engine import ApplyEngine, BrowserSession
-from jobpilot.apply.planner import LLMPlanner
-from jobpilot.llm import LLM, check_login
+from jobslop.apply.engine import ApplyEngine, BrowserSession
+from jobslop.apply.planner import LLMPlanner
+from jobslop.llm import LLM, check_login
 
 pytestmark = [
     pytest.mark.live,
     pytest.mark.browser,
     pytest.mark.skipif(
-        os.environ.get("JOBPILOT_LIVE") != "1", reason="nur mit JOBPILOT_LIVE=1 (nutzt das Abo)"
+        os.environ.get("JOBSLOP_LIVE") != "1", reason="nur mit JOBSLOP_LIVE=1 (nutzt das Abo)"
     ),
 ]
 

@@ -1,0 +1,30 @@
+{
+  "jobs": [
+    {
+      "company": "Beispiel Cloud GmbH",
+      "title": "Site Reliability Engineer",
+      "url": "https://careers.example.com/beispiel-cloud/sre",
+      "location": "Berlin",
+      "notes": "Über ein Netzwerktreffen entdeckt",
+      "status": "applied"
+    },
+    {
+      "company": "Muster Hosting AG",
+      "title": "Cloud Engineer (m/w/d)",
+      "url": "https://careers.example.com/muster-hosting/cloud",
+      "location": "Remote, Germany"
+    },
+    {
+      "company": "Spreebyte",
+      "title": "Platform Engineer",
+      "url": "https://careers.example.com/spreebyte/platform",
+      "location": "Berlin",
+      "status": "saved"
+    },
+    {
+      "company": "",
+      "title": "Ungültiger Eintrag ohne Firma",
+      "url": "https://careers.example.com/invalid"
+    }
+  ]
+}
