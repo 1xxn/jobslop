@@ -1,0 +1,36 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Thanks! Please **remove personal data** (name, email, phone, CV content) from logs and screenshots."
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead?
+    validations: { required: true }
+  - type: input
+    id: url
+    attributes:
+      label: Job board / application system
+      placeholder: "e.g. Greenhouse embed on a company page, Personio, Workday …"
+  - type: textarea
+    id: log
+    attributes:
+      label: Log or error message
+      description: From the run's timeline in the dashboard (Applications → run → Timeline) or the terminal.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: "jobslop --version"
+    validations: { required: true }
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, macOS, Linux]
+    validations: { required: true }

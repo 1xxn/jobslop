@@ -1,0 +1,207 @@
+"""Eine Stelle per Link hinzufügen.
+
+Reihenfolge: strukturierte Daten der Seite (schema.org ``JobPosting`` – liefern fast alle Karriereseiten für
+Google Jobs) → Meta-Tags → gerenderte Seite + Claude. So kostet das Hinzufügen meist kein Abo-Kontingent.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+from dataclasses import dataclass
+from html import unescape
+from typing import Any
+from urllib.parse import urlparse
+
+import httpx
+from pydantic import BaseModel
+from sqlalchemy import select
+
+from .classify import classify, content_hash, fingerprint, html_to_text, match_key, where_of
+from .config import SearchConfig
+from .db import Job, JobSnapshot, session_scope
+
+log = logging.getLogger(__name__)
+
+_LD_RX = re.compile(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', re.I | re.S)
+_META_RX = re.compile(
+    r'<meta[^>]+(?:property|name)=["\']([^"\']+)["\'][^>]+content=["\']([^"\']*)["\']', re.I
+)
+_TITLE_RX = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+
+
+@dataclass
+class FetchedJob:
+    url: str
+    title: str = ""
+    company: str = ""
+    location: str = ""
+    description: str = ""
+    posted: str = ""
+    remote: bool = False
+    via: str = ""  # jsonld | meta | claude
+
+
+class _Extracted(BaseModel):
+    title: str
+    company: str
+    location: str
+    remote: bool
+
+
+def _walk(node: Any) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    if isinstance(node, list):
+        for item in node:
+            found += _walk(item)
+    elif isinstance(node, dict):
+        kind = node.get("@type")
+        kinds = kind if isinstance(kind, list) else [kind]
+        if "JobPosting" in kinds:
+            found.append(node)
+        for key in ("@graph", "mainEntity", "itemListElement"):
+            if key in node:
+                found += _walk(node[key])
+    return found
+
+
+def _location(posting: dict[str, Any]) -> str:
+    locs = posting.get("jobLocation") or []
+    locs = locs if isinstance(locs, list) else [locs]
+    parts = []
+    for loc in locs:
+        addr = (loc or {}).get("address") or {}
+        if isinstance(addr, str):
+            parts.append(addr)
+            continue
+        country = addr.get("addressCountry")
+        if isinstance(country, dict):
+            country = country.get("name", "")
+        text = ", ".join(str(x) for x in (addr.get("addressLocality"), country) if x)
+        if text:
+            parts.append(text)
+    return "; ".join(dict.fromkeys(parts))
+
+
+def parse_html(url: str, html: str) -> FetchedJob:
+    job = FetchedJob(url=url)
+    for raw in _LD_RX.findall(html):
+        try:
+            data = json.loads(raw.strip())
+        except json.JSONDecodeError:
+            continue
+        postings = _walk(data)
+        if not postings:
+            continue
+        p = postings[0]
+        org = p.get("hiringOrganization") or {}
+        job.title = unescape(str(p.get("title") or "")).strip()
+        job.company = unescape(str(org.get("name") if isinstance(org, dict) else org or "")).strip()
+        job.location = _location(p)
+        job.description = html_to_text(str(p.get("description") or ""))
+        job.posted = str(p.get("datePosted") or "")[:10]
+        job.remote = "TELECOMMUTE" in str(p.get("jobLocationType") or "").upper()
+        if job.remote and "remote" not in job.location.lower():
+            job.location = ", ".join(x for x in (job.location, "Remote") if x)
+        job.via = "jsonld"
+        if job.title:
+            return job
+    meta = {k.lower(): unescape(v) for k, v in _META_RX.findall(html)}
+    title = meta.get("og:title") or (unescape(m.group(1)).strip() if (m := _TITLE_RX.search(html)) else "")
+    job.title = re.split(r"\s+[|–-]\s+", title)[0].strip() if title else ""
+    job.company = meta.get("og:site_name", "")
+    job.description = meta.get("og:description") or meta.get("description", "")
+    job.via = "meta"
+    return job
+
+
+async def fetch_job(url: str, *, llm: Any = None, render: Any = None, fast_model: str = "") -> FetchedJob:
+    if not re.match(r"https?://", url):
+        raise ValueError("Bitte einen vollständigen Link (https://…) angeben")
+    html = ""
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; jobslop/1.0)"})
+            if resp.status_code < 400:
+                html = resp.text
+    except httpx.HTTPError as exc:
+        log.info("Abruf von %s fehlgeschlagen: %s", url, exc)
+    job = parse_html(url, html) if html else FetchedJob(url=url)
+    if job.via == "jsonld" and job.company:
+        return job
+    text = ""
+    if render is not None:
+        try:
+            text, _links = await render(url)
+        except Exception as exc:
+            log.info("Rendern von %s fehlgeschlagen: %s", url, exc)
+    if llm is not None and (text or html):
+        content = text or html_to_text(html)
+        result = await llm.parse(
+            _Extracted,
+            system="Lies aus der Stellenanzeige Titel, Firma, Ort und ob die Stelle remote ist. Nichts erfinden; "
+            "Unbekanntes als leerer String.",
+            content=f"URL: {url}\n\n{content[:12000]}",
+            model=fast_model or None,
+            max_tokens=800,
+            cache_system=False,
+        )
+        job.title = result.title or job.title
+        job.company = result.company or job.company
+        job.location = result.location or job.location
+        job.remote = result.remote or job.remote
+        job.description = job.description or content[:20000]
+        job.via = "claude"
+    if not job.company:
+        host = urlparse(url).hostname or ""
+        job.company = host.removeprefix("www.").split(".")[0].replace("-", " ").title()
+    if not job.title:
+        raise ValueError("Auf der Seite wurde keine Stellenanzeige erkannt")
+    return job
+
+
+def add_fetched_job(db_path: Any, config: SearchConfig, fetched: FetchedJob) -> tuple[int, bool]:
+    """Legt die Stelle an (oder findet sie wieder). Rückgabe: (Job-ID, neu angelegt)."""
+    fp = fingerprint("manual", fetched.url)
+    with session_scope(db_path) as s:
+        existing = (
+            s.execute(select(Job).where((Job.fingerprint == fp) | (Job.url == fetched.url))).scalars().first()
+        )
+        if existing is not None:
+            return existing.id, False
+        where = where_of(fetched.location, config.filters, fetched.remote) or ("R" if fetched.remote else "B")
+        meta = classify(
+            company=fetched.company,
+            title=fetched.title,
+            description=fetched.description,
+            where=where,
+            near=False,
+            config=config,
+        )
+        job = Job(
+            fingerprint=fp,
+            match_key=match_key(fetched.company, fetched.title),
+            source="manual",
+            company=fetched.company,
+            title=fetched.title,
+            location=fetched.location,
+            where=where,
+            workplace="Remote" if fetched.remote else "",
+            url=fetched.url,
+            description=fetched.description,
+            content_hash=content_hash(fetched.title, fetched.location, fetched.description),
+            posted=fetched.posted,
+            origin="manual",
+            category=str(meta["category"]),
+            level=str(meta["level"]),
+            segment=str(meta["segment"]),
+            fit=int(meta["fit"]),  # type: ignore[call-overload]
+            score=float(meta["score"]),  # type: ignore[arg-type]
+            language=str(meta["language"]),
+            starred=True,
+        )
+        s.add(job)
+        s.flush()
+        s.add(JobSnapshot(job=job, change="new", title=job.title, location=job.location))
+        return job.id, True

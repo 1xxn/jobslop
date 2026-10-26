@@ -1,0 +1,91 @@
+# Erfundenes Testprofil – keine echten Personendaten.
+personal:
+  first_name: Max
+  last_name: Mustermann
+  email: max.mustermann@example.com
+  phone: "+49 30 12345678"
+  street: ""
+  postal_code: "10115"
+  city: Berlin
+  country: Deutschland
+  linkedin: https://www.linkedin.com/in/max-mustermann-example
+  github: https://github.com/max-mustermann-example
+  website: ""
+  date_of_birth: ""
+  pronouns: ""
+
+work:
+  current_title: Site Reliability Engineer
+  current_employer: Beispiel Cloud GmbH
+  years_experience_total: TODO
+  years_experience_relevant: TODO
+  notice_period: TODO
+  earliest_start: TODO
+  salary_expectation_eur: TODO
+  work_authorization_eu: true
+  requires_visa_sponsorship: false
+  nationality: deutsch
+  willing_to_relocate: false
+  workplace_preference: Hybrid in Berlin oder Remote in Deutschland
+  security_clearance: keine
+  drivers_license: ""
+
+summary: >-
+  Site Reliability Engineer mit Schwerpunkt Kubernetes, Terraform und Observability auf GCP.
+
+skills:
+  - Google Cloud Platform (GCP)
+  - Kubernetes
+  - Terraform
+  - Python, Bash, Go
+  - Prometheus, Grafana
+
+languages:
+  - language: Deutsch
+    level: Muttersprache
+  - language: Englisch
+    level: C1
+
+experience:
+  - company: Beispiel Cloud GmbH
+    title: Site Reliability Engineer
+    start: 2023-01
+    end: heute
+    location: Berlin
+    highlights:
+      - Betrieb von Kubernetes-Clustern auf GCP
+      - Terraform-Module und GitLab-CI/CD-Pipelines
+  - company: Muster Hosting AG
+    title: Linux System Engineer
+    start: 2020-01
+    end: 2022-12
+    location: Hamburg
+    highlights:
+      - Administration von Linux-Servern und Monitoring mit Prometheus
+
+education:
+  - institution: Beispiel-Universität Berlin
+    degree: B.Sc. Informatik
+    start: 2016-10
+    end: 2019-09
+    location: Berlin
+
+certifications: []
+
+documents:
+  cv: Max_Mustermann_CV.pdf
+  cv_en: ""
+  certificates: []
+  cover_letter: auto
+
+preferences:
+  cover_letter_language: auto
+  diversity_questions: decline
+  diversity_answers: {}
+  consent_privacy: true
+  consent_talent_pool: false
+  newsletter: false
+  how_did_you_hear: Karriereseite des Unternehmens
+  tone: sachlich, freundlich, konkret, ohne Floskeln
+
+standard_answers: {}

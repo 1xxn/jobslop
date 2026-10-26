@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from jobpilot.config import Settings
-from jobpilot.llm import (
+from jobslop.config import Settings
+from jobslop.llm import (
     LLM,
     LLMLimitReached,
     LLMUnavailable,
@@ -140,7 +140,7 @@ def test_missing_binary(tmp_path, monkeypatch):
 
 
 @pytest.mark.live
-@pytest.mark.skipif(os.environ.get("JOBPILOT_LIVE") != "1", reason="nur mit JOBPILOT_LIVE=1 (nutzt das Abo)")
+@pytest.mark.skipif(os.environ.get("JOBSLOP_LIVE") != "1", reason="nur mit JOBSLOP_LIVE=1 (nutzt das Abo)")
 async def test_live_claude_code(tmp_path):
     """Echter Aufruf gegen das installierte Claude Code (kleines Modell, ein Aufruf)."""
     settings = Settings(home=tmp_path / "home", llm_model="haiku")
