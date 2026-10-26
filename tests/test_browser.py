@@ -10,7 +10,8 @@ from jobpilot.apply.engine import ApplyEngine, BrowserSession
 from jobpilot.apply.executor import Executor, Files
 from jobpilot.apply.extract import extract_state
 from jobpilot.apply.planner import FieldAction, HeuristicPlanner
-from jobpilot.db import Answer, Application, session_scope
+from jobpilot.apply.prepare import dismiss_cookie_banners, reveal_lazy_content, try_autofill
+from jobpilot.db import Answer, Application, ApplicationEvent, session_scope
 
 pytestmark = pytest.mark.browser
 
@@ -210,6 +211,135 @@ async def test_dry_run_and_missing_answers_park(settings, site, profile, config)
         app = s.get(Application, outcome.application_id)
         labels = " ".join(q["label"] for q in app.open_questions)
     assert "visa" in labels.lower() and "salary" in labels.lower()
+
+
+def _engine(settings, config, profile, browser, interactor=None, mode="auto"):
+    return ApplyEngine(
+        settings=settings,
+        config=config,
+        profile=profile,
+        planner=HeuristicPlanner(profile),
+        interactor=interactor or ScriptedInteractor({}),
+        browser=browser,
+        mode=mode,
+    )
+
+
+async def test_cookie_overlay_in_shadow_dom_and_hidden_form_section(settings, site):
+    session, page = await _page(settings)
+    try:
+        await page.goto(f"{site.base_url}/toggle_form.html")
+        state = await extract_state(page)
+        # Upload-Feld im zugeklappten Formular gehört noch nicht zur Seite (Zalando-Fall)
+        assert not [f for f in state.fields if f["kind"] == "file"]
+        assert next(b for b in state.buttons if b["text"] == "Only essential")["cookie"]
+        assert not next(b for b in state.buttons if b["text"] == "Apply").get("cookie")
+        assert await dismiss_cookie_banners(page) == ["Only essential"]
+        assert await page.evaluate("window.cookieChoice") == "essential"
+        assert await dismiss_cookie_banners(page) == []  # nichts mehr da
+    finally:
+        await session.__aexit__(None, None, None)
+
+
+async def test_engine_toggle_form_behind_cookie_overlay(settings, site, profile, config):
+    job_id = add_job(settings, f"{site.base_url}/toggle_form.html", "Toggle AG", "Software Engineer")
+    before = len(site.submissions)
+    async with BrowserSession(settings, headless=True) as browser:
+        outcome = await _engine(settings, config, profile, browser).apply(job_id)
+    assert outcome.status == "submitted", outcome.message
+    assert site.submissions[before] == {
+        "firstName": "Max",
+        "lastName": "Mustermann",
+        "email": "max.mustermann@example.com",
+        "resume": "Max_Mustermann_CV_SRE.pdf",
+        "consent": True,
+        "cookie": "essential",
+    }
+
+
+async def test_lazy_iframe_below_the_fold_is_revealed(settings, site):
+    session, page = await _page(settings)
+    try:
+        await page.goto(f"{site.base_url}/lazy_embed.html")
+        await reveal_lazy_content(page)
+        state = await extract_state(page)
+        first = next(f for f in state.fields if f["label"].startswith("First Name"))
+        assert first["frame"] > 0
+    finally:
+        await session.__aexit__(None, None, None)
+
+
+async def test_autofill_from_resume_then_corrects_wrong_values(settings, site, profile, config):
+    job_id = add_job(
+        settings, f"{site.base_url}/autofill.html?mode=resume", "Autofill AG", "Platform Engineer"
+    )
+    before = len(site.submissions)
+    async with BrowserSession(settings, headless=True) as browser:
+        outcome = await _engine(settings, config, profile, browser).apply(job_id)
+    assert outcome.status == "submitted", outcome.message
+    sub = site.submissions[before]
+    assert sub["autofill"] == "Max_Mustermann_CV_SRE.pdf"  # Autofill-Button wurde mit dem Lebenslauf bedient
+    assert sub["first"] == "Max" and sub["last"] == "Mustermann"
+    assert sub["mail"] == "max.mustermann@example.com"  # falscher Autofill-Wert durch Profilwert ersetzt
+    assert sub["cv"] == "Max_Mustermann_CV_SRE.pdf" and sub["privacy"] is True
+    with session_scope(settings.db_path) as s:
+        events = (
+            s.execute(select(ApplicationEvent).where(ApplicationEvent.kind == "autofill")).scalars().all()
+        )
+        assert any("Lebenslauf" in e.message for e in events)
+
+
+async def test_autofill_that_needs_login_is_skipped(settings, site, profile):
+    session, page = await _page(settings)
+    try:
+        await page.goto(f"{site.base_url}/autofill.html?mode=login")
+        state = await extract_state(page)
+        note, _ = await try_autofill(page, state, profile.cv_path(settings.home))
+        assert "Login" in note
+        assert await page.locator("#login-mail").count() == 0  # Login-Dialog wieder geschlossen
+    finally:
+        await session.__aexit__(None, None, None)
+
+
+class _StaleTargetPlanner(HeuristicPlanner):
+    """Erster Plan zielt auf einen Button, der beim Klicken schon ersetzt ist (wie 'Alle ablehnen' bei Zattoo)."""
+
+    def __init__(self, profile, browser):
+        super().__init__(profile)
+        self.browser = browser
+        self.calls = 0
+
+    async def plan(self, data):
+        from jobpilot.apply.planner import PagePlan
+
+        self.calls += 1
+        if self.calls > 1:
+            return await super().plan(data)
+        page = self.browser.context.pages[-1]
+        bid = next(b["id"] for b in data.state.buttons if b["text"] == "Submit application")
+        await page.evaluate(
+            """id => { const el = document.querySelector(`[data-jp="${id}"]`);
+                       const copy = el.cloneNode(true); copy.removeAttribute('data-jp'); el.replaceWith(copy); }""",
+            bid,
+        )
+        return PagePlan(
+            page_kind="application_form",
+            actions=[],
+            open_questions=[],
+            next_step="click_next",
+            next_target_id=bid,
+            summary="Ziel ist inzwischen ersetzt",
+        )
+
+
+async def test_vanished_button_does_not_fail_application(settings, site, profile, config):
+    job_id = add_job(settings, f"{site.base_url}/greenhouse_like.html?stale=1", "Stale GmbH", "SRE")
+    interactor = ScriptedInteractor({"visa": "No", "salary": "70000", "hear about": "Company website"})
+    async with BrowserSession(settings, headless=True) as browser:
+        engine = _engine(settings, config, profile, browser, interactor)
+        engine.planner = _StaleTargetPlanner(profile, browser)
+        outcome = await engine.apply(job_id)
+    assert outcome.status == "submitted", outcome.message
 
 
 class _LimitPlanner:

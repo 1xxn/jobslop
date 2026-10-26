@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Apply – Platform Engineer</title>
+<style>.field{margin:12px 0} .modal{position:fixed;inset:20%;background:#fff;border:1px solid #333;padding:20px}</style></head>
+<body>
+<h1>Platform Engineer</h1>
+<form id="app" novalidate>
+  <!-- ?mode=resume: Button öffnet Dateiauswahl und befüllt danach Felder; ?mode=login: Button verlangt Login -->
+  <button type="button" id="autofill">Autofill my application</button>
+  <input type="file" id="autofill-file" style="display:none">
+  <div class="field"><label for="first">First Name *</label><input id="first" name="first" required></div>
+  <div class="field"><label for="last">Last Name *</label><input id="last" name="last" required></div>
+  <div class="field"><label for="mail">Email *</label><input id="mail" name="mail" type="email" required></div>
+  <div class="field"><label for="phone">Phone</label><input id="phone" name="phone" type="tel"></div>
+  <div class="field"><label for="cv">Resume/CV *</label><input id="cv" name="cv" type="file" required></div>
+  <div class="field"><input type="checkbox" id="privacy" name="privacy"><label for="privacy">I agree to the privacy policy *</label></div>
+  <div id="errors"></div>
+  <button type="submit">Submit application</button>
+</form>
+<script>
+  const mode = new URLSearchParams(location.search).get('mode') || 'resume';
+  const file = document.getElementById('autofill-file');
+  document.getElementById('autofill').addEventListener('click', () => {
+    if (mode === 'resume') { file.click(); return; }
+    const m = document.createElement('div');
+    m.className = 'modal'; m.setAttribute('role', 'dialog');
+    m.innerHTML = '<h2>Sign in to autofill</h2><label for="login-mail">Email</label><input id="login-mail" type="email">' +
+      '<button type="button">Send verification code</button>';
+    document.body.appendChild(m);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') m.remove(); });
+  });
+  file.addEventListener('change', () => {
+    window.autofillFile = file.files[0].name;
+    setTimeout(() => {  // "Parser" braucht etwas Zeit
+      document.getElementById('first').value = 'Max';
+      document.getElementById('last').value = 'Mustermann';
+      document.getElementById('mail').value = 'max.mustermann@old-mail.example';  // veralteter Wert aus dem CV
+    }, 700);
+  });
+  document.getElementById('app').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const data = { first: f.first.value, last: f.last.value, mail: f.mail.value, phone: f.phone.value,
+      cv: f.cv.files.length ? f.cv.files[0].name : '', privacy: f.privacy.checked, autofill: window.autofillFile || '' };
+    const missing = ['first', 'last', 'mail', 'cv'].filter((k) => !data[k]);
+    if (!data.privacy) missing.push('privacy');
+    if (missing.length) {
+      document.getElementById('errors').innerHTML = '<div role="alert">Please complete: ' + missing.join(', ') + '</div>';
+      return;
+    }
+    await fetch('/submit', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)});
+    document.body.innerHTML = '<h1>Thank you for applying!</h1><p>Application submitted.</p>';
+  });
+</script>
+</body>
+</html>

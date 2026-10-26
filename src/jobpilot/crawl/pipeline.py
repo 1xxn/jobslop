@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -19,9 +20,15 @@ from ..llm import LLM, LLMLimitReached
 from ..profile import Profile
 from .base import RawPosting, make_client
 from .render import PageRenderer
-from .sources import build_sources, gather_limited
+from .sources import AGGREGATOR_SOURCES, build_sources, gather_limited
 
 log = logging.getLogger(__name__)
+
+STALE_DAYS = 21  # Börsen-Stellen gelten als geschlossen, wenn sie so lange nicht mehr auftauchen
+
+
+def _is_aggregator(source: str) -> bool:
+    return source.split(":", 1)[0] in AGGREGATOR_SOURCES
 
 
 @dataclass
@@ -37,6 +44,7 @@ class CrawlReport:
     errors: list[str] = field(default_factory=list)
     per_source: dict[str, int] = field(default_factory=dict)
     rejected: Counter[str] = field(default_factory=Counter)
+    enrich_skipped: int = 0
 
 
 def _workplace(p: RawPosting, where: str) -> str:
@@ -75,12 +83,14 @@ async def run_crawl(
         async with make_client() as client:
             results = await gather_limited([src.fetch(client) for src in sources], limit=8)
             ok_sources: set[str] = set()
+            partial_sources: set[str] = set()
             kept: list[tuple[Any, RawPosting, str]] = []
             for src, result in zip(sources, results, strict=True):
                 if isinstance(result, BaseException):
                     report.errors.append(f"{src.name}: {type(result).__name__}: {result}")
                     continue
-                ok_sources.add(src.name)
+                # Gedeckelte Suchen (Jobbörsen) liefern nicht alles – daraus keine Schließungen ableiten.
+                (ok_sources if getattr(src, "complete", True) else partial_sources).add(src.name)
                 report.per_source[src.name] = len(result)
                 report.fetched += len(result)
                 for posting in result:
@@ -112,14 +122,22 @@ async def run_crawl(
         seen_ids: set[int] = set()
         for _src, posting, where in kept:
             job_id, change = _upsert(s, run, posting, where, config, report)
+            if change == "duplicate":
+                continue
             seen_ids.add(job_id)
             if change in ("new", "updated", "reopened", "merged"):
                 touched.append(job_id)
 
-        # Stellen, die in einer erfolgreich abgefragten Quelle nicht mehr auftauchen, gelten als geschlossen.
+        # Stellen, die in einer vollständig abgefragten Quelle nicht mehr auftauchen, gelten als geschlossen.
+        # Aus gedeckelten Börsen-Suchen erst, wenn sie STALE_DAYS lang nicht mehr gesehen wurden.
+        stale_before = utcnow() - timedelta(days=STALE_DAYS)
         open_jobs = s.execute(select(Job).where(Job.status == "open", Job.origin == "crawl")).scalars().all()
         for job in open_jobs:
-            if job.source in ok_sources and job.id not in seen_ids:
+            if job.id in seen_ids:
+                continue
+            if job.source in ok_sources or (
+                job.source in partial_sources and job.last_seen and job.last_seen < stale_before
+            ):
                 job.status = "closed"
                 job.closed_at = utcnow()
                 s.add(
@@ -151,7 +169,20 @@ async def run_crawl(
         run.finished_at = utcnow()
 
     if enrich and llm is not None and profile is not None and touched:
-        await enrich_jobs(settings, config, llm, profile, touched)
+        cap = max(0, config.limits.max_enrich_per_crawl)
+        if len(touched) > cap:
+            # Viele neue Stellen (z. B. erster Crawl mit Jobbörsen): nur die besten nach Regel-Score bewerten lassen.
+            with session_scope(settings.db_path) as s:
+                touched = list(
+                    s.execute(select(Job.id).where(Job.id.in_(touched)).order_by(Job.score.desc()).limit(cap))
+                    .scalars()
+                    .all()
+                )
+            report.enrich_skipped = (
+                len(report.new) + len(report.updated) + len(report.reopened) - len(touched)
+            )
+        if touched:
+            await enrich_jobs(settings, config, llm, profile, touched)
     return report
 
 
@@ -171,17 +202,37 @@ def _upsert(
             if mk
             else None
         )
+        if twin is None and mk:
+            # Dieselbe Stelle aus einer anderen Quelle: Jobbörse und Firmen-Board nicht doppelt führen.
+            other = (
+                s.execute(
+                    select(Job).where(
+                        Job.match_key == mk,
+                        Job.origin == "crawl",
+                        Job.source != p.source,
+                        Job.status == "open",
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if other is not None and _is_aggregator(p.source):
+                report.rejected["Dublette"] += 1
+                return other.id, "duplicate"
+            if other is not None and _is_aggregator(other.source):
+                twin = other  # Firmen-Board ersetzt den Börsen-Eintrag (direkte URL, vollständige Daten)
         if twin is not None:
             job = twin
             if job.url and job.url != p.url:
                 job.alt_urls = [*job.alt_urls, job.url]
+            if job.origin == "seed":
+                report.merged_seeds.append(job.id)
             job.fingerprint = fp
             job.origin = "crawl"
             job.source = p.source
             job.external_id = p.external_id
             job.url = p.url
             job.apply_url = p.apply_url
-            report.merged_seeds.append(job.id)
             change = "merged"
         else:
             job = Job(

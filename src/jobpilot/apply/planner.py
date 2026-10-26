@@ -111,8 +111,18 @@ Wahrheit vor Vollständigkeit:
    Zahlenfelder ohne Tausenderpunkt. Gehalt als Jahresbrutto in EUR, wenn nicht anders verlangt.
 10. Felder, die schon den richtigen Wert haben: skip. Passwortfelder nie ausfüllen; Konto anlegen oder Login heißt
     page_kind=login_or_account und next_step=wait_for_user.
-11. Cookie-Banner: Wenn einer die Seite blockiert, ist die richtige Aktion click auf "Nur notwendige"/"Ablehnen", sonst
-    "Akzeptieren". Das hat Vorrang vor allem anderen.
+11. Cookie-Banner schließt das Tool vorher selbst. Nur wenn trotzdem einer die Seite blockiert: click auf "Nur notwendige"/
+    "Ablehnen" als Aktion – aber nie einen Cookie-Button (cookie=true) als next_target_id wählen.
+12. Formulare stecken oft in iframes eingebetteter Bewerbungssysteme (Greenhouse, Personio, SmartRecruiters …). Ihre
+    Feld-IDs haben ein anderes Präfix (z. B. "3-12"). Das ist normal: diese Felder direkt ausfüllen.
+13. Sind schon Eingabefelder wie Vorname/Nachname/E-Mail sichtbar, ist das Formular offen. Dann NICHT erneut auf
+    "Apply"/"Bewerben" klicken (das klappt das Formular bei manchen Seiten wieder zu), sondern ausfüllen.
+14. Fülle in jedem Schritt alle sichtbaren Felder aus, die du beantworten kannst – nicht nur die Pflichtfelder.
+15. Vorausgefüllte Werte (z. B. durch Autofill aus dem Lebenslauf, siehe Bisherige Schritte) gegen das Profil prüfen:
+    falsche oder abgeschnittene Werte mit dem richtigen Profilwert überschreiben (fill), korrekte skip.
+    Autofill-Buttons (autofill=true) bedient das Tool selbst – nicht als Aktion oder next_target_id verwenden.
+16. Buttons mit form=true liegen im Formular. Der endgültige Absende-Button ist der im Formular ("Submit application",
+    "Absenden", "Bewerbung senden", auch "Apply"/"Bewerben", wenn er im Formular unter den Feldern steht).
 
 Ablaufsteuerung (next_step + next_target_id):
 - Stellenanzeige ohne Formular: click_apply mit dem Bewerben-Button/Link ("Apply", "Jetzt bewerben", "Bewerbung starten").
@@ -242,7 +252,7 @@ _RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"current (company|employer)|aktueller arbeitgeber", re.I), "work.current_employer"),
     (re.compile(r"current (title|position|role)|aktuelle position", re.I), "work.current_title"),
 ]
-_CV_RX = re.compile(r"resume|lebenslauf|\bcv\b|curriculum", re.I)
+_CV_RX = re.compile(r"r[eé]sum[eé]|lebenslauf|\bcv\b|curriculum", re.I)
 _COVER_RX = re.compile(r"cover letter|anschreiben|motivationsschreiben", re.I)
 _CONSENT_RX = re.compile(r"datenschutz|privacy|einwillig|consent|zustimm|agree|akzeptier|terms", re.I)
 _TALENT_RX = re.compile(r"talent ?pool|future (opportunities|positions)|weitere stellen|newsletter", re.I)
@@ -257,6 +267,15 @@ _CONFIRM_RX = re.compile(
     r"vielen dank für (deine|ihre) bewerbung|bewerbung (ist )?(erfolgreich )?(eingegangen|versendet|übermittelt)|danke für deine bewerbung",
     re.I,
 )
+
+
+def _same_value(current: str, expected: str) -> bool:
+    """Vergleicht tolerant: Groß/Klein, Leerzeichen, Satzzeichen; Telefonnummern über die letzten 8 Ziffern."""
+    a, b = re.sub(r"[\s\-()./]", "", current.lower()), re.sub(r"[\s\-()./]", "", expected.lower())
+    if a == b:
+        return True
+    da, db = re.sub(r"\D", "", current), re.sub(r"\D", "", expected)
+    return len(da) >= 8 and len(db) >= 8 and da[-8:] == db[-8:]
 
 
 def profile_value(profile: Profile, path: str) -> str:
@@ -281,6 +300,12 @@ class HeuristicPlanner:
 
     def remember(self, question: str, answer: str) -> None:
         self.answers.insert(0, (question, answer))
+
+    def _profile_for(self, f: dict[str, Any], label: str) -> str:
+        for rx, path in _RULES:
+            if rx.search(label) or rx.search(f.get("name", "")) or rx.search(f.get("autocomplete", "")):
+                return profile_value(self.profile, path)
+        return ""
 
     def _answer_for(self, label: str) -> str:
         from ..profile import normalize_question
@@ -332,9 +357,10 @@ class HeuristicPlanner:
                 continue
             actions.append(act)
 
-        submit = next((b for b in st.buttons if _SUBMIT_RX.search(b["text"]) and not b.get("disabled")), None)
-        nxt = next((b for b in st.buttons if _NEXT_RX.search(b["text"]) and not b.get("disabled")), None)
-        apply = next((b for b in st.buttons if _APPLY_RX.search(b["text"])), None)
+        buttons = [b for b in st.buttons if not b.get("cookie") and not b.get("autofill")]
+        submit = next((b for b in buttons if _SUBMIT_RX.search(b["text"]) and not b.get("disabled")), None)
+        nxt = next((b for b in buttons if _NEXT_RX.search(b["text"]) and not b.get("disabled")), None)
+        apply = next((b for b in buttons if _APPLY_RX.search(b["text"])), None)
         if not st.form_fields and apply:
             return PagePlan(
                 page_kind="job_posting",
@@ -373,7 +399,8 @@ class HeuristicPlanner:
             )
 
         if kind == "file":
-            if _COVER_RX.search(label):
+            label = " ".join(x for x in (label, f.get("name", ""), f.get("html_id", "")) if x)
+            if _COVER_RX.search(label) or re.search(r"cover|anschreiben", label, re.I):
                 return (
                     act("upload", "@cover_letter_pdf")
                     if self.profile.documents.cover_letter == "auto"
@@ -394,6 +421,11 @@ class HeuristicPlanner:
                 return None
             return act("fill", "@cover_letter", "job_tailored", "medium")
         if f.get("value"):
+            # Vorausgefüllt (Autofill, Browser): nur korrigieren, wenn es einem eindeutigen Profilwert widerspricht.
+            if kind == "text":
+                expected = self._profile_for(f, label)
+                if expected and not _same_value(f["value"], expected):
+                    return act("fill", expected)
             return None
         if answer := self._answer_for(label):
             if kind in ("select", "radio", "combobox", "checkbox_group"):
