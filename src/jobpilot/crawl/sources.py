@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import xml.etree.ElementTree as ET
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -357,6 +358,119 @@ class AmazonSource:
         return list(seen.values())
 
 
+# --------------------------------------------------------------------------- Jobbörsen (viele Firmen, eine Quelle)
+#
+# Börsen liefern Stellen vieler Firmen. Ist eine Abfrage gedeckelt (Seitenlimit), fehlen Stellen nicht, weil sie
+# geschlossen sind – solche Quellen setzen ``complete = False``, damit der Crawl daraus keine Schließungen ableitet.
+
+
+class ArbeitnowSource:
+    """arbeitnow.com: freie API mit Stellen aus Deutschland (viele direkt aus Greenhouse, Personio, Join …)."""
+
+    name = "arbeitnow"
+
+    def __init__(self, max_pages: int, pause_s: float = 2.0) -> None:
+        self.max_pages = max_pages
+        self.pause_s = pause_s  # die API drosselt schnelle Seitenfolgen (429)
+        self.complete = True
+
+    async def fetch(self, client: httpx.AsyncClient) -> list[RawPosting]:
+        out: dict[str, RawPosting] = {}
+        page = 1
+        while page <= self.max_pages:
+            try:
+                data = await get_json(
+                    client, "https://www.arbeitnow.com/api/job-board-api", params={"page": page}
+                )
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 429 and out:
+                    log.info("arbeitnow drosselt ab Seite %s – behalte %s Stellen", page, len(out))
+                    self.complete = False
+                    break
+                raise
+            for j in data.get("data", []):
+                slug = j.get("slug") or j.get("url", "")
+                types = " ".join(j.get("job_types") or [])
+                location = (j.get("location") or "").strip()
+                if not re.search(r"germany|deutschland", location, re.I):
+                    location = f"{location}, Germany" if location else "Germany"  # Börse nur für Deutschland
+                out[slug] = RawPosting(
+                    source=self.name,
+                    external_id=slug,
+                    company=(j.get("company_name") or "").strip(),
+                    title=(j.get("title") or "").strip(),
+                    location=location,
+                    url=j.get("url", ""),
+                    description=html_to_text(j.get("description", "")),
+                    posted=_epoch_date(j.get("created_at")),
+                    remote=bool(j.get("remote")),
+                    workplace="Remote"
+                    if j.get("remote")
+                    else ("Hybrid" if "hybrid" in types.lower() else ""),
+                )
+            if not (data.get("links") or {}).get("next"):
+                break
+            page += 1
+            await asyncio.sleep(self.pause_s)
+        else:
+            self.complete = False  # Seitenlimit erreicht
+        return list(out.values())
+
+
+class HimalayasSource:
+    """himalayas.app: Remote-Stellen, die für ein Land offen sind (Suche nach Stichworten)."""
+
+    name = "himalayas"
+
+    def __init__(self, queries: list[str], country: str, max_pages: int = 5) -> None:
+        self.queries = queries
+        self.country = country
+        self.max_pages = max_pages
+        self.complete = False  # Suchtreffer sind gedeckelt
+
+    async def fetch(self, client: httpx.AsyncClient) -> list[RawPosting]:
+        out: dict[str, RawPosting] = {}
+        for query in self.queries:
+            for page in range(1, self.max_pages + 1):
+                data = await get_json(
+                    client,
+                    "https://himalayas.app/jobs/api/search",
+                    params={"q": query, "country": self.country, "page": page},
+                )
+                jobs = data.get("jobs", [])
+                for j in jobs:
+                    guid = j.get("guid") or j.get("applicationLink", "")
+                    allowed = j.get("locationRestrictions") or []
+                    region = ", ".join(allowed[:6]) if allowed else f"{self.country}, Worldwide"
+                    out[guid] = RawPosting(
+                        source=self.name,
+                        external_id=guid,
+                        company=(j.get("companyName") or "").strip(),
+                        title=(j.get("title") or "").strip(),
+                        location=f"Remote ({region})",
+                        url=j.get("applicationLink") or guid,
+                        description=html_to_text(j.get("description", "")),
+                        posted=_epoch_date(j.get("pubDate")),
+                        remote=True,
+                        workplace="Remote",
+                    )
+                if len(jobs) < 20:
+                    break
+        return list(out.values())
+
+
+def _epoch_date(value: Any) -> str:
+    from datetime import UTC, datetime
+
+    try:
+        return datetime.fromtimestamp(int(value), tz=UTC).strftime("%Y-%m-%d")
+    except (TypeError, ValueError, OSError):
+        return ""
+
+
+AGGREGATOR_SOURCES = ("arbeitnow", "himalayas")
+
+
 # --------------------------------------------------------------------------- generische Karriereseiten (Browser + Claude)
 
 
@@ -451,6 +565,10 @@ def build_sources(
     sources += [WorkdaySource(w) for w in s.workday]
     if s.amazon_queries:
         sources.append(AmazonSource(s.amazon_queries, s.amazon_country))
+    if s.arbeitnow:
+        sources.append(ArbeitnowSource(s.arbeitnow_max_pages))
+    if s.himalayas_queries:
+        sources.append(HimalayasSource(s.himalayas_queries, s.himalayas_country))
     if render is not None:
         sources += [GenericPageSource(p, render, llm, fast_model) for p in s.generic]
     if only:

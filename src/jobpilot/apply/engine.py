@@ -28,6 +28,7 @@ from .extract import PageState, extract_state
 from .interact import Interactor
 from .marks import annotated_screenshots, save_screenshot
 from .planner import _CONFIRM_RX, JobContext, LLMPlanner, PagePlan, PlanInput, Planner
+from .prepare import dismiss_cookie_banners, reveal_lazy_content, try_autofill
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +68,8 @@ class _Run:
     captcha_ack: set[str] = field(default_factory=set)
     signatures: list[str] = field(default_factory=list)
     vision_forced: bool = False
+    seen_urls: set[str] = field(default_factory=set)
+    autofill_tried: set[str] = field(default_factory=set)
 
 
 def slugify(text: str) -> str:
@@ -245,7 +248,7 @@ class ApplyEngine:
         failures: list[str] = []
         for step in range(1, self.settings.max_steps_per_application + 1):
             await settle(page)
-            state = await extract_state(page)
+            state = await self._prepare(run, page)
 
             if run.submit_clicked and _CONFIRM_RX.search(state.text):
                 await save_screenshot(page, run.artdir / "confirmation.jpg")
@@ -257,6 +260,24 @@ class ApplyEngine:
                     run, page, title, "Bitte löse das CAPTCHA im Browserfenster. Danach mache ich weiter."
                 )
                 continue
+
+            page_key = state.url.split("#")[0].split("?")[0]
+            if (
+                self.settings.autofill
+                and page_key not in run.autofill_tried
+                and any(b.get("autofill") for b in state.buttons)
+            ):
+                run.autofill_tried.add(page_key)
+                try:
+                    note, page = await try_autofill(page, state, self.files.cv)
+                except Exception as exc:  # Autofill ist ein Bonus – nie die Bewerbung daran scheitern lassen
+                    note = f"Autofill fehlgeschlagen ({type(exc).__name__}) – Formular wird normal ausgefüllt"
+                if note:
+                    run.history.append(f"Schritt {step}: {note}")
+                    self._event(run.app_id, "autofill", note)
+                    self.on_event(note)
+                    await settle(page)
+                    state = await extract_state(page)
 
             self._loop_guard(run, state)
             shots: list[bytes] = []
@@ -352,13 +373,27 @@ class ApplyEngine:
             run.history.append(f"Schritt {step}: {plan.summary} – {ok_count}/{len(results)} Aktionen ok")
             self._event(run.app_id, "fill", f"{ok_count}/{len(results)} Aktionen ok", {"failures": failures})
 
+            clicked = {r.field_id for r in results if r.action == "click" and r.ok}
+            if (
+                plan.next_step in ("click_apply", "click_next", "click_submit")
+                and plan.next_target_id in clicked
+            ):
+                # Ziel wurde schon als Aktion geklickt (z. B. Cookie-Banner) – Seite neu erfassen statt doppelt klicken.
+                continue
+
             if plan.next_step in ("click_apply", "click_next"):
                 if not plan.next_target_id or (
                     state.button(plan.next_target_id) is None and state.field(plan.next_target_id) is None
                 ):
                     failures.append(f"Button-ID '{plan.next_target_id}' existiert nicht")
                     continue
-                page = await click_element(page, state, plan.next_target_id)
+                try:
+                    page = await click_element(page, state, plan.next_target_id)
+                except Exception as exc:
+                    failures.append(
+                        f"Button '{plan.next_target_id}' nicht klickbar: {str(exc).splitlines()[0][:160]}"
+                    )
+                    continue
                 run.history.append(
                     f"Schritt {step}: '{(state.button(plan.next_target_id) or {}).get('text', '')}' geklickt"
                 )
@@ -430,12 +465,33 @@ class ApplyEngine:
                 "Absenden nicht freigegeben" + (f" ({len(low)} unsichere Felder)" if low else ""),
             )
 
+        self._event(run.app_id, "submit", f"Klick auf {plan.next_target_id}")
+        try:
+            page = await click_element(page, state, plan.next_target_id)
+        except Exception as exc:
+            run.history.append(f"Absenden-Button nicht klickbar: {str(exc).splitlines()[0][:160]}")
+            return page
         run.submit_clicked = True
         run.submit_clicks += 1
         run.fills_since_submit = 0
         run.history.append("Absenden geklickt")
-        self._event(run.app_id, "submit", f"Klick auf {plan.next_target_id}")
-        return await click_element(page, state, plan.next_target_id)
+        return page
+
+    async def _prepare(self, run: _Run, page: Any) -> PageState:
+        """Cookie-Banner schließen und (beim ersten Besuch einer URL) nachgeladene Inhalte wecken, dann erfassen."""
+        key = page.url.split("#")[0]
+        try:
+            closed = await dismiss_cookie_banners(page)
+        except Exception as exc:
+            closed = []
+            log.info("Cookie-Banner konnte nicht geprüft werden: %s", exc)
+        if closed:
+            run.history.append(f"Cookie-Banner geschlossen ('{closed[-1]}')")
+            await settle(page)
+        if key not in run.seen_urls:
+            run.seen_urls.add(key)
+            await reveal_lazy_content(page)
+        return await extract_state(page)
 
     async def _resolve_questions(self, run: _Run, state: PageState, plan: PagePlan, title: str) -> None:
         questions = plan.open_questions

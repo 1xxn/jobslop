@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Software Engineer (all genders) – Toggle AG</title>
+<style>
+  body{margin:0;font-family:sans-serif}
+  .hidden{display:none}
+  .attach{display:inline-block;padding:6px 12px;border:1px solid #333;cursor:pointer}
+  .field{margin:12px 0}
+</style></head>
+<body>
+<div style="padding:20px">
+  <h1>Software Engineer (all genders)</h1>
+  <p>Location: Germany - Berlin. Contract: Full time.</p>
+  <button type="button" id="apply-toggle">Apply</button>
+  <div id="form-section" class="hidden">
+    <form id="app" novalidate>
+      <div class="field"><label for="firstName">First Name*</label><input id="firstName" name="firstName"></div>
+      <div class="field"><label for="lastName">Last Name*</label><input id="lastName" name="lastName"></div>
+      <div class="field"><label for="email">Email*</label><input id="email" name="email" type="email"></div>
+      <div class="field">
+        <span id="resume-label">Résumé*</span>
+        <label class="attach" for="resume">Attach File</label>
+        <input id="resume" name="resume" type="file" style="display:none" aria-labelledby="resume-label">
+      </div>
+      <div class="field"><input type="checkbox" id="consent" name="consent"><label for="consent">I agree to the privacy policy*</label></div>
+      <div id="errors"></div>
+      <input type="submit" value="Submit">
+    </form>
+  </div>
+  <p style="height:400px">Lorem ipsum.</p>
+</div>
+<!-- Cookie-Banner im Shadow DOM, Overlay blockiert Klicks auf die Seite -->
+<div id="usercentrics-root"></div>
+<script>
+  const host = document.getElementById('usercentrics-root');
+  const root = host.attachShadow({mode: 'open'});
+  root.innerHTML = `
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000">
+      <div role="dialog" aria-label="Privacy settings" style="position:absolute;bottom:0;left:0;right:0;background:#fff;padding:20px">
+        <p>We use cookies to improve your experience. Privacy settings.</p>
+        <button id="prefs">Set preferences</button>
+        <button id="essential">Only essential</button>
+        <button id="ok">That’s OK</button>
+      </div>
+    </div>`;
+  const close = (choice) => { window.cookieChoice = choice; host.remove(); };
+  root.getElementById('essential').addEventListener('click', () => close('essential'));
+  root.getElementById('ok').addEventListener('click', () => close('all'));
+  document.getElementById('apply-toggle').addEventListener('click', () => {
+    document.getElementById('form-section').classList.toggle('hidden');
+  });
+  document.getElementById('app').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const data = { firstName: f.firstName.value, lastName: f.lastName.value, email: f.email.value,
+      resume: f.resume.files.length ? f.resume.files[0].name : '', consent: f.consent.checked, cookie: window.cookieChoice || '' };
+    const missing = ['firstName', 'lastName', 'email', 'resume'].filter((k) => !data[k]);
+    if (!data.consent) missing.push('consent');
+    if (missing.length) {
+      document.getElementById('errors').innerHTML = '<div role="alert">Please complete: ' + missing.join(', ') + '</div>';
+      return;
+    }
+    await fetch('/submit', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)});
+    document.body.innerHTML = '<h1>Thank you for your application!</h1><p>We have received your application.</p>';
+  });
+</script>
+</body>
+</html>

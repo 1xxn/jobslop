@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     apply_mode: ApplyMode = "review"
     headless: bool = False
     vision: Literal["auto", "always", "never"] = "auto"
+    autofill: bool = True  # Autofill-Buttons der Formulare nutzen (Lebenslauf-Parser, Portal-Profile)
     max_steps_per_application: int = 14
     navigation_timeout_ms: int = 45_000
     user_wait_timeout_s: int = 900
@@ -93,7 +94,7 @@ class FilterConfig(BaseModel):
     include_titles: list[str] = Field(default_factory=list)
     exclude_titles: list[str] = Field(default_factory=list)
     stretch_markers: list[str] = Field(
-        default_factory=lambda: ["(senior)", "(sr.)", "(expert)", "senior/mid", "mid/senior"]
+        default_factory=lambda: ["(senior)", "(sr.)", "(expert)", "senior/mid", "mid/senior", "senior", "sr."]
     )
     onsite_locations: list[str] = Field(default_factory=lambda: ["berlin"])
     remote_regions: list[str] = Field(default_factory=lambda: ["germany", "deutschland"])
@@ -109,6 +110,7 @@ class LimitConfig(BaseModel):
     max_applications_per_run: int = 15
     min_delay_seconds: int = 40
     min_score_for_auto_queue: float = 14.0
+    max_enrich_per_crawl: int = 60  # Claude-Bewertungen pro Crawl (schont das Abo)
 
 
 class WorkdaySite(BaseModel):
@@ -133,6 +135,10 @@ class SourceConfig(BaseModel):
     workday: list[WorkdaySite] = Field(default_factory=list)
     amazon_queries: list[str] = Field(default_factory=list)
     amazon_country: str = "DEU"
+    arbeitnow: bool = False
+    arbeitnow_max_pages: int = 25
+    himalayas_queries: list[str] = Field(default_factory=list)
+    himalayas_country: str = "Germany"
     generic: list[GenericPage] = Field(default_factory=list)
 
 
@@ -166,16 +172,25 @@ skills = ["gcp", "google cloud", "kubernetes", "k8s", "terraform", "helm", "dock
 
 [filters]
 # Titel müssen mindestens einen dieser Begriffe enthalten (Kleinschreibung egal).
-include_titles = ["site reliability", "sre", "platform", "plattform", "devops", "dev ops", "cloud",
-                  "infrastructure", "infrastruktur", "kubernetes", "k8s", "systems engineer", "system engineer",
-                  "production engineer", "operations engineer", "observability"]
-# Titel mit diesen Begriffen fliegen raus. "(Senior)" in Klammern bleibt als Stretch erhalten.
-exclude_titles = ["senior", "sr.", "staff", "principal", "lead", "head of", "manager", "director", "architect",
-                  "intern", "internship", "werkstudent", "working student", "praktik", "thesis", "sales",
-                  "account", "data engineer", "data platform", "machine learning", "frontend", "android", "ios",
-                  "duales studium", "ausbildung", "teamleit"]
-onsite_locations = ["berlin"]
-remote_regions = ["germany", "deutschland", "europe", "european union", "emea", "dach"]
+include_titles = ["site reliability", "reliability", "sre", "platform", "plattform", "devops", "dev ops", "devsecops",
+                  "mlops", "gitops", "cloud", "infrastructure", "infrastruktur", "kubernetes", "k8s",
+                  "systems engineer", "system engineer", "systemingenieur", "system-ingenieur",
+                  "production engineer", "operations engineer", "it operations", "it-operations", "cloud operations",
+                  "technical operations", "observability", "monitoring", "linux", "unix", "administrator",
+                  "sysadmin", "systemadministrat", "it engineer", "it-engineer", "it specialist", "it-spezialist",
+                  "fachinformatiker", "systemintegration", "network engineer", "netzwerk", "release engineer",
+                  "build engineer", "automation engineer", "test automation", "testautomatisierung", "middleware",
+                  "rechenzentrum", "data center", "datacenter", "virtualisierung", "virtualization"]
+# Titel mit diesen Begriffen fliegen raus. "Senior" fliegt nicht raus, sondern zählt als Stretch (niedriger Score).
+exclude_titles = ["staff", "principal", "lead", "head of", "manager", "director", "architect",
+                  "intern", "internship", "werkstudent", "working student", "student", "praktik", "thesis",
+                  "masterarbeit", "bachelorarbeit", "abschlussarbeit", "sales", "account", "marketing", "recruit",
+                  "data engineer", "data platform", "machine learning", "frontend", "android", "ios",
+                  "duales studium", "ausbildung", "teamleit", "salesforce", "servicenow", "sap ", "crm", "erp",
+                  "product owner", "scrum", "designer", "aushilfe", "minijob"]
+onsite_locations = ["berlin", "potsdam"]
+remote_regions = ["germany", "deutschland", "europe", "europa", "european union", "eu", "emea", "dach",
+                  "worldwide", "anywhere"]
 keep_stretch = true
 
 [limits]
@@ -184,6 +199,7 @@ company_window_days = 30        # … innerhalb von 30 Tagen
 max_applications_per_run = 15
 min_delay_seconds = 40          # Pause zwischen zwei Bewerbungen
 min_score_for_auto_queue = 14.0 # `jobpilot queue add --top` nimmt nur Jobs ab diesem Score
+max_enrich_per_crawl = 60       # Claude bewertet pro Crawl höchstens so viele neue Stellen (Rest: `jobpilot jobs enrich`)
 
 [segments]
 big = ["amazon", "aws", "google", "microsoft", "sap", "sony", "meta", "apple", "netflix"]
@@ -202,14 +218,23 @@ greenhouse = ["n26", "hellofresh", "getyourguide", "contentful", "sumup", "wolt"
               "solarisbank", "soundcloud71", "grafanalabs", "gitlab", "elastic", "canonical", "datadog",
               "cloudflare", "mongodb", "databricks", "doctolib", "helsing", "parloa", "trivago", "coinbase",
               "vercel", "ionos", "traderepublicbank", "jetbrains", "commercetools", "zattoo", "emnify",
-              "talonone", "nebius", "stripe", "cockroachlabs"]
+              "talonone", "nebius", "stripe", "cockroachlabs", "chainguard", "flix", "moonfare", "grover",
+              "thoughtworks", "bitpanda"]
 ashby = ["n8n", "deepl", "upvest", "enpal", "moss", "pliant", "qonto", "elevenlabs", "langdock", "knowunity",
-         "tacto", "clark", "tourlane", "flink"]
-lever = []                       # z. B. "company-slug" aus jobs.lever.co/<slug>
-smartrecruiters = ["DeliveryHero", "Auto1", "BoschGroup", "Sixt", "Canva"]
-personio = []                    # z. B. "firma" aus firma.jobs.personio.de
+         "tacto", "clark", "tourlane", "flink", "buena", "black-forest-labs", "zenjob", "forto", "langchain",
+         "billie", "heyjobs"]
+lever = ["unzer", "spotify"]     # "company-slug" aus jobs.lever.co/<slug>
+smartrecruiters = ["DeliveryHero", "Auto1", "BoschGroup", "Sixt", "Canva", "Continental", "ServiceNow"]
+personio = ["ottonova", "tado", "gridx"]  # "firma" aus firma.jobs.personio.de
 amazon_queries = ["engineer", "devops", "site reliability", "systems engineer"]
 amazon_country = "DEU"
+
+# Jobbörsen mit Stellen vieler Firmen (öffentliche APIs). Dubletten zu Firmen-Boards werden erkannt.
+arbeitnow = true                 # arbeitnow.com – Stellen in Deutschland
+arbeitnow_max_pages = 25         # à ca. 250 Stellen
+himalayas_queries = ["devops", "site reliability", "platform engineer", "cloud engineer", "kubernetes",
+                     "infrastructure engineer", "linux"]   # Remote-Stellen, die für Deutschland offen sind
+himalayas_country = "Germany"
 
 # Workday-Karriereseiten: host/tenant/site stehen in der URL, z. B.
 # https://<tenant>.wd3.myworkdayjobs.com/<site>
