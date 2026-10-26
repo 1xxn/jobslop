@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% from "_prompt.html" import prompt_card %}
+{% block title %}Bewerbung #{{ a.id }} · jobpilot{% endblock %}
+{% block content %}
+<div>
+  <div class="mono muted">Bewerbung #{{ a.id }} · {{ a.started_at|dt }} · Modus {{ a.mode }} · {{ a.origin }}</div>
+  <h1>{{ a.job.company }} · {{ a.job.title }}</h1>
+  <div class="actions" style="margin-top:8px"><span class="pill s-{{ a.status }}">{{ a.status }}</span>
+    <a href="/jobs/{{ a.job_id }}">Zur Stelle</a>{% if a.final_url %} · <a href="{{ a.final_url }}" target="_blank" rel="noopener">letzte Seite ↗</a>{% endif %}</div>
+  {% if a.confirmation or a.error %}<p>{{ a.confirmation or a.error }}</p>{% endif %}
+</div>
+
+{% for p in prompts %}{{ prompt_card(p) }}{% endfor %}
+
+{% if a.open_questions and a.status == 'needs_input' %}
+<div class="card prompt">
+  <h2>Offene Fragen beantworten</h2>
+  <p class="muted">Die Antworten landen in der Antwortbank. Danach die Stelle neu einreihen und den Lauf erneut starten.</p>
+  <form method="post" action="/applications/{{ a.id }}/answers" style="display:grid;gap:10px">
+    {% for q in a.open_questions %}
+      <label style="display:grid;gap:4px"><span><b>{{ q.label or q.question }}</b> <span class="muted">· {{ q.why }}</span></span>
+        {% if q.options %}<select name="a{{ loop.index0 }}"><option value="">– wählen –</option>{% for o in q.options %}<option>{{ o }}</option>{% endfor %}</select>
+        {% else %}<input name="a{{ loop.index0 }}">{% endif %}</label>
+    {% endfor %}
+    <div class="actions"><button class="primary" name="requeue" value="1">Speichern & neu einreihen</button><button>Nur speichern</button></div>
+  </form>
+</div>
+{% endif %}
+
+{% if shots or pdfs %}
+<div class="card"><h2>Screenshots & Dokumente</h2>
+  <div class="shots">{% for s in shots %}<a href="/artifacts/{{ a.id }}/{{ s }}" target="_blank"><img loading="lazy" src="/artifacts/{{ a.id }}/{{ s }}" alt="{{ s }}"><span>{{ s }}</span></a>{% endfor %}</div>
+  {% for pdf in pdfs %}<a class="btn" href="/artifacts/{{ a.id }}/{{ pdf }}" target="_blank">{{ pdf }}</a>{% endfor %}
+</div>
+{% endif %}
+
+<div class="grid">
+  <div class="card"><h2>Ausgefüllte Felder</h2>
+    <div class="tablewrap"><table><tr><th>Feld</th><th>Wert</th><th>Quelle</th><th></th></tr>
+      {% for r in a.filled %}<tr><td>{{ r.label[:80] }}</td><td>{{ (r.value|string)[:160] }}</td><td class="mono">{{ r.source }} {{ r.confidence }}</td>
+        <td>{{ '✓' if r.ok else '✕ ' ~ r.detail }}</td></tr>
+      {% else %}<tr><td class="muted">–</td></tr>{% endfor %}
+    </table></div></div>
+  <div class="card"><h2>Ablauf</h2>
+    <div class="tablewrap"><table>{% for e in a.events %}<tr><td class="mono">{{ e.ts.strftime('%H:%M:%S') }}</td><td class="mono">{{ e.kind }}</td><td>{{ e.message[:300] }}</td></tr>{% endfor %}</table></div>
+    {% if a.usage %}<p class="muted mono">Claude: {{ a.usage.calls }} Aufrufe · {{ a.usage.input_tokens }} in · {{ a.usage.output_tokens }} out · {{ a.usage.cache_read_tokens }} Cache</p>{% endif %}
+  </div>
+</div>
+{% endblock %}
