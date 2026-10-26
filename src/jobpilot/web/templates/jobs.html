@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Stellen · jobpilot{% endblock %}
+{% block content %}
+<div><div class="mono muted">Sortiert nach Priorität: SRE › Platform › DevOps › Cloud › System</div><h1>Stellen</h1></div>
+<form class="filters" method="get">
+  <input type="search" name="q" value="{{ f.q }}" placeholder="Firma, Titel, Stichwort" aria-label="Suche">
+  <select name="cat" aria-label="Rolle"><option value="">Alle Rollen</option>
+    {% for c in ['SRE','Platform','DevOps','Cloud','System','Other'] %}<option {{ 'selected' if f.cat == c }}>{{ c }}</option>{% endfor %}</select>
+  <select name="where" aria-label="Ort"><option value="">Berlin + Remote</option>
+    <option value="B" {{ 'selected' if f.where == 'B' }}>Berlin</option><option value="R" {{ 'selected' if f.where == 'R' }}>Remote DE</option></select>
+  <select name="level" aria-label="Level"><option value="">Alle Level</option>
+    <option value="noS" {{ 'selected' if f.level == 'noS' }}>Ohne Stretch</option>
+    {% for k, v in LEVEL_LABEL.items() %}<option value="{{ k }}" {{ 'selected' if f.level == k }}>{{ v }}</option>{% endfor %}</select>
+  <select name="status" aria-label="Status"><option value="open" {{ 'selected' if f.status == 'open' }}>Offen</option>
+    <option value="closed" {{ 'selected' if f.status == 'closed' }}>Geschlossen</option><option value="all" {{ 'selected' if f.status == 'all' }}>Alle</option></select>
+  <select name="show" aria-label="Anzeige"><option value="todo" {{ 'selected' if f.show == 'todo' }}>Noch nicht beworben</option>
+    <option value="all" {{ 'selected' if f.show == 'all' }}>Alle inkl. beworben</option><option value="queued" {{ 'selected' if f.show == 'queued' }}>Nur Warteschlange</option></select>
+  <button>Filtern</button>
+  <span class="muted mono">{{ items|length }} Stellen</span>
+</form>
+
+<form method="post" action="/run" id="runform"></form>
+<div class="tablewrap"><table>
+  <tr><th></th><th>Score</th><th>Rolle</th><th>Firma · Titel</th><th>Ort</th><th>Stack</th><th>Status</th><th>Aktionen</th></tr>
+  {% for it in items %}{% set j = it.job %}{% set a = it.app %}
+  <tr>
+    <td><input type="checkbox" name="job_id" value="{{ j.id }}" form="runform" aria-label="Auswählen"></td>
+    <td class="num">{{ '%.1f'|format(j.score) }}</td>
+    <td><span class="pill k-{{ j.category }}">{{ j.category }}</span><br><span class="muted mono">{{ LEVEL_LABEL[j.level] }}</span></td>
+    <td><a href="/jobs/{{ j.id }}"><b>{{ j.company }}</b></a><br>{{ j.title }}
+      {% if j.near %}<br><span class="muted">{{ j.near }}</span>{% endif %}</td>
+    <td>{{ j.where|where }}<br><span class="muted">{{ j.workplace }}</span></td>
+    <td class="fit">{% for i in range(3) %}<i class="{{ 'on' if i < j.fit }}"></i>{% endfor %}</td>
+    <td>{% if a %}<a class="pill s-{{ a.status }}" href="/applications/{{ a.id }}">{{ a.status }}</a>{% elif j.queued %}<span class="pill s-running">queued</span>{% endif %}
+      {% if j.status == 'closed' %}<span class="pill s-skipped">geschlossen</span>{% endif %}</td>
+    <td><div class="actions">
+      <form method="post" action="/jobs/{{ j.id }}/queue" class="inline"><input type="hidden" name="on" value="{{ 0 if j.queued else 1 }}">
+        <button>{{ 'Aus Queue' if j.queued else 'Einreihen' }}</button></form>
+      <a class="btn" href="{{ j.url }}" target="_blank" rel="noopener">Anzeige ↗</a>
+      <form method="post" action="/jobs/{{ j.id }}/mark" class="inline"><input type="hidden" name="status" value="applied">
+        <button title="Schon selbst beworben">✓ beworben</button></form>
+      <form method="post" action="/exclude" class="inline"><input type="hidden" name="kind" value="job"><input type="hidden" name="value" value="{{ j.id }}">
+        <button class="danger" title="Diese Stelle ausschließen">✕</button></form>
+    </div></td>
+  </tr>
+  {% endfor %}
+</table></div>
+<div class="actions">
+  <select name="mode" form="runform" aria-label="Modus"><option value="review">Review</option><option value="auto">Auto</option><option value="dry-run">Testlauf</option></select>
+  <button class="primary" form="runform" {% if runner_active %}disabled{% endif %}>Ausgewählte jetzt bewerben</button>
+  <span class="muted">Der Browser öffnet sich auf diesem Rechner. Rückfragen erscheinen in der Übersicht.</span>
+</div>
+{% endblock %}

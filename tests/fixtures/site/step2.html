@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="de">
+<head><meta charset="utf-8"><title>Schritt 2</title></head>
+<body>
+<h2>Schritt 2 von 2 – Unterlagen</h2>
+<form id="s2">
+  <div><label for="cv">Lebenslauf hochladen*</label><input id="cv" type="file" required></div>
+  <div><label><input type="checkbox" id="ds" required> Ich willige in die Verarbeitung meiner Daten gemäß Datenschutzerklärung ein*</label></div>
+  <div><label><input type="checkbox" id="pool"> Ich möchte in den Talent Pool aufgenommen werden</label></div>
+  <button type="submit">Bewerbung absenden</button>
+</form>
+<script>
+  document.getElementById('s2').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const s1 = JSON.parse(sessionStorage.getItem('s1') || '{}');
+    const data = Object.assign(s1, { cv: document.getElementById('cv').files[0]?.name || '',
+      datenschutz: document.getElementById('ds').checked, talentpool: document.getElementById('pool').checked });
+    await fetch('/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    document.body.innerHTML = '<h2>Vielen Dank für Ihre Bewerbung!</h2><p>Sie erhalten in Kürze eine Bestätigung per E-Mail.</p>';
+  });
+</script>
+</body>
+</html>

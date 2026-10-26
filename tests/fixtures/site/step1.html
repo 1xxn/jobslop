@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="de">
+<head><meta charset="utf-8"><title>Schritt 1</title></head>
+<body>
+<h2>Schritt 1 von 2 – Persönliche Daten</h2>
+<form id="s1">
+  <div><span>Vorname*</span><input name="vorname" required></div>
+  <div><span>Nachname*</span><input name="nachname" required></div>
+  <div><label>E-Mail-Adresse* <input name="mail" type="email" required></label></div>
+  <phone-field></phone-field>
+  <button type="submit">Weiter</button>
+</form>
+<script>
+  // Web Component mit Shadow DOM (wie bei manchen Bewerbungsportalen)
+  customElements.define('phone-field', class extends HTMLElement {
+    constructor() {
+      super();
+      const root = this.attachShadow({ mode: 'open' });
+      root.innerHTML = '<label for="tel">Telefonnummer</label><input id="tel" type="tel">';
+    }
+  });
+  document.getElementById('s1').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const tel = document.querySelector('phone-field').shadowRoot.getElementById('tel').value;
+    sessionStorage.setItem('s1', JSON.stringify({ vorname: f.vorname.value, nachname: f.nachname.value, mail: f.mail.value, tel }));
+    location.href = '/step2.html';
+  });
+</script>
+</body>
+</html>

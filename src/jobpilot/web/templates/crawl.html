@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Crawl #{{ run.id }} · jobpilot{% endblock %}
+{% block content %}
+<div><div class="mono muted">{{ run.started_at|dt }} – {{ run.finished_at|dt }} · {{ run.status }}</div><h1>Crawl #{{ run.id }}</h1></div>
+<div class="tablewrap"><table>
+  <tr><th>Änderung</th><th>Firma · Titel</th><th>Ort</th><th>Details</th></tr>
+  {% for sn in snaps %}
+  <tr><td><span class="pill {{ 's-submitted' if sn.change in ('new','reopened') else ('s-failed' if sn.change == 'closed' else 's-ready') }}">{{ sn.change }}</span></td>
+    <td><a href="/jobs/{{ sn.job_id }}"><b>{{ sn.job.company }}</b></a><br>{{ sn.title }}</td><td>{{ sn.location }}</td>
+    <td class="mono">{{ sn.diff|tojson if sn.diff else '' }}</td></tr>
+  {% else %}<tr><td colspan="4" class="muted">Keine Änderungen.</td></tr>{% endfor %}
+</table></div>
+{% if run.errors %}<div class="card"><h2>Fehler</h2><pre class="log">{{ run.errors|join('\n') }}</pre></div>{% endif %}
+<div class="card"><h2>Treffer pro Quelle</h2><pre class="log">{{ (run.stats.per_source if run.stats else {})|tojson(indent=1) }}</pre></div>
+{% endblock %}
