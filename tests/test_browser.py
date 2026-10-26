@@ -210,3 +210,45 @@ async def test_dry_run_and_missing_answers_park(settings, site, profile, config)
         app = s.get(Application, outcome.application_id)
         labels = " ".join(q["label"] for q in app.open_questions)
     assert "visa" in labels.lower() and "salary" in labels.lower()
+
+
+class _LimitPlanner:
+    """Simuliert ein erschöpftes Abo-Kontingent beim ersten Planungsschritt."""
+
+    async def plan(self, data):
+        from jobpilot.llm import LLMLimitReached
+
+        raise LLMLimitReached("You've hit your session limit · resets 5pm")
+
+    def remember(self, question, answer):
+        pass
+
+
+async def test_usage_limit_pauses_and_requeues(settings, site, profile, config):
+    from jobpilot.apply.engine import run_batch
+    from jobpilot.db import Job
+
+    first = add_job(settings, f"{site.base_url}/greenhouse_like.html", company="Erste GmbH")
+    second = add_job(settings, f"{site.base_url}/greenhouse_like.html?b=2", company="Zweite GmbH")
+    async with BrowserSession(settings, headless=True) as browser:
+        engine = ApplyEngine(
+            settings=settings,
+            config=config,
+            profile=profile,
+            planner=_LimitPlanner(),
+            interactor=ScriptedInteractor({}),
+            browser=browser,
+            mode="auto",
+        )
+        outcomes = await run_batch(engine, [first, second], max_count=5, min_delay=0)
+    assert [o.status for o in outcomes] == ["paused"]  # Lauf stoppt, zweite Stelle wird nicht angefasst
+    with session_scope(settings.db_path) as s:
+        assert s.get(Job, first).queued is True
+        app = s.execute(select(Application).where(Application.job_id == first)).scalars().one()
+        assert app.status == "paused" and "limit" in app.confirmation.lower()
+        assert not s.execute(select(Application).where(Application.job_id == second)).scalars().all()
+    # pausierte Bewerbung blockiert keinen neuen Versuch
+    from jobpilot.guard import check_job
+
+    with session_scope(settings.db_path) as s:
+        assert check_job(s, s.get(Job, first), config.limits).ok

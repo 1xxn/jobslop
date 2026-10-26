@@ -8,7 +8,7 @@ from sqlalchemy import select
 from jobpilot.apply.extract import PageState
 from jobpilot.apply.planner import JobContext, LLMPlanner, PagePlan, PlanInput
 from jobpilot.db import Answer, Application, Job, Prompt, session_scope
-from jobpilot.llm import Usage
+from jobpilot.llm import DYNAMIC_BOUNDARY, Usage
 from jobpilot.runtime import Runtime
 from jobpilot.seeds import import_seeds
 from jobpilot.web.app import create_app
@@ -127,7 +127,28 @@ async def test_llm_planner_prompt(settings, profile):
     assert call["schema"] is PagePlan
     assert "Max" in call["system"] and "UNBEKANNT" in call["system"]  # TODO-Felder als unbekannt markiert
     assert "Kündigungsfrist" in call["system"] and "Karriereseite" in call["system"]
-    assert call["content"][0]["type"] == "document"  # Lebenslauf als PDF-Block, gecacht
-    assert call["content"][0]["cache_control"] == {"type": "ephemeral"}
+    # Test-PDF ohne Textebene: Claude bekommt die Datei selbst (Read-Tool)
+    assert call["content"][0]["type"] == "file" and call["content"][0]["path"].name.endswith(".pdf")
+    # Antwortbank steht hinter der Cache-Grenze, Profil davor
+    head, tail = call["system"].split(DYNAMIC_BOUNDARY)
+    assert "Max" in head and "Kündigungsfrist" in tail and "Karriereseite" in tail
     text = call["content"][-1]["text"]
     assert "First Name *" in text and "Bitte Feld ausfüllen" in text and "SRE GCP" in text
+
+
+async def test_llm_planner_uses_cv_text(settings, profile):
+    cv = settings.home / "cv.txt"
+    cv.write_text(
+        "Max Mustermann – Site Reliability Engineer. " * 10 + "Terraform-Module für GCP", encoding="utf-8"
+    )
+    profile.documents.cv = str(cv)
+    fake = _FakeLLM()
+    planner = LLMPlanner(fake, profile, settings.home, [], cover_letter_auto=False)
+    state = PageState(url="https://x", title="x", fields=[], buttons=[], errors=[])
+    job = JobContext(
+        id=1, company="A", title="SRE", location="Berlin", url="https://x", description="", language=""
+    )
+    await planner.plan(PlanInput(job=job, state=state, step=1))
+    call = fake.calls[0]
+    assert "Terraform-Module für GCP" in call["system"].split(DYNAMIC_BOUNDARY)[0]
+    assert all(block["type"] == "text" for block in call["content"])  # kein Datei-Upload nötig

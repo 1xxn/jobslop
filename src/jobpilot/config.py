@@ -19,9 +19,14 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="JOBPILOT_", env_file=".env", extra="ignore")
 
     home: Path = Field(default_factory=lambda: Path.home() / ".jobpilot")
-    llm_model: str = "claude-sonnet-5-5"
-    llm_model_fast: str = "claude-haiku-5-5"
-    llm_max_retries: int = 4
+    # Claude Code (Abo-Login). Modelle als Alias: sonnet | opus | haiku – oder ein voller Modellname.
+    llm_model: str = "sonnet"
+    llm_model_fast: str = "haiku"
+    claude_bin: str = ""  # leer = automatisch suchen (PATH, ~/.local/bin/claude[.exe], npm)
+    claude_parallel: int = 2  # gleichzeitige Claude-Aufrufe (schont das Abo-Limit)
+    claude_timeout_s: int = 300
+    claude_effort: str = ""  # optional: low | medium | high
+    keep_llm_workdirs: bool = False  # Arbeitsordner der Claude-Aufrufe zum Debuggen behalten
     apply_mode: ApplyMode = "review"
     headless: bool = False
     vision: Literal["auto", "always", "never"] = "auto"
@@ -57,7 +62,7 @@ class Settings(BaseSettings):
 
 
 def load_env_files(*paths: Path) -> None:
-    """Übernimmt KEY=VALUE aus .env-Dateien in die Umgebung (z. B. ANTHROPIC_API_KEY), ohne Gesetztes zu überschreiben."""
+    """Übernimmt KEY=VALUE aus .env-Dateien in die Umgebung (JOBPILOT_*), ohne Gesetztes zu überschreiben."""
     import os
 
     for path in paths:

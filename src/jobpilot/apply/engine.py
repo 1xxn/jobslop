@@ -20,7 +20,7 @@ from sqlalchemy import select
 from ..config import ApplyMode, SearchConfig, Settings
 from ..db import Answer, Application, ApplicationEvent, Job, session_scope, utcnow
 from ..guard import check_job
-from ..llm import LLM
+from ..llm import LLM, LLMLimitReached
 from ..profile import Profile, normalize_question
 from .coverletter import cover_letter_html, cover_letter_text, render_pdf, write_cover_letter
 from .executor import Executor, Files, click_element
@@ -196,6 +196,9 @@ class ApplyEngine:
             status, message, page = await self._run(run, page)
         except Park as park:
             status, message, questions = park.status, park.message, park.questions
+        except LLMLimitReached as exc:
+            # Abo-Limit: nichts abgesendet, Stelle bleibt in der Warteschlange und kann später neu starten.
+            status, message = "paused", str(exc)[:300]
         except Exception as exc:
             status, message = "failed", f"{type(exc).__name__}: {exc}"
             self._event(app_id, "error", message, {"traceback": traceback.format_exc()[-4000:]})
@@ -219,6 +222,8 @@ class ApplyEngine:
                 app.filled = run.filled
                 app.usage = usage
                 app.open_questions = questions
+                if status == "paused" and (job_row := s.get(Job, job_id)) is not None:
+                    job_row.queued = True
                 if status == "submitted":
                     app.submitted_at = utcnow()
                     app.confirmation = message
@@ -467,11 +472,17 @@ class ApplyEngine:
             return
         if self.llm is None:
             raise Park(
-                "needs_input", "Anschreiben verlangt, aber kein ANTHROPIC_API_KEY für die Erstellung gesetzt"
+                "needs_input",
+                "Anschreiben verlangt, aber Claude Code ist nicht verfügbar (offline) – documents.cover_letter "
+                "auf eine PDF setzen oder mit Claude Code starten",
             )
-        cv_block = getattr(self.planner, "cv_block", None)
         letter = await write_cover_letter(
-            self.llm, self.profile, run.job, self.profile.preferences.cover_letter_language, cv_block
+            self.llm,
+            self.profile,
+            run.job,
+            self.profile.preferences.cover_letter_language,
+            cv_text=getattr(self.planner, "cv_text", ""),
+            cv_file=getattr(self.planner, "cv_file", None) or self.files.cv,
         )
         text = cover_letter_text(letter, self.profile)
         (run.artdir / "anschreiben.txt").write_text(text, encoding="utf-8")
@@ -564,7 +575,13 @@ class ApplyEngine:
         if not self.llm:
             return {}
         after = self.llm.usage.as_dict()
-        return {k: after[k] - before.get(k, 0) for k in after if isinstance(after[k], int)}
+        return {
+            k: round(after[k] - before.get(k, 0), 1)
+            if isinstance(after[k], float)
+            else after[k] - before.get(k, 0)
+            for k in after
+            if isinstance(after[k], int | float)
+        }
 
     def _event(self, app_id: int, kind: str, message: str, data: dict[str, Any] | None = None) -> None:
         log.info("[app %s] %s: %s", app_id, kind, message)
@@ -592,6 +609,8 @@ async def run_batch(
         outcomes.append(outcome)
         if on_result:
             on_result(outcome)
+        if outcome.status == "paused":
+            break  # Abo-Limit erreicht: Rest bleibt eingereiht
         if outcome.application_id is not None:
             attempted += 1
             if attempted < max_count and job_id != job_ids[-1]:

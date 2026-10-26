@@ -389,8 +389,12 @@ def create_app(runtime: Runtime) -> FastAPI:
         from ..crawl.pipeline import run_crawl
 
         try:
+            from ..llm import check_login
+
             r = Runtime.load(settings)
-            report = await run_crawl(r.settings, r.config, llm=r.llm(), profile=r.profile)
+            login = await asyncio.to_thread(check_login, r.settings)
+            llm = r.llm() if login.ok else None
+            report = await run_crawl(r.settings, r.config, llm=llm, profile=r.profile, enrich=llm is not None)
             state["crawl"]["last"] = (
                 f"Crawl #{report.run_id}: +{len(report.new)} neu, −{len(report.closed)} geschlossen"
             )

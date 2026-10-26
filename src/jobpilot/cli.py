@@ -61,6 +61,7 @@ STATUS_STYLE = {
     "offer": "bold green",
     "needs_input": "yellow",
     "needs_review": "yellow",
+    "paused": "magenta",
     "ready": "cyan",
     "running": "cyan",
     "failed": "red",
@@ -82,12 +83,24 @@ def _root(
         format="%(message)s",
         handlers=[RichHandler(console=console, show_path=False, rich_tracebacks=True)],
     )
-    for noisy in ("httpx", "httpcore", "anthropic"):
+    for noisy in ("httpx", "httpcore"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 def rt() -> Runtime:
     return Runtime.load()
+
+
+def need_claude(r: Runtime):
+    """LLM-Client oder Abbruch mit klarer Meldung, wenn Claude Code fehlt bzw. nicht eingeloggt ist."""
+    from .llm import check_login
+
+    login = check_login(r.settings)
+    llm = r.llm() if login.ok else None
+    if llm is None:
+        console.print(f"[red]{escape(login.message)}[/red]")
+        raise typer.Exit(1)
+    return llm
 
 
 def _where(w: str) -> str:
@@ -121,7 +134,7 @@ def init(
     console.print(
         f"\nArbeitsordner: [bold]{settings.home}[/bold]\nNächste Schritte:\n"
         f"  1. Lebenslauf nach {settings.home} kopieren und TODO-Felder in profile.yaml ausfüllen\n"
-        "  2. ANTHROPIC_API_KEY setzen (Umgebung oder .env)\n"
+        "  2. Claude Code installieren und einmal `claude` starten → mit deinem Claude-Abo einloggen\n"
         "  3. jobpilot doctor   → prüft alles\n"
         "  4. jobpilot crawl    → Liste aktualisieren\n"
         "  5. jobpilot dashboard  oder  jobpilot apply --queue"
@@ -130,8 +143,11 @@ def init(
 
 @app.command()
 def doctor() -> None:
-    """Prüft Profil, Dokumente, API-Schlüssel, Browser und Datenbank."""
+    """Prüft Profil, Dokumente, Claude Code (Abo-Login), Browser und Datenbank."""
     import os
+
+    from .cvtext import cv_text
+    from .llm import check_login
 
     r = rt()
     ok = True
@@ -153,11 +169,24 @@ def doctor() -> None:
     )
     cv = r.profile.cv_path(r.settings.profile_path.parent)
     line(bool(cv and cv.exists()), f"Lebenslauf: {cv}", "Pfad in profile.yaml → documents.cv")
+    if cv and cv.exists():
+        chars = len(cv_text(cv))
+        console.print(
+            f"  [dim]Lebenslauf-Text: {chars} Zeichen"
+            + (" (Bild-PDF – Claude liest die Datei bei jedem Schritt, langsamer)" if not chars else "")
+            + "[/dim]"
+        )
+    login = check_login(r.settings)
     line(
-        bool(os.environ.get("ANTHROPIC_API_KEY")),
-        "ANTHROPIC_API_KEY gesetzt",
-        "ohne Schlüssel läuft nur der Regel-Planer (--offline)",
+        login.ok,
+        login.message,
+        "Installation: https://code.claude.com · danach `claude` starten und einloggen",
     )
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        console.print(
+            "  [dim]Hinweis: ANTHROPIC_API_KEY ist gesetzt – jobpilot entfernt ihn für Claude-Aufrufe, "
+            "damit nur das Abo genutzt wird.[/dim]"
+        )
     line(r.settings.search_path.exists(), f"Suchkonfiguration: {r.settings.search_path}")
     try:
         from playwright.sync_api import sync_playwright
@@ -173,7 +202,8 @@ def doctor() -> None:
         apps = s.scalar(select(func.count(Application.id))) or 0
     line(True, f"Datenbank: {jobs} Stellen, {apps} Bewerbungen ({r.settings.db_path})")
     console.print(
-        f"\nLLM: {r.settings.llm_model} (Formulare), {r.settings.llm_model_fast} (Bewertung) · Modus: {r.settings.apply_mode}"
+        f"\nClaude Code (Abo): {r.settings.llm_model} (Formulare), {r.settings.llm_model_fast} (Bewertung) · "
+        f"parallel {r.settings.claude_parallel} · Modus: {r.settings.apply_mode}"
     )
     raise typer.Exit(0 if ok else 1)
 
@@ -196,11 +226,9 @@ def profile_import_cv(
     from .cvimport import import_cv
 
     r = rt()
-    llm = r.llm()
-    if llm is None:
-        console.print("[red]ANTHROPIC_API_KEY fehlt.[/red]")
-        raise typer.Exit(1)
-    profile = asyncio.run(import_cv(llm, cv.resolve(), r.profile, overwrite=overwrite))
+    llm = need_claude(r)
+    with console.status("Claude liest den Lebenslauf …"):
+        profile = asyncio.run(import_cv(llm, cv.resolve(), r.profile, overwrite=overwrite))
     if r.settings.profile_path.exists():
         r.settings.profile_path.with_suffix(".yaml.bak").write_text(
             r.settings.profile_path.read_text(encoding="utf-8"), encoding="utf-8"
@@ -226,7 +254,17 @@ def crawl(
     from .crawl.pipeline import run_crawl
 
     r = rt()
-    llm = r.llm() if enrich or (browser and r.config.sources.generic) else None
+    llm = None
+    if enrich or (browser and r.config.sources.generic):
+        from .llm import check_login
+
+        login = check_login(r.settings)
+        if login.ok:
+            llm = r.llm()
+        else:
+            console.print(
+                f"[yellow]{escape(login.message)} – crawle ohne Bewertung und ohne generische Karriereseiten.[/yellow]"
+            )
     with console.status("Crawle Quellen …"):
         report = asyncio.run(
             run_crawl(
@@ -469,10 +507,7 @@ def jobs_enrich(
     from .crawl.pipeline import enrich_jobs
 
     r = rt()
-    llm = r.llm()
-    if llm is None:
-        console.print("[red]ANTHROPIC_API_KEY fehlt.[/red]")
-        raise typer.Exit(1)
+    llm = need_claude(r)
     with session_scope(r.settings.db_path) as s:
         rows = s.execute(select(Job).where(Job.status == "open", Job.description != "")).scalars()
         ids = [j.id for j in rows if all_open or not j.enrichment]
@@ -587,11 +622,14 @@ def apply(
     if not ids:
         console.print("Nichts zu tun. Stellen einreihen: [bold]jobpilot queue add --top 10[/bold]")
         raise typer.Exit()
-    if not offline and r.llm() is None:
-        console.print(
-            "[yellow]Kein ANTHROPIC_API_KEY – nutze den Regel-Planer (nur Standardfelder).[/yellow]"
-        )
-        offline = True
+    if not offline:
+        from .llm import check_login
+
+        login = check_login(r.settings)
+        if not login.ok:
+            console.print(f"[red]{escape(login.message)}[/red]")
+            console.print("Ohne Claude geht nur der Regel-Planer für Standardfelder: [bold]--offline[/bold]")
+            raise typer.Exit(1)
     if unattended:
         interactor = UnattendedInteractor()
     elif via_dashboard:
@@ -622,11 +660,15 @@ def apply(
                 offline=offline,  # type: ignore[arg-type]
                 on_event=lambda m: console.print(f"  [dim]{escape(m)}[/dim]"),
             )
+            outcomes = []
             if force:
                 for jid in ids:
-                    on_result(await engine.apply(jid, force=True))
+                    outcomes.append(o := await engine.apply(jid, force=True))
+                    on_result(o)
+                    if o.status == "paused":
+                        break
             else:
-                await run_batch(
+                outcomes = await run_batch(
                     engine,
                     ids,
                     max_count=limit,
@@ -636,8 +678,13 @@ def apply(
             if engine.llm:
                 u = engine.llm.usage
                 console.print(
-                    f"[dim]Claude: {u.calls} Aufrufe, {u.input_tokens:,} Input- (+{u.cache_read_tokens:,} aus Cache), "
-                    f"{u.output_tokens:,} Output-Tokens[/dim]"
+                    f"[dim]Claude Code (Abo): {u.calls} Aufrufe in {u.seconds:.0f}s · {u.input_tokens:,} Input- "
+                    f"(+{u.cache_read_tokens:,} aus Cache), {u.output_tokens:,} Output-Tokens[/dim]"
+                )
+            if any(o.status == "paused" for o in outcomes):
+                console.print(
+                    "[magenta]Claude-Nutzungslimit erreicht – Rest bleibt in der Warteschlange. "
+                    "Später einfach `jobpilot apply --queue` erneut starten.[/magenta]"
                 )
 
     try:

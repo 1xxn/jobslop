@@ -6,7 +6,8 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from .llm import LLM, pdf_block
+from .cvtext import cv_text
+from .llm import LLM, file_block
 from .profile import Education, Experience, Language, Profile
 
 
@@ -61,13 +62,12 @@ Skills als kurze Einträge, wie sie im Lebenslauf stehen."""
 
 
 async def import_cv(llm: LLM, cv: Path, profile: Profile, *, overwrite: bool = False) -> Profile:
-    data = await llm.parse(
-        CVExtract,
-        system=SYSTEM,
-        content=[pdf_block(cv), {"type": "text", "text": "Bitte extrahieren."}],
-        max_tokens=6000,
-        cache_system=False,
-    )
+    text = cv_text(cv)
+    if text:
+        content: list[dict] = [{"type": "text", "text": f"Lebenslauf:\n\n{text}\n\nBitte extrahieren."}]
+    else:  # Bild-PDF: Claude liest die Datei selbst
+        content = [file_block(cv), {"type": "text", "text": "Bitte extrahieren."}]
+    data = await llm.parse(CVExtract, system=SYSTEM, content=content, max_tokens=6000, cache_system=False)
     p = profile.model_copy(deep=True)
 
     def take(current: str, new: str) -> str:
