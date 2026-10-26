@@ -6,9 +6,9 @@ import httpx
 import respx
 from sqlalchemy import select
 
-from jobpilot.config import WorkdaySite
-from jobpilot.crawl.pipeline import run_crawl
-from jobpilot.db import Job, JobSnapshot, session_scope
+from jobslop.config import WorkdaySite
+from jobslop.crawl.pipeline import run_crawl
+from jobslop.db import Job, JobSnapshot, session_scope
 
 GH_JOBS = {
     "jobs": [
@@ -180,7 +180,7 @@ def _config(config):
 async def test_crawl_filters_upserts_and_tracks_history(settings, config):
     config = _config(config)
     # Eintrag aus der Startliste (LinkedIn), der beim Crawl auf die direkte Firmen-URL umgestellt werden soll
-    from jobpilot.classify import fingerprint, match_key
+    from jobslop.classify import fingerprint, match_key
 
     with session_scope(settings.db_path) as s:
         s.add(
@@ -378,8 +378,8 @@ async def test_job_boards_add_jobs_without_duplicates(settings, config):
 
 
 async def test_arbeitnow_throttling_keeps_loaded_pages(settings, config, monkeypatch):
-    from jobpilot.crawl import base
-    from jobpilot.crawl.sources import ArbeitnowSource
+    from jobslop.crawl import base
+    from jobslop.crawl.sources import ArbeitnowSource
 
     monkeypatch.setattr(base, "wait_exponential", lambda **_: lambda _state: 0)
     page2 = dict(ARBEITNOW, links={"next": "https://www.arbeitnow.com/api/job-board-api?page=2"})
@@ -427,7 +427,7 @@ class _BatchLLM:
     """Bewertet Stapel; der zweite Stapel scheitert am Abo-Limit."""
 
     def __init__(self):
-        from jobpilot.llm import Usage
+        from jobslop.llm import Usage
 
         self.usage = Usage()
         self.prompts: list[str] = []
@@ -435,7 +435,7 @@ class _BatchLLM:
     async def parse(self, schema, *, system, content, model=None, max_tokens=4096, cache_system=True):
         import re
 
-        from jobpilot.llm import LLMLimitReached
+        from jobslop.llm import LLMLimitReached
 
         self.prompts.append(content)
         if len(self.prompts) > 1:
@@ -458,7 +458,7 @@ class _BatchLLM:
 
 async def test_enrich_batches_and_stops_at_limit(settings, config, profile):
     from conftest import add_job
-    from jobpilot.crawl.pipeline import ENRICH_BATCH, enrich_jobs
+    from jobslop.crawl.pipeline import ENRICH_BATCH, enrich_jobs
 
     settings.claude_parallel = 1  # Reihenfolge deterministisch
     ids = [add_job(settings, f"https://x/{i}", company=f"Firma {i}") for i in range(ENRICH_BATCH * 3)]

@@ -1,0 +1,218 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Design-Tokens
+ * Farbrollen nach Material 3 (surface, container, on-surface, outline), Typografie, Abstände und Tiefe nach Apple HIG:
+ * eine Akzentfarbe, ruhige Flächen, Inhalt vor Dekoration, klare Hierarchie über Schriftgrößen statt Farben.
+ */
+:root {
+  --bg: #f6f6f8;
+  --surface: #ffffff;
+  --surface-2: #f2f2f5;
+  --surface-3: #e8e8ed;
+  --overlay: rgb(250 250 252 / 0.72);
+  --border: rgb(15 15 30 / 0.08);
+  --border-strong: rgb(15 15 30 / 0.15);
+  --fg: #111116;
+  --fg-muted: #5b5c6b;
+  --fg-subtle: #8b8c99;
+  --primary: oklch(0.54 0.215 270);
+  --primary-hover: oklch(0.49 0.22 270);
+  --primary-fg: #ffffff;
+  --primary-soft: oklch(0.54 0.215 270 / 0.1);
+  --success: oklch(0.6 0.15 155);
+  --success-soft: oklch(0.6 0.15 155 / 0.12);
+  --warning: oklch(0.68 0.16 70);
+  --warning-soft: oklch(0.75 0.16 75 / 0.16);
+  --danger: oklch(0.58 0.21 25);
+  --danger-soft: oklch(0.58 0.21 25 / 0.1);
+  --info: oklch(0.6 0.13 230);
+  --info-soft: oklch(0.6 0.13 230 / 0.12);
+  --ring: oklch(0.54 0.215 270 / 0.45);
+  --shadow-sm: 0 1px 2px rgb(16 16 32 / 0.05);
+  --shadow-md: 0 1px 2px rgb(16 16 32 / 0.04), 0 8px 24px -8px rgb(16 16 32 / 0.12);
+  --shadow-lg: 0 2px 6px rgb(16 16 32 / 0.06), 0 24px 64px -16px rgb(16 16 32 / 0.28);
+}
+
+.dark {
+  --bg: #0b0b0f;
+  --surface: #141419;
+  --surface-2: #1b1b22;
+  --surface-3: #25252e;
+  --overlay: rgb(20 20 26 / 0.72);
+  --border: rgb(255 255 255 / 0.07);
+  --border-strong: rgb(255 255 255 / 0.14);
+  --fg: #f3f3f6;
+  --fg-muted: #a3a3b2;
+  --fg-subtle: #6e6f7e;
+  --primary: oklch(0.7 0.16 272);
+  --primary-hover: oklch(0.75 0.15 272);
+  --primary-fg: #0b0b12;
+  --primary-soft: oklch(0.7 0.16 272 / 0.14);
+  --success: oklch(0.75 0.15 158);
+  --success-soft: oklch(0.75 0.15 158 / 0.14);
+  --warning: oklch(0.8 0.15 80);
+  --warning-soft: oklch(0.8 0.15 80 / 0.14);
+  --danger: oklch(0.7 0.18 25);
+  --danger-soft: oklch(0.7 0.18 25 / 0.14);
+  --info: oklch(0.75 0.12 230);
+  --info-soft: oklch(0.75 0.12 230 / 0.14);
+  --ring: oklch(0.7 0.16 272 / 0.5);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -8px rgb(0 0 0 / 0.6);
+  --shadow-lg: 0 2px 6px rgb(0 0 0 / 0.4), 0 24px 64px -16px rgb(0 0 0 / 0.8);
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-overlay: var(--overlay);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-fg: var(--primary-fg);
+  --color-primary-soft: var(--primary-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-ring: var(--ring);
+
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+
+  /* Typografie-Stufen (angelehnt an die HIG-Textstile) */
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1rem;
+  --text-footnote: 0.8125rem;
+  --text-footnote--line-height: 1.125rem;
+  --text-body: 0.9375rem;
+  --text-body--line-height: 1.375rem;
+  --text-headline: 1.0625rem;
+  --text-headline--line-height: 1.5rem;
+  --text-title3: 1.25rem;
+  --text-title3--line-height: 1.625rem;
+  --text-title2: 1.5rem;
+  --text-title2--line-height: 1.875rem;
+  --text-title1: 1.875rem;
+  --text-title1--line-height: 2.25rem;
+  --text-large: 2.5rem;
+  --text-large--line-height: 2.875rem;
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
+
+  --animate-fade-in: fade-in 180ms var(--ease-standard);
+  --animate-slide-up: slide-up 260ms var(--ease-emphasized);
+  --animate-scale-in: scale-in 200ms var(--ease-emphasized);
+  --animate-sheet-in: sheet-in 300ms var(--ease-emphasized);
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes slide-up {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes scale-in {
+    from { opacity: 0; transform: translate(-50%, -48%) scale(0.97); }
+    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  }
+  @keyframes sheet-in {
+    from { transform: translateX(24px); opacity: 0; }
+    to { transform: none; opacity: 1; }
+  }
+}
+
+/* Farben für Zielrollen (Index = Priorität) */
+.role-0 { --role: oklch(0.62 0.19 30); }
+.role-1 { --role: oklch(0.58 0.19 268); }
+.role-2 { --role: oklch(0.62 0.15 160); }
+.role-3 { --role: oklch(0.64 0.13 220); }
+.role-4 { --role: oklch(0.6 0.17 310); }
+.role-5 { --role: oklch(0.7 0.15 85); }
+.role-6 { --role: oklch(0.6 0.12 190); }
+.role-7 { --role: oklch(0.55 0.02 270); }
+
+.avatar { background: oklch(0.94 0.035 var(--h)); color: oklch(0.42 0.1 var(--h)); }
+.dark .avatar { background: oklch(0.3 0.05 var(--h)); color: oklch(0.88 0.07 var(--h)); }
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "cv11", "ss01", "ss03";
+  }
+  body {
+    @apply bg-bg text-fg font-sans text-body;
+    min-height: 100dvh;
+  }
+  ::selection {
+    background: var(--primary-soft);
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+}
+
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  .glass {
+    background: var(--overlay);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}

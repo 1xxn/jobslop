@@ -8,13 +8,13 @@ from typing import Any
 
 import pytest
 
-from jobpilot.apply.planner import OpenQuestion
-from jobpilot.config import SearchConfig, Settings
-from jobpilot.db import Job, get_engine, session_scope
-from jobpilot.profile import Profile
+from jobslop.apply.planner import OpenQuestion
+from jobslop.config import SearchConfig, Settings
+from jobslop.db import Job, get_engine, session_scope
+from jobslop.profile import Profile
 
 SITE = Path(__file__).parent / "fixtures" / "site"
-EXAMPLE_PROFILE = Path(__file__).parents[1] / "src" / "jobpilot" / "examples" / "profile.yaml"
+EXAMPLE_PROFILE = Path(__file__).parent / "fixtures" / "profile.yaml"
 
 
 class _Site:
@@ -64,7 +64,7 @@ def config() -> SearchConfig:
 @pytest.fixture
 def profile(settings: Settings) -> Profile:
     p = Profile.load(EXAMPLE_PROFILE)
-    cv = settings.home / "Max_Mustermann_CV_SRE.pdf"
+    cv = settings.home / "Max_Mustermann_CV.pdf"
     cv.write_bytes(b"%PDF-1.4\n% Test-Lebenslauf\n")
     p.documents.cv = str(cv)
     p.documents.cover_letter = "none"
@@ -74,7 +74,7 @@ def profile(settings: Settings) -> Profile:
 def add_job(
     settings: Settings, url: str, company: str = "Beispiel GmbH", title: str = "DevOps Engineer"
 ) -> int:
-    from jobpilot.classify import fingerprint, match_key
+    from jobslop.classify import fingerprint, match_key
 
     with session_scope(settings.db_path) as s:
         job = Job(
