@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Apply – Site Reliability Engineer</title>
+<style>
+  .visually-hidden{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
+  .radio-label{display:inline-block;padding:4px 10px;border:1px solid #999;margin-right:6px;cursor:pointer}
+  .combo{border:1px solid #999;padding:6px;width:260px;cursor:pointer}
+  ul[role=listbox]{border:1px solid #999;margin:0;padding:0;list-style:none;width:260px}
+  ul[role=listbox] li{padding:6px;cursor:pointer}
+  .upload-btn{display:inline-block;padding:6px 12px;border:1px solid #333;cursor:pointer}
+  .field{margin:12px 0}
+</style></head>
+<body>
+<h1>Site Reliability Engineer</h1>
+<p>Berlin · Hybrid</p>
+<form id="app" novalidate>
+  <div class="field"><label for="first_name">First Name *</label><input id="first_name" name="first_name" required></div>
+  <div class="field"><label for="last_name">Last Name *</label><input id="last_name" name="last_name" required></div>
+  <div class="field"><label for="email">Email *</label><input id="email" name="email" type="email" required></div>
+  <div class="field"><label for="phone">Phone</label><input id="phone" name="phone" type="tel"></div>
+  <div class="field"><label for="li">LinkedIn Profile</label><input id="li" name="linkedin" type="url"></div>
+  <div class="field">
+    <span id="resume-label">Resume/CV *</span>
+    <label class="upload-btn" for="resume">Attach</label>
+    <input id="resume" name="resume" type="file" class="visually-hidden" aria-labelledby="resume-label" required>
+  </div>
+  <div class="field"><label for="country">Land *</label>
+    <select id="country" name="country" required><option value="">Bitte wählen</option><option>Deutschland</option><option>Österreich</option></select></div>
+  <fieldset class="field"><legend>Do you require visa sponsorship? *</legend>
+    <input type="radio" class="visually-hidden" name="visa" id="visa-yes" value="yes" required><label class="radio-label" for="visa-yes">Yes</label>
+    <input type="radio" class="visually-hidden" name="visa" id="visa-no" value="no"><label class="radio-label" for="visa-no">No</label>
+  </fieldset>
+  <div class="field"><label for="salary">Salary expectations (EUR, yearly) *</label><input id="salary" name="salary" type="number" required></div>
+  <div class="field">
+    <span id="hear-label">How did you hear about us? *</span>
+    <div class="combo" id="hear" role="combobox" aria-labelledby="hear-label" aria-haspopup="listbox" aria-expanded="false" tabindex="0">Select...</div>
+    <ul role="listbox" id="hear-list" hidden><li role="option">LinkedIn</li><li role="option">Company website</li><li role="option">Referral</li></ul>
+    <input type="hidden" name="hear" id="hear-value">
+  </div>
+  <div class="field"><label for="cover">Cover Letter</label><textarea id="cover" name="cover"></textarea></div>
+  <div class="field"><input type="checkbox" id="privacy" name="privacy" required><label for="privacy">I agree to the privacy policy *</label></div>
+  <div id="errors"></div>
+  <button type="submit">Submit application</button>
+</form>
+<script>
+  const combo = document.getElementById('hear'), list = document.getElementById('hear-list');
+  combo.addEventListener('click', () => { list.hidden = !list.hidden; combo.setAttribute('aria-expanded', String(!list.hidden)); });
+  list.querySelectorAll('li').forEach(li => li.addEventListener('click', () => {
+    combo.textContent = li.textContent; document.getElementById('hear-value').value = li.textContent; list.hidden = true;
+  }));
+  document.getElementById('app').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const data = {
+      first_name: f.first_name.value, last_name: f.last_name.value, email: f.email.value, phone: f.phone.value,
+      linkedin: f.linkedin.value, resume: f.resume.files.length ? f.resume.files[0].name : '', country: f.country.value,
+      visa: (f.querySelector('input[name=visa]:checked') || {}).value || '', salary: f.salary.value,
+      hear: document.getElementById('hear-value').value, cover: f.cover.value, privacy: f.privacy.checked,
+    };
+    const missing = ['first_name','last_name','email','resume','country','visa','salary','hear'].filter(k => !data[k]);
+    if (!data.privacy) missing.push('privacy');
+    if (missing.length) {
+      document.getElementById('errors').innerHTML = '<div role="alert">Please complete: ' + missing.join(', ') + '</div>';
+      return;
+    }
+    await fetch('/submit', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)});
+    document.body.innerHTML = '<h1>Thank you for applying!</h1><p>We have received your application and will be in touch.</p>';
+  });
+</script>
+</body>
+</html>

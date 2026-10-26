@@ -1,0 +1,59 @@
+# jobslop – Bewerberprofil
+# Am einfachsten im Dashboard pflegen (Einrichtung → Lebenslauf hochladen füllt fast alles automatisch).
+# Alles, was hier steht, darf der Agent in Formulare eintragen. Felder mit TODO gelten als unbekannt:
+# der Agent rät dort nie, sondern fragt dich beim ersten Formular und merkt sich die Antwort.
+
+personal:
+  first_name: ""
+  last_name: ""
+  email: ""
+  phone: ""                 # international, z. B. "+49 30 1234567"
+  street: ""                # optional, manche Formulare verlangen die Adresse
+  postal_code: ""
+  city: ""
+  country: Deutschland
+  linkedin: ""
+  github: ""
+  website: ""
+  date_of_birth: ""         # leer lassen = wird nicht angegeben
+  pronouns: ""
+
+work:
+  current_title: ""
+  current_employer: ""
+  years_experience_total: TODO        # z. B. "4"
+  years_experience_relevant: TODO     # z. B. "2"
+  notice_period: TODO                 # z. B. "3 Monate zum Monatsende"
+  earliest_start: TODO                # z. B. "01.02.2027"
+  salary_expectation_eur: TODO        # Jahresbrutto, z. B. "68000"
+  work_authorization_eu: true
+  requires_visa_sponsorship: false
+  nationality: ""
+  willing_to_relocate: false
+  workplace_preference: ""            # z. B. "Hybrid in Berlin oder Remote in Deutschland"
+  security_clearance: ""
+  drivers_license: ""
+
+summary: ""
+skills: []
+languages: []
+experience: []
+education: []
+certifications: []
+
+documents:
+  cv: ""                              # Dateiname im Ordner documents/ oder absoluter Pfad
+  cv_en: ""                           # optional: englischer Lebenslauf für englischsprachige Formulare
+  certificates: []                    # z. B. [documents/zeugnis.pdf]
+  cover_letter: auto                  # auto = pro Stelle erzeugen, none = nie, oder Pfad zu einer PDF
+
+preferences:
+  cover_letter_language: auto         # auto | de | en
+  diversity_questions: decline        # decline = "Keine Angabe" wählen | answer
+  consent_privacy: true
+  consent_talent_pool: false
+  newsletter: false
+  how_did_you_hear: Karriereseite des Unternehmens
+  tone: sachlich, freundlich, konkret, ohne Floskeln
+
+standard_answers: {}                  # feste Antworten auf wiederkehrende Fragen, z. B. "Warum wechseln?": "…"
