@@ -1,0 +1,1 @@
+"""Lokales Web-Dashboard."""

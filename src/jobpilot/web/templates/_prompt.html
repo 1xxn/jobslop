@@ -1,0 +1,45 @@
+{% macro prompt_card(p) %}
+<div class="card prompt">
+  <div class="mono muted">Bewerbung #{{ p.application_id }} · {{ p.payload.title }}</div>
+  {% if p.kind == 'questions' %}
+    <h2>Das Formular fragt nach Angaben, die nicht im Profil stehen</h2>
+    <form method="post" action="/prompts/{{ p.id }}" style="display:grid;gap:10px">
+      {% for q in p.payload.questions %}
+        <label style="display:grid;gap:4px">
+          <span><b>{{ q.question }}</b> <span class="muted">· {{ q.why }}</span></span>
+          {% if q.options %}
+            <select name="q_{{ q.field_id }}"><option value="">– wählen –</option>
+              {% for o in q.options %}<option>{{ o }}</option>{% endfor %}</select>
+          {% else %}
+            <input name="q_{{ q.field_id }}" autocomplete="off">
+          {% endif %}
+        </label>
+      {% endfor %}
+      <div class="actions"><button class="primary">Antworten speichern & weiter</button>
+        <button name="skip" value="1">Überspringen (Bewerbung parken)</button></div>
+    </form>
+  {% elif p.kind == 'confirm' %}
+    <h2>Formular ist ausgefüllt – absenden?</h2>
+    <p class="muted">Prüfe das Formular im Browserfenster. Felder mit geringer Sicherheit sind gelb markiert.</p>
+    <div class="tablewrap"><table>
+      <tr><th>Feld</th><th>Wert</th><th>Quelle</th></tr>
+      {% for r in p.payload.rows %}
+        <tr {% if r.confidence == 'low' %}style="background:color-mix(in srgb,var(--warn) 12%,transparent)"{% endif %}>
+          <td>{{ r.label[:90] }}</td><td>{{ (r.value|string)[:200] }}</td><td class="mono">{{ r.source }} {{ r.confidence }}</td></tr>
+      {% endfor %}
+    </table></div>
+    <form method="post" action="/prompts/{{ p.id }}" class="actions">
+      <button class="primary" name="decision" value="submit">Absenden</button>
+      <button name="decision" value="manual">Ich korrigiere und sende selbst</button>
+      <button class="danger" name="decision" value="reject">Nicht absenden</button>
+    </form>
+  {% else %}
+    <h2>Du bist dran</h2>
+    <p>{{ p.payload.message }}</p>
+    <form method="post" action="/prompts/{{ p.id }}" class="actions">
+      <button class="primary">Erledigt, weiter</button>
+      <button class="danger" name="abort" value="1">Abbrechen</button>
+    </form>
+  {% endif %}
+</div>
+{% endmacro %}
