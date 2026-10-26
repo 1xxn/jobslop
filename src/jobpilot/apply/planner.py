@@ -10,7 +10,8 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
 
-from ..llm import LLM, image_block, pdf_block
+from ..cvtext import cv_text
+from ..llm import DYNAMIC_BOUNDARY, LLM, file_block, image_block
 from ..profile import TODO, Profile
 from .extract import PageState
 
@@ -147,6 +148,11 @@ class LLMPlanner:
         self.answers = list(answers)
         prefs = profile.preferences
         standard = "\n".join(f"- {k}: {v}" for k, v in profile.standard_answers.items()) or "(keine)"
+        cv = profile.cv_path(profile_base)
+        self.cv_text = cv_text(cv)
+        # Eingescanntes PDF ohne Textebene: Claude liest die Datei bei jedem Schritt selbst (langsamer).
+        self.cv_file: Path | None = cv if (cv and cv.exists() and not self.cv_text) else None
+        cv_section = self.cv_text or "(siehe beigefügte Lebenslauf-Datei)"
         self._base_system = (
             SYSTEM_RULES
             + "\n\n# Profil\n"
@@ -156,18 +162,16 @@ class LLMPlanner:
             f"anschreiben_automatisch={cover_letter_auto}, englischer_cv={'ja' if profile.documents.cv_en else 'nein'}"
             + "\n\n# Standardantworten\n"
             + standard
+            + "\n\n# Lebenslauf (Text)\n"
+            + cv_section
         )
-        cv = profile.cv_path(profile_base)
-        self.cv_block: dict[str, Any] | None = None
-        if cv and cv.exists() and cv.suffix.lower() == ".pdf":
-            self.cv_block = pdf_block(cv)
-            self.cv_block["cache_control"] = {"type": "ephemeral"}
 
     @property
     def system(self) -> str:
+        # Alles vor der Grenze ist stabil und wird von Claude Code gecacht; die Antwortbank wächst während eines Laufs.
         return (
             self._base_system
-            + "\n\n# Antwortbank (vom Bewerber bestätigt)\n"
+            + f"\n\n{DYNAMIC_BOUNDARY}\n\n# Antwortbank (vom Bewerber bestätigt)\n"
             + _answer_bank_text(self.answers)
         )
 
@@ -177,8 +181,8 @@ class LLMPlanner:
     async def plan(self, data: PlanInput) -> PagePlan:
         job = data.job
         content: list[dict[str, Any]] = []
-        if self.cv_block:
-            content.append(self.cv_block)
+        if self.cv_file:
+            content.append(file_block(self.cv_file))
         history = "\n".join(f"- {h}" for h in data.history[-12:]) or "- (erster Schritt)"
         failures = "\n".join(f"- {f}" for f in data.failures) or "- keine"
         errors = "\n".join(f"- {e}" for e in data.state.errors[:15]) or "- keine"
@@ -199,7 +203,10 @@ class LLMPlanner:
             content.append(image_block(shot))
         if data.screenshots:
             content.append(
-                {"type": "text", "text": "Die Screenshots zeigen die Seite mit eingezeichneten Element-IDs."}
+                {
+                    "type": "text",
+                    "text": "Die Screenshots (screenshot-*.jpg) zeigen die Seite mit eingezeichneten Element-IDs.",
+                }
             )
         return await self.llm.parse(
             PagePlan, system=self.system, content=content, model=self.model, max_tokens=6000
@@ -263,7 +270,7 @@ def profile_value(profile: Profile, path: str) -> str:
 
 
 class HeuristicPlanner:
-    """Deterministischer Planer für Standardfelder. Wird ohne API-Schlüssel und in Tests verwendet.
+    """Deterministischer Planer für Standardfelder. Wird ohne Claude (--offline) und in Tests verwendet.
 
     Er beantwortet nur, was eindeutig im Profil steht, und stellt für alles andere Rückfragen.
     """

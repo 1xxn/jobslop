@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import Counter
 from dataclasses import dataclass, field
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Session
 from ..classify import classify, content_hash, fingerprint, match_key, score, title_allowed, where_of
 from ..config import SearchConfig, Settings
 from ..db import CrawlRun, Job, JobSnapshot, session_scope, utcnow
-from ..llm import LLM
+from ..llm import LLM, LLMLimitReached
 from ..profile import Profile
 from .base import RawPosting, make_client
 from .render import PageRenderer
@@ -283,6 +284,17 @@ Profil des Bewerbers:
 """
 
 
+class AssessedJob(JobAssessment):
+    job_id: int
+
+
+class AssessmentBatch(BaseModel):
+    items: list[AssessedJob]
+
+
+ENRICH_BATCH = 6  # mehrere Stellen pro Claude-Aufruf: schont das Abo-Kontingent
+
+
 async def enrich_jobs(
     settings: Settings, config: SearchConfig, llm: LLM, profile: Profile, job_ids: list[int]
 ) -> int:
@@ -291,20 +303,43 @@ async def enrich_jobs(
         jobs = [
             (j.id, j.company, j.title, j.location, j.description)
             for j in s.execute(select(Job).where(Job.id.in_(job_ids))).scalars()
+            if j.description
         ]
+    batches = [jobs[i : i + ENRICH_BATCH] for i in range(0, len(jobs), ENRICH_BATCH)]
+    limit_hit = asyncio.Event()
 
-    async def assess(item: tuple[int, str, str, str, str]) -> tuple[int, JobAssessment]:
-        jid, company, title, location, desc = item
-        result = await llm.parse(
-            JobAssessment,
-            system=system,
-            content=f"Firma: {company}\nTitel: {title}\nOrt: {location}\n\nBeschreibung:\n{desc[:14000]}",
-            model=settings.llm_model_fast,
-            max_tokens=1200,
+    async def assess(batch: list[tuple[int, str, str, str, str]]) -> list[tuple[int, JobAssessment]]:
+        if limit_hit.is_set():
+            return []
+        parts = [
+            f"## job_id={jid}\nFirma: {company}\nTitel: {title}\nOrt: {location}\n\nBeschreibung:\n{desc[:6000]}"
+            for jid, company, title, location, desc in batch
+        ]
+        prompt = (
+            f"Bewerte jede der folgenden {len(batch)} Stellen einzeln. Gib für jede genau ein Element in items "
+            "zurück, mit ihrer job_id.\n\n" + "\n\n---\n\n".join(parts)
         )
-        return jid, result
+        try:
+            result = await llm.parse(
+                AssessmentBatch, system=system, content=prompt, model=settings.llm_model_fast
+            )
+        except LLMLimitReached:
+            limit_hit.set()
+            raise
+        wanted = {b[0] for b in batch}
+        return [(item.job_id, item) for item in result.items if item.job_id in wanted]
 
-    results = await gather_limited([assess(j) for j in jobs if j[4]], limit=5)
+    nested = await gather_limited([assess(b) for b in batches], limit=max(1, settings.claude_parallel))
+    if limit_hit.is_set():
+        log.warning(
+            "Claude-Nutzungslimit erreicht – restliche Stellen bleiben unbewertet (später `jobpilot jobs enrich`)."
+        )
+    results: list[Any] = []
+    for res in nested:
+        if isinstance(res, BaseException):
+            results.append(res)
+        else:
+            results.extend(res)
     count = 0
     with session_scope(settings.db_path) as s:
         for res in results:

@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from ..llm import LLM
+from ..llm import LLM, file_block
 from ..profile import Profile
 from .planner import JobContext
 
@@ -34,20 +34,33 @@ Regeln:
 
 Profil:
 {profile}
+
+Lebenslauf:
+{cv}
 """
 
 
 async def write_cover_letter(
-    llm: LLM, profile: Profile, job: JobContext, language_pref: str, cv_block: Any = None
+    llm: LLM,
+    profile: Profile,
+    job: JobContext,
+    language_pref: str,
+    cv_text: str = "",
+    cv_file: Path | None = None,
 ) -> CoverLetter:
     if language_pref in ("de", "en"):
         rule = "Deutsch" if language_pref == "de" else "Englisch"
     else:
         rule = "Sprache der Stellenanzeige (Deutsch oder Englisch)"
-    system = SYSTEM.format(tone=profile.preferences.tone, language_rule=rule, profile=profile.to_prompt())
+    system = SYSTEM.format(
+        tone=profile.preferences.tone,
+        language_rule=rule,
+        profile=profile.to_prompt(),
+        cv=cv_text or ("(siehe beigefügte Datei)" if cv_file else "(nicht verfügbar)"),
+    )
     content: list[dict[str, Any]] = []
-    if cv_block:
-        content.append(cv_block)
+    if cv_file and not cv_text:
+        content.append(file_block(cv_file))
     content.append(
         {
             "type": "text",
