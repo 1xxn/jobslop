@@ -68,15 +68,6 @@ export function roleClass(category: string, roles: string[]): string {
   return `role-${idx < 0 ? 7 : idx % 7}`;
 }
 
-export function initials(name: string): string {
-  return name
-    .split(/[\s&,.-]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? "")
-    .join("");
-}
-
 export function hostOf(url: string): string {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
