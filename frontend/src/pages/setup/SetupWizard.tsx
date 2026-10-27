@@ -1,29 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  ArrowLeft,
-  ArrowRight,
-  Bot,
-  Check,
-  CircleAlert,
-  CircleCheck,
-  Download,
-  FileText,
-  Globe,
-  LogIn,
-  MapPin,
-  Rocket,
-  Search,
-  ShieldCheck,
-  Sparkles,
-  TerminalSquare,
-  UserRound,
-} from "lucide-react";
+import { Check } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
-import { Logo } from "@/components/domain";
+import { Logo, StatusGlyph } from "@/components/domain";
 import { ChipsInput, Segmented, SwitchRow } from "@/components/ui/controls";
-import { Badge, Button, Card, CardBody, Kbd, Progress } from "@/components/ui/primitives";
+import { Button, SectionBody, Kbd, Progress } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { type Lang, useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
@@ -33,13 +15,13 @@ import { DocumentsCard, ProfileForm } from "../settings/ProfileForm";
 import { RolesEditor } from "../settings/SearchForm";
 import { StatusLine } from "../settings/sections";
 
-const STEPS: { id: string; title: MessageKey; icon: ReactNode }[] = [
-  { id: "welcome", title: "setup.step_welcome", icon: <Sparkles /> },
-  { id: "claude", title: "setup.step_claude", icon: <Bot /> },
-  { id: "cv", title: "setup.step_cv", icon: <FileText /> },
-  { id: "profile", title: "setup.step_profile", icon: <UserRound /> },
-  { id: "search", title: "setup.step_search", icon: <Search /> },
-  { id: "finish", title: "setup.step_finish", icon: <Rocket /> },
+const STEPS: { id: string; title: MessageKey }[] = [
+  { id: "welcome", title: "setup.step_welcome" },
+  { id: "claude", title: "setup.step_claude" },
+  { id: "cv", title: "setup.step_cv" },
+  { id: "profile", title: "setup.step_profile" },
+  { id: "search", title: "setup.step_search" },
+  { id: "finish", title: "setup.step_finish" },
 ];
 
 export function SetupWizard() {
@@ -69,26 +51,22 @@ export function SetupWizard() {
   return (
     <div className="min-h-dvh bg-paper">
       <div className="mx-auto grid min-h-dvh max-w-6xl lg:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="hidden border-r border-line px-8 py-10 lg:block">
+        <aside className="hidden border-r border-line px-8 py-10 lg:block" aria-label={t("setup.steps")}>
           <Logo />
-          <ol className="mt-12 space-y-1">
+          <ol className="mt-10 grid gap-0.5">
             {STEPS.map((s, i) => (
               <li
                 key={s.id}
+                aria-current={i === step ? "step" : undefined}
                 className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-body font-medium",
-                  i === step ? "bg-accent-soft text-accent" : i < step ? "text-ink" : "text-ink-3",
+                  "flex items-center justify-between gap-2 py-1.5 pl-3 text-body",
+                  i === step
+                    ? "font-semibold text-ink shadow-[inset_2px_0_0_var(--accent)]"
+                    : cn("shadow-[inset_2px_0_0_var(--line)]", i < step ? "text-ink-2" : "text-ink-3"),
                 )}
               >
-                <span
-                  className={cn(
-                    "grid size-6 shrink-0 place-items-center rounded-full text-small [&_svg]:size-3.5",
-                    i < step ? "bg-sunken text-ink-2" : i === step ? "bg-accent text-on-accent" : "bg-sunken text-ink-3",
-                  )}
-                >
-                  {i < step ? <Check strokeWidth={3} /> : i + 1}
-                </span>
                 {t(s.title)}
+                {i < step && <Check className="size-3.5 text-ink-3" aria-label={t("setup.step_done")} />}
               </li>
             ))}
           </ol>
@@ -109,14 +87,12 @@ export function SetupWizard() {
             {current.id === "finish" && <FinishStep />}
           </div>
           {current.id !== "finish" && (
-            <div className="sticky bottom-0 -mx-5 mt-10 flex items-center justify-between gap-3 border-t border-line bg-paper px-5 py-4 backdrop-blur-xl sm:-mx-10 sm:px-10">
+            <div className="sticky bottom-0 -mx-5 mt-10 flex items-center justify-between gap-3 border-t border-line bg-paper px-5 py-3 sm:-mx-10 sm:px-10">
               <Button variant="quiet" onClick={() => setStep(step - 1)} disabled={step === 0}>
-                <ArrowLeft />
                 {t("common.back")}
               </Button>
-              <Button variant="primary" size="lg" onClick={next} loading={saveSearch.isPending}>
+              <Button variant="primary" onClick={next} loading={saveSearch.isPending}>
                 {step === 0 ? t("setup.start") : t("common.next")}
-                <ArrowRight />
               </Button>
             </div>
           )}
@@ -129,41 +105,40 @@ export function SetupWizard() {
 function StepTitle({ title, text }: { title: ReactNode; text?: ReactNode }) {
   return (
     <div className="mb-8">
-      <h1 className="text-title font-bold tracking-[-0.025em] text-balance sm:text-display">{title}</h1>
-      {text && <p className="mt-3 max-w-2xl text-heading font-normal leading-relaxed text-ink-2">{text}</p>}
+      <h1 className="text-title font-semibold tracking-[-0.015em] text-balance sm:text-display">{title}</h1>
+      {text && <p className="mt-2 max-w-prose text-read text-ink-2">{text}</p>}
     </div>
   );
 }
 
 function Welcome() {
   const { t, lang, setLang } = useI18n();
-  const features: { icon: ReactNode; title: MessageKey; text: MessageKey }[] = [
-    { icon: <Search />, title: "setup.f_find", text: "setup.f_find_text" },
-    { icon: <Sparkles />, title: "setup.f_rank", text: "setup.f_rank_text" },
-    { icon: <ShieldCheck />, title: "setup.f_apply", text: "setup.f_apply_text" },
+  const features: { title: MessageKey; text: MessageKey }[] = [
+    { title: "setup.f_find", text: "setup.f_find_text" },
+    { title: "setup.f_rank", text: "setup.f_rank_text" },
+    { title: "setup.f_apply", text: "setup.f_apply_text" },
   ];
   return (
     <>
       <Segmented<Lang>
-        size="sm"
         className="mb-8"
+        label={t("appearance.language")}
         value={lang}
         onChange={setLang}
         options={[
-          { value: "de", label: "Deutsch", icon: <Globe /> },
+          { value: "de", label: "Deutsch" },
           { value: "en", label: "English" },
         ]}
       />
       <StepTitle title={t("setup.welcome_title")} text={t("setup.welcome_text")} />
-      <div className="grid gap-3 md:grid-cols-3">
+      <dl className="max-w-2xl border-t border-line">
         {features.map((f) => (
-          <Card key={f.title} className="p-5">
-            <span className="grid size-10 place-items-center rounded-lg bg-accent-soft text-accent [&_svg]:size-5">{f.icon}</span>
-            <h3 className="mt-4 text-heading font-semibold">{t(f.title)}</h3>
-            <p className="mt-1 text-meta leading-relaxed text-ink-2">{t(f.text)}</p>
-          </Card>
+          <div key={f.title} className="grid gap-1 border-b border-line py-3 sm:grid-cols-[12rem_minmax(0,1fr)] sm:gap-4">
+            <dt className="font-semibold">{t(f.title)}</dt>
+            <dd className="text-meta text-ink-2">{t(f.text)}</dd>
+          </div>
         ))}
-      </div>
+      </dl>
       <p className="mt-6 text-meta text-ink-2">{t("setup.welcome_time")}</p>
     </>
   );
@@ -181,22 +156,16 @@ function ClaudeStep() {
   return (
     <>
       <StepTitle title={t("setup.claude_title")} text={t("setup.claude_text")} />
-      <Card>
-        <CardBody className="pt-5">
+      <section>
+        <SectionBody className="pt-5">
           {!c ? (
             <p className="text-meta text-ink-2">{t("setup.checking")}</p>
           ) : c.ok ? (
-            <div className="flex items-center gap-4">
-              <span className="grid size-12 place-items-center rounded-full bg-sunken text-positive">
-                <CircleCheck className="size-6" />
-              </span>
-              <div>
-                <div className="text-heading font-semibold">{t("setup.claude_ok")}</div>
-                <div className="text-meta text-ink-2">
-                  {c.account} {c.plan && <Badge tone="accent">{c.plan}</Badge>} · Claude Code {c.version}
-                </div>
-              </div>
-            </div>
+            <StatusLine
+              ok
+              title={t("setup.claude_ok")}
+              text={[c.account, c.plan, `Claude Code ${c.version}`].filter(Boolean).join(" · ")}
+            />
           ) : !c.installed ? (
             <div className="space-y-4">
               <StatusLine ok={false} title={t("setup.claude_not_installed")} text={t("setup.claude_install_text")} />
@@ -206,7 +175,6 @@ function ClaudeStep() {
                   : "curl -fsSL https://claude.ai/install.sh | bash"}
               </pre>
               <Button variant="primary" onClick={() => install.mutate()} loading={install.isPending}>
-                <TerminalSquare />
                 {t("setup.claude_install_btn")}
               </Button>
             </div>
@@ -221,17 +189,13 @@ function ClaudeStep() {
                 </li>
               </ol>
               <Button variant="primary" onClick={() => login.mutate()} loading={login.isPending}>
-                <LogIn />
                 {t("system.claude_login")}
               </Button>
             </div>
           )}
-        </CardBody>
-      </Card>
-      <p className="mt-4 flex items-start gap-2 text-meta text-ink-2">
-        <CircleAlert className="mt-0.5 size-4 shrink-0" />
-        {t("setup.claude_note")}
-      </p>
+        </SectionBody>
+      </section>
+      <p className="mt-4 max-w-prose text-meta text-ink-2">{t("setup.claude_note")}</p>
     </>
   );
 }
@@ -245,8 +209,8 @@ function CvStep() {
       <StepTitle title={t("setup.cv_title")} text={t("setup.cv_text")} />
       <DocumentsCard importOnUpload />
       {name && (
-        <p className="mt-4 flex items-center gap-2 text-body text-positive">
-          <CircleCheck className="size-4" />
+        <p className="mt-4 flex items-center gap-2 text-body">
+          <StatusGlyph status="offer" />
           {t("setup.cv_imported", { name })}
         </p>
       )}
@@ -293,34 +257,31 @@ function SearchStep({ draft, onDraft }: { draft: SearchConfig | null; onDraft: (
               onClick={() => setChosen(on ? chosen.filter((x) => x !== p.id) : [...chosen, p.id])}
               aria-pressed={on}
               className={cn(
-                "rounded-lg border p-4 text-left transition-all",
-                on ? "border-accent bg-accent-soft ring-1 ring-accent" : "border-line bg-raised hover:bg-sunken",
+                "rounded-md border p-3 text-left transition-colors duration-[120ms]",
+                on ? "border-accent bg-accent-soft" : "border-line-input hover:bg-sunken",
               )}
             >
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <span className="text-body font-semibold">{p.label[lang]}</span>
-                {on && <CircleCheck className="size-5 text-accent" />}
+                {on && <Check className="size-4 shrink-0 text-accent" aria-hidden />}
               </div>
               <div className="mt-1 line-clamp-2 text-meta text-ink-2">{p.roles.map((r) => r.name).join(" · ")}</div>
             </button>
           );
         })}
       </div>
-      <Card className="mt-6">
-        <CardBody className="space-y-4 pt-5">
+      <section className="mt-6">
+        <SectionBody className="space-y-4 pt-5">
           <div>
-            <div className="mb-1.5 flex items-center gap-2 text-meta font-medium">
-              <MapPin className="size-4 text-ink-2" />
-              {t("setup.cities")}
-            </div>
+            <div className="mb-1.5 text-meta font-medium">{t("setup.cities")}</div>
             <ChipsInput value={cities} onChange={setCities} placeholder="Berlin, Hamburg, …" />
           </div>
           <div className="divide-y divide-line">
             <SwitchRow title={t("search.remote")} description={t("search.remote_hint")} checked={remote} onCheckedChange={setRemote} />
             <SwitchRow title={t("setup.no_leadership")} description={t("setup.no_leadership_hint")} checked={leadership} onCheckedChange={setLeadership} />
           </div>
-        </CardBody>
-      </Card>
+        </SectionBody>
+      </section>
       {draft && (
         <div className="mt-6">
           <RolesEditor config={draft} onChange={onDraft} />
@@ -353,8 +314,8 @@ function FinishStep() {
   return (
     <>
       <StepTitle title={t("setup.finish_title")} text={t("setup.finish_text")} />
-      <Card>
-        <CardBody className="divide-y divide-line pt-2">
+      <section>
+        <SectionBody className="divide-y divide-line pt-2">
           <StatusLine
             ok={!!s?.claude.ok}
             title="Claude Code"
@@ -372,17 +333,15 @@ function FinishStep() {
             action={
               s && !s.browser.ok && (
                 <Button size="sm" variant="primary" onClick={() => install.mutate()} loading={s.browser_install.running}>
-                  <Download />
                   {t("system.browser_install")}
                 </Button>
               )
             }
           />
-        </CardBody>
-      </Card>
+        </SectionBody>
+      </section>
       <div className="mt-8 flex flex-wrap gap-3">
-        <Button variant="primary" size="lg" onClick={() => done.mutate()} loading={done.isPending}>
-          <Rocket />
+        <Button variant="primary" onClick={() => done.mutate()} loading={done.isPending}>
           {t("setup.finish_btn")}
         </Button>
       </div>

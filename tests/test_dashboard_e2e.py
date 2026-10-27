@@ -86,8 +86,10 @@ async def test_dashboard_end_to_end(dashboard):
             await page.get_by_text("Rückgängig gemacht").wait_for()
             await page.wait_for_selector(f"#{first}")
 
-            # Einstellungen speichern: LinkedIn abschalten bleibt nach dem Neuladen aus
-            await page.goto(f"{base}/settings/search")
+            # Einstellungen speichern: LinkedIn abschalten (Suche › Quellen) bleibt nach dem Neuladen aus
+            await page.goto(f"{base}/settings/profile")
+            assert await page.get_by_label("Vorname", exact=True).input_value() == "Max"
+            await page.goto(f"{base}/settings/sources")
             linkedin = page.get_by_role("switch", name="LinkedIn")
             await linkedin.wait_for()
             assert await linkedin.get_attribute("aria-checked") == "true"
