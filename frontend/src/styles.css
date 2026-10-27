@@ -139,8 +139,6 @@
 .role-6 { --role: oklch(0.6 0.12 190); }
 .role-7 { --role: oklch(0.55 0.02 270); }
 
-.avatar { background: var(--sunken); color: var(--ink-2); }
-
 @layer base {
   html {
     -webkit-font-smoothing: antialiased;

@@ -1,229 +1,206 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarClock, Ellipsis, ExternalLink, Handshake, MessagesSquare, Send, ThumbsDown } from "lucide-react";
-import { type DragEvent, type ReactNode, useState } from "react";
+import { Ellipsis } from "lucide-react";
+import { type DragEvent, type KeyboardEvent, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
-import { CompanyAvatar, StatusGlyph } from "@/components/domain";
-import { Dialog, DialogContent, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/overlays";
-import { Button, EmptyState, Field, Input, Skeleton, Textarea } from "@/components/ui/primitives";
+import { StatusGlyph } from "@/components/domain";
+import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/overlays";
+import { EmptyState, Kbd, Skeleton } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
+import { followUpDue } from "@/lib/applications";
 import { useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
 import type { ApplicationSummary } from "@/lib/types";
-import { cn, formatDate, formatRelative, parseDate } from "@/lib/utils";
+import { cn, formatDate, formatRelative } from "@/lib/utils";
 
 type Stage = "applied" | "interview" | "offer" | "rejected";
-const STAGE_STATUS: Record<Stage, string> = { applied: "submitted", interview: "interview", offer: "offer", rejected: "rejected" };
-const STAGES: { id: Stage; icon: ReactNode }[] = [
-  { id: "applied", icon: <Send /> },
-  { id: "interview", icon: <MessagesSquare /> },
-  { id: "offer", icon: <Handshake /> },
-  { id: "rejected", icon: <ThumbsDown /> },
-];
+const STAGES: Stage[] = ["applied", "interview", "offer", "rejected"];
+const STAGE_STATUS: Record<Stage, string> = {
+  applied: "submitted",
+  interview: "interview",
+  offer: "offer",
+  rejected: "rejected",
+};
 
-/** Bewerbungen ab „gesendet“ als Board – zweite Ansicht der Seite Bewerbungen. */
+/**
+ * Bewerbungen ab „gesendet“ als Board – zweite Ansicht der Seite Bewerbungen. Verschieben per Ziehen, per Menü oder
+ * mit Alt+Pfeil auf einer fokussierten Karte; Enter öffnet die Bewerbung.
+ */
 export function PipelineBoard() {
-  const { t, lang } = useI18n();
+  const { t } = useI18n();
   const qc = useQueryClient();
   const pipeline = useQuery({ queryKey: ["pipeline"], queryFn: api.pipeline });
   const [dragOver, setDragOver] = useState<Stage | null>(null);
-  const [editing, setEditing] = useState<ApplicationSummary | null>(null);
   const move = useMutation({
-    mutationFn: ({ id, stage }: { id: number; stage: Stage }) => api.patchApplication(id, { status: STAGE_STATUS[stage] }),
-    onSuccess: (_r, { stage }) => {
-      toast.success(t("pipeline.moved", { stage: t(`pipeline.${stage}` as MessageKey) }));
-      qc.invalidateQueries({ queryKey: ["pipeline"] });
-      qc.invalidateQueries({ queryKey: ["stats"] });
+    mutationFn: ({ id, stage }: { id: number; stage: Stage; from: Stage }) =>
+      api.patchApplication(id, { status: STAGE_STATUS[stage] }),
+    onSuccess: (_r, { id, stage, from }) => {
+      toast(t("pipeline.moved", { stage: t(`pipeline.${stage}` as MessageKey) }), {
+        action: {
+          label: t("common.undo"),
+          onClick: () => api.patchApplication(id, { status: STAGE_STATUS[from] }).then(refresh),
+        },
+      });
+      refresh();
+      // Fokus folgt der Karte in die neue Spalte
+      requestAnimationFrame(() => document.getElementById(`card-${id}`)?.focus());
     },
     onError: (e: Error) => toast.error(e.message),
   });
-
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["pipeline"] });
+    qc.invalidateQueries({ queryKey: ["applications"] });
+    qc.invalidateQueries({ queryKey: ["stats"] });
+  };
+  const stageOf = (id: number) => STAGES.find((s) => pipeline.data?.stages[s].some((a) => a.id === id));
+  const moveTo = (id: number, stage: Stage) => {
+    const from = stageOf(id);
+    if (from && from !== stage) move.mutate({ id, stage, from });
+  };
   const onDrop = (e: DragEvent, stage: Stage) => {
     e.preventDefault();
     setDragOver(null);
     const id = Number(e.dataTransfer.getData("text/plain"));
-    if (id) move.mutate({ id, stage });
+    if (id) moveTo(id, stage);
   };
-  const due = pipeline.data?.follow_ups_due ?? [];
-  const total = pipeline.data ? Object.values(pipeline.data.stages).reduce((n, list) => n + list.length, 0) : 0;
+
+  if (pipeline.isLoading) {
+    return (
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {STAGES.map((s) => (
+          <Skeleton key={s} className="h-64 rounded-lg" />
+        ))}
+      </div>
+    );
+  }
+  const total = pipeline.data ? STAGES.reduce((n, s) => n + pipeline.data.stages[s].length, 0) : 0;
+  if (!total) return <EmptyState title={t("pipeline.empty")} description={t("pipeline.empty_hint")} />;
 
   return (
     <>
-      {due.length > 0 && (
-        <div className="mb-6">
-          <h2 className="text-body font-semibold text-accent">{t("pipeline.due", { n: due.length })}</h2>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {due.map((a) => (
-              <button
-                key={a.id}
-                type="button"
-                onClick={() => setEditing(a)}
-                className="rounded-md border border-line-input px-2.5 py-1 text-meta hover:bg-sunken"
-              >
-                {a.company} · {formatRelative(a.follow_up_at, lang)}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {pipeline.isLoading ? (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {STAGES.map((s) => (
-            <Skeleton key={s.id} className="h-80 rounded-lg" />
-          ))}
-        </div>
-      ) : total === 0 ? (
-        <EmptyState title={t("pipeline.empty")} description={t("pipeline.empty_hint")} />
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {STAGES.map((stage) => {
-            const cards = pipeline.data?.stages[stage.id] ?? [];
-            return (
-              <section
-                key={stage.id}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setDragOver(stage.id);
-                }}
-                onDragLeave={() => setDragOver(null)}
-                onDrop={(e) => onDrop(e, stage.id)}
-                className={cn(
-                  "flex min-h-64 flex-col rounded-lg p-1 transition-colors",
-                  dragOver === stage.id && "bg-accent-soft",
-                )}
-                aria-label={t(`pipeline.${stage.id}` as MessageKey)}
-              >
-                <header className="mb-2 flex items-center gap-2 border-b border-line px-1 pt-1 pb-2">
-                  <StatusGlyph status={STAGE_STATUS[stage.id]} />
-                  <h2 className="text-body font-semibold">{t(`pipeline.${stage.id}` as MessageKey)}</h2>
-                  <span className="tabular ml-auto text-small text-ink-3">{cards.length}</span>
-                </header>
-                <div className="flex flex-col gap-2">
-                  {cards.map((a) => (
-                    <PipelineCard key={a.id} app={a} onEdit={() => setEditing(a)} onMove={(s) => move.mutate({ id: a.id, stage: s })} />
-                  ))}
-                </div>
-              </section>
-            );
-          })}
-        </div>
-      )}
-      {editing && <EditDialog app={editing} onClose={() => setEditing(null)} />}
+      <p className="mb-3 text-meta text-ink-3">
+        {t("pipeline.keyboard_hint")} <Kbd>Alt</Kbd> + <Kbd>←</Kbd> <Kbd>→</Kbd>
+      </p>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {STAGES.map((stage, i) => {
+          const cards = pipeline.data?.stages[stage] ?? [];
+          const id = `stage-${stage}`;
+          return (
+            <section
+              key={stage}
+              aria-labelledby={id}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(stage);
+              }}
+              onDragLeave={() => setDragOver(null)}
+              onDrop={(e) => onDrop(e, stage)}
+              className={cn("flex min-h-48 flex-col rounded-lg p-1 transition-colors", dragOver === stage && "bg-accent-soft")}
+            >
+              <header className="mb-2 flex items-center gap-2 border-b border-line px-1 pt-1 pb-2">
+                <StatusGlyph status={STAGE_STATUS[stage]} />
+                <h2 id={id} className="text-body font-semibold">
+                  {t(`pipeline.${stage}` as MessageKey)}
+                </h2>
+                <span className="tabular ml-auto text-small text-ink-3">{cards.length}</span>
+              </header>
+              <ul className="flex flex-col gap-2">
+                {cards.map((a) => (
+                  <li key={a.id}>
+                    <BoardCard
+                      app={a}
+                      stage={stage}
+                      onMove={(s) => moveTo(a.id, s)}
+                      prev={STAGES[i - 1]}
+                      next={STAGES[i + 1]}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          );
+        })}
+      </div>
     </>
   );
 }
 
-function PipelineCard({
+function BoardCard({
   app,
-  onEdit,
+  stage,
   onMove,
+  prev,
+  next,
 }: {
   app: ApplicationSummary;
-  onEdit: () => void;
+  stage: Stage;
   onMove: (s: Stage) => void;
+  prev?: Stage;
+  next?: Stage;
 }) {
   const { t, lang } = useI18n();
   const navigate = useNavigate();
-  const due = parseDate(app.follow_up_at);
-  const overdue = due && due.getTime() < Date.now();
+  const due = followUpDue(app);
+  const open = () => navigate(`/applications/${app.id}`);
+  const onKey = (e: KeyboardEvent) => {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === "Enter") open();
+    else if (e.altKey && e.key === "ArrowLeft" && prev) {
+      e.preventDefault();
+      onMove(prev);
+    } else if (e.altKey && e.key === "ArrowRight" && next) {
+      e.preventDefault();
+      onMove(next);
+    }
+  };
   return (
     <article
+      id={`card-${app.id}`}
+      tabIndex={0}
       draggable
+      aria-label={`${app.company}, ${app.title}`}
       onDragStart={(e) => e.dataTransfer.setData("text/plain", String(app.id))}
-      className="group cursor-grab rounded-md border border-line bg-raised p-3 transition-colors hover:border-line-input active:cursor-grabbing"
+      onClick={open}
+      onKeyDown={onKey}
+      className="group cursor-pointer rounded-md border border-line bg-raised p-3 transition-colors hover:border-line-input active:cursor-grabbing"
     >
-      <div className="flex items-start gap-2.5">
-        <CompanyAvatar name={app.company} size={30} />
+      <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <button type="button" onClick={onEdit} className="block w-full text-left">
-            <div className="truncate text-body font-semibold">{app.company}</div>
-            <div className="line-clamp-2 text-meta text-ink-2">{app.title}</div>
-          </button>
+          <div className="truncate font-semibold">{app.company}</div>
+          <div className="line-clamp-2 text-meta text-ink-2">{app.title}</div>
         </div>
         <Menu>
           <MenuTrigger asChild>
             <button
               type="button"
-              className="grid size-7 place-items-center rounded-md text-ink-3 opacity-0 hover:bg-sunken group-hover:opacity-100 focus-visible:opacity-100"
+              onClick={(e) => e.stopPropagation()}
+              className="grid size-7 place-items-center rounded-md text-ink-3 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-sunken focus-visible:opacity-100"
               aria-label={t("common.more")}
             >
               <Ellipsis className="size-4" />
             </button>
           </MenuTrigger>
-          <MenuContent>
+          <MenuContent onClick={(e) => e.stopPropagation()}>
             <MenuLabel>{t("pipeline.move_to")}</MenuLabel>
-            {STAGES.map((s) => (
-              <MenuItem key={s.id} icon={s.icon} onSelect={() => onMove(s.id)}>
-                {t(`pipeline.${s.id}` as MessageKey)}
+            {STAGES.filter((s) => s !== stage).map((s) => (
+              <MenuItem key={s} onSelect={() => onMove(s)}>
+                {t(`pipeline.${s}` as MessageKey)}
               </MenuItem>
             ))}
             <MenuSeparator />
-            <MenuItem icon={<CalendarClock />} onSelect={onEdit}>
-              {t("pipeline.edit")}
-            </MenuItem>
-            <MenuItem icon={<ExternalLink />} onSelect={() => navigate(`/applications/${app.id}`)}>
-              {t("pipeline.open")}
-            </MenuItem>
+            <MenuItem onSelect={open}>{t("pipeline.open")}</MenuItem>
           </MenuContent>
         </Menu>
       </div>
       {app.notes && <p className="mt-2 line-clamp-2 text-small text-ink-2">{app.notes}</p>}
-      <div className="mt-2.5 flex items-center justify-between text-small text-ink-3">
-        <span>{formatDate(app.submitted_at ?? app.started_at, lang)}</span>
-        {due && (
-          <span className={cn("inline-flex items-center gap-1", overdue ? "font-medium text-accent" : "")}>
-            <CalendarClock className="size-3" />
-            {formatRelative(app.follow_up_at, lang)}
+      <div className="mt-2 flex items-center justify-between gap-2 text-small text-ink-3">
+        <span className="tabular">{formatDate(app.submitted_at ?? app.started_at, lang)}</span>
+        {app.follow_up_at && ["submitted", "manual", "interview"].includes(app.status) && (
+          <span className={cn(due && "font-medium text-accent")}>
+            {t(due ? "apps.followup_due" : "apps.followup_at", { when: formatRelative(app.follow_up_at, lang) })}
           </span>
         )}
       </div>
     </article>
-  );
-}
-
-function EditDialog({ app, onClose }: { app: ApplicationSummary; onClose: () => void }) {
-  const { t } = useI18n();
-  const qc = useQueryClient();
-  const [notes, setNotes] = useState(app.notes);
-  const [date, setDate] = useState(app.follow_up_at ? app.follow_up_at.slice(0, 10) : "");
-  const save = useMutation({
-    mutationFn: () =>
-      api.patchApplication(app.id, {
-        notes,
-        ...(date ? { follow_up_at: `${date}T09:00:00` } : { clear_follow_up: true }),
-      }),
-    onSuccess: () => {
-      toast.success(t("common.saved"));
-      qc.invalidateQueries({ queryKey: ["pipeline"] });
-      onClose();
-    },
-  });
-  return (
-    <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent
-        title={app.company}
-        description={app.title}
-        footer={
-          <>
-            <Button variant="quiet" onClick={onClose}>
-              {t("common.cancel")}
-            </Button>
-            <Button variant="primary" onClick={() => save.mutate()} loading={save.isPending}>
-              {t("common.save")}
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          <Field label={t("pipeline.followup")} hint={t("pipeline.followup_hint")}>
-            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-48" />
-          </Field>
-          <Field label={t("job.notes")}>
-            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={t("pipeline.notes_placeholder")} />
-          </Field>
-        </div>
-      </DialogContent>
-    </Dialog>
   );
 }
