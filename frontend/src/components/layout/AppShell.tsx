@@ -2,6 +2,7 @@ import {
   Activity,
   BellRing,
   Briefcase,
+  FlaskConical,
   LayoutDashboard,
   ListChecks,
   Monitor,
@@ -10,7 +11,7 @@ import {
   SquareKanban,
   Sun,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, Suspense } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router";
 import { useDesktopNotifications, useStatus, useTheme, type Theme } from "@/lib/hooks";
 import { type Lang, useI18n } from "@/lib/i18n";
@@ -18,6 +19,7 @@ import type { MessageKey } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 import { Logo } from "../domain";
 import { Segmented } from "../ui/controls";
+import { Skeleton } from "../ui/primitives";
 
 const NAV: { to: string; label: MessageKey; icon: ReactNode; end?: boolean }[] = [
   { to: "/", label: "nav.overview", icon: <LayoutDashboard />, end: true },
@@ -42,6 +44,12 @@ export function AppShell() {
         <div className="mb-5 flex items-center justify-between lg:hidden">
           <Logo />
         </div>
+        {status?.demo && (
+          <div className="mb-6 flex items-center gap-3 rounded-lg border border-border bg-surface-2 px-4 py-3 text-[0.875rem]">
+            <FlaskConical className="size-4 shrink-0 text-fg-muted" />
+            <span className="font-medium">{t("shell.demo")}</span>
+          </div>
+        )}
         {waiting > 0 && location.pathname !== "/" && (
           <Link
             to="/"
@@ -52,9 +60,21 @@ export function AppShell() {
             <span className="ml-auto text-footnote font-medium text-primary">{t("shell.open")}</span>
           </Link>
         )}
-        <Outlet />
+        <Suspense fallback={<PageSkeleton />}>
+          <Outlet />
+        </Suspense>
       </main>
       <MobileNav badge={waiting} />
+    </div>
+  );
+}
+
+function PageSkeleton() {
+  return (
+    <div className="space-y-4" aria-busy="true">
+      <Skeleton className="h-9 w-64 rounded-lg" />
+      <Skeleton className="h-40 rounded-lg" />
+      <Skeleton className="h-64 rounded-lg" />
     </div>
   );
 }

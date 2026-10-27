@@ -299,6 +299,11 @@ def crawl(
         f"[yellow]↺{len(report.reopened)} wieder offen[/yellow]  [red]−{len(report.closed)} geschlossen[/red]  "
         f"⇄{len(report.merged_seeds)} Startlisten-Einträge auf Firmen-URL umgestellt"
     )
+    if report.discovered:
+        console.print(
+            f"  [green]{len(report.discovered)} Firmen-Boards entdeckt[/green] "
+            f"[dim]({', '.join(report.discovered[:8])}{' …' if len(report.discovered) > 8 else ''})[/dim]"
+        )
     if report.rejected.get("Dublette"):
         console.print(f"  [dim]{report.rejected['Dublette']} Dubletten aus Jobbörsen übersprungen[/dim]")
     if report.enrich_skipped:
@@ -996,7 +1001,7 @@ def autopilot(
     r = rt()
     s = r.settings
     count = count or s.autopilot_apply_max
-    record(s, "autopilot", "Autopilot gestartet (Kommandozeile)")
+    record(s, "autopilot", "Autopilot gestartet (Kommandozeile)", code="autopilot.started")
     summary = asyncio.run(crawl_and_queue(r, queue_count=count if apply_jobs else 0))
     console.print(f"Crawl #{summary['run_id']}: {summary['new']} neu, {len(summary['queued'])} eingereiht")
     if apply_jobs and summary["queued"]:
@@ -1006,6 +1011,9 @@ def autopilot(
         "autopilot",
         f"Autopilot fertig: {summary['new']} neu, {len(summary['queued'])} eingereiht",
         summary,
+        code="autopilot.done",
+        new=summary["new"],
+        queued=len(summary["queued"]),
     )
 
 
@@ -1049,8 +1057,24 @@ def export(
         console.print(f"[green]✓[/green] {len(rows)} Zeilen → {out}")
 
 
+def utf8_output() -> None:
+    """Unter Windows schreiben umgeleitete Ausgaben (Pipe, Aufgabenplanung, Log-Datei) sonst cp1252 –
+    und schon ein „↺“ oder „−“ bricht den Befehl mit UnicodeEncodeError ab."""
+    for stream in (sys.stdout, sys.stderr):
+        encoding = (getattr(stream, "encoding", "") or "").lower().replace("-", "")
+        if encoding != "utf8" and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 def main() -> None:
-    app()
+    from .config import DemoModeError
+
+    utf8_output()
+    try:
+        app()
+    except DemoModeError as exc:
+        console.print(f"[red]{escape(str(exc))}[/red]")
+        raise SystemExit(2) from None
 
 
 if __name__ == "__main__":

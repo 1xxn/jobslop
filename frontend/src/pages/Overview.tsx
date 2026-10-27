@@ -3,9 +3,8 @@ import {
   ArrowRight,
   Bot,
   CalendarClock,
-  ChartColumn,
-  CircleCheck,
   Clock,
+  History,
   Inbox,
   MessageSquareReply,
   Play,
@@ -23,6 +22,7 @@ import { PromptCard } from "@/components/PromptCard";
 import { Switch } from "@/components/ui/controls";
 import { Button, Card, CardBody, CardHeader, EmptyState, Skeleton } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
+import { codeOf, useBackendText } from "@/lib/backendText";
 import { useRoleNames, useStatus } from "@/lib/hooks";
 import { useI18n } from "@/lib/i18n";
 import { formatDateTime, formatRelative, percent } from "@/lib/utils";
@@ -32,8 +32,10 @@ function greeting(t: ReturnType<typeof useI18n>["t"]) {
   return h < 11 ? t("overview.morning") : h < 18 ? t("overview.day") : t("overview.evening");
 }
 
+/** Startseite: was dich braucht, die besten Treffer, was als Nächstes ansteht – Statistik und Verlauf haben eigene Seiten. */
 export function OverviewPage() {
   const { t, lang } = useI18n();
+  const backendText = useBackendText();
   const qc = useQueryClient();
   const roles = useRoleNames();
   const { data: status } = useStatus();
@@ -44,7 +46,7 @@ export function OverviewPage() {
     queryFn: () => api.jobs({ view: "todo", level: "noS", limit: 6 }),
   });
   const pipeline = useQuery({ queryKey: ["pipeline"], queryFn: api.pipeline });
-  const activity = useQuery({ queryKey: ["activity"], queryFn: () => api.activity(8), refetchInterval: 15_000 });
+  const activity = useQuery({ queryKey: ["activity", 1], queryFn: () => api.activity(1), refetchInterval: 15_000 });
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings });
   const [applyOpen, setApplyOpen] = useState(false);
 
@@ -54,6 +56,7 @@ export function OverviewPage() {
       toast(r.started ? t("crawl.started") : t("crawl.running"));
       qc.invalidateQueries({ queryKey: ["status"] });
     },
+    onError: (e: Error) => toast.error(e.message),
   });
   const queueTop = useMutation({
     mutationFn: () => api.queueTop(10),
@@ -80,8 +83,8 @@ export function OverviewPage() {
   const prompts = status?.prompts ?? [];
   const queued = status?.counts.queued ?? 0;
   const a = stats.data?.applications;
-  const weeks = a?.per_week ?? [];
-  const maxWeek = Math.max(1, ...weeks.map((w) => w.sent));
+  const followUps = pipeline.data?.follow_ups_due ?? [];
+  const last = activity.data?.[0];
 
   return (
     <>
@@ -157,175 +160,126 @@ export function OverviewPage() {
       </div>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-        <div className="space-y-6">
-          <Card>
-            <CardHeader
-              title={t("overview.top_matches")}
-              description={t("overview.top_matches_hint")}
-              icon={<Sparkles />}
-              action={
-                <Button asChild variant="ghost" size="sm">
-                  <Link to="/jobs">
-                    {t("common.all")} <ArrowRight />
-                  </Link>
-                </Button>
-              }
-            />
-            <div className="divide-y divide-border">
-              {top.isLoading &&
-                Array.from({ length: 4 }, (_, i) => (
-                  <div key={i} className="px-5 py-3">
-                    <Skeleton className="h-10" />
-                  </div>
-                ))}
-              {top.data?.items.length === 0 && (
-                <EmptyState
-                  icon={<Search />}
-                  title={t("overview.no_jobs")}
-                  description={t("overview.no_jobs_hint")}
-                  action={
-                    <Button variant="primary" onClick={() => crawl.mutate()}>
-                      <RefreshCw />
-                      {t("crawl.start")}
-                    </Button>
-                  }
-                />
-              )}
-              {top.data?.items.map((j) => (
-                <Link
-                  key={j.id}
-                  to={`/jobs?job=${j.id}`}
-                  className="flex items-center gap-3.5 px-5 py-3 transition-colors hover:bg-surface-2"
-                >
-                  <CompanyAvatar name={j.company} />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[0.875rem] font-semibold">{j.title}</div>
-                    <div className="truncate text-footnote text-fg-muted">
-                      {j.company} · {j.location.split(";")[0]}
-                    </div>
-                  </div>
-                  <div className="hidden sm:block">
-                    <RoleBadge category={j.category} roles={roles} />
-                  </div>
-                  {j.queued && <StatusBadge status="queued" />}
-                  <ScoreRing score={j.score} />
+        <Card>
+          <CardHeader
+            title={t("overview.top_matches")}
+            description={t("overview.top_matches_hint")}
+            icon={<Sparkles />}
+            action={
+              <Button asChild variant="ghost" size="sm">
+                <Link to="/jobs">
+                  {t("common.all")} <ArrowRight />
                 </Link>
+              </Button>
+            }
+          />
+          <div className="divide-y divide-border">
+            {top.isLoading &&
+              Array.from({ length: 4 }, (_, i) => (
+                <div key={i} className="px-5 py-3">
+                  <Skeleton className="h-10" />
+                </div>
               ))}
-            </div>
-            {!!top.data?.items.length && (
-              <CardBody className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-                <span className="text-footnote text-fg-muted">{t("overview.queue_hint")}</span>
-                <Button size="sm" variant="soft" onClick={() => queueTop.mutate()} loading={queueTop.isPending}>
-                  {t("overview.queue_top")}
-                </Button>
-              </CardBody>
+            {top.data?.items.length === 0 && (
+              <EmptyState
+                icon={<Search />}
+                title={t("overview.no_jobs")}
+                description={t("overview.no_jobs_hint")}
+                action={
+                  <Button variant="primary" onClick={() => crawl.mutate()}>
+                    <RefreshCw />
+                    {t("crawl.start")}
+                  </Button>
+                }
+              />
             )}
-          </Card>
-
-          <Card>
-            <CardHeader title={t("overview.weekly")} description={t("overview.weekly_hint")} icon={<ChartColumn />} />
-            <CardBody>
-              <div className="flex h-36 items-end gap-1.5" role="img" aria-label={t("overview.weekly")}>
-                {weeks.map((w) => (
-                  <div key={w.week} className="group flex flex-1 flex-col items-center gap-1.5">
-                    <span className="tabular text-caption text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100">
-                      {w.sent}
-                    </span>
-                    <div
-                      className="w-full rounded-t-[5px] bg-primary/80 transition-[height] duration-500 group-hover:bg-primary"
-                      style={{ height: `${Math.max(3, (w.sent / maxWeek) * 100)}px`, opacity: w.sent ? 1 : 0.25 }}
-                    />
+            {top.data?.items.map((j) => (
+              <Link
+                key={j.id}
+                to={`/jobs?job=${j.id}`}
+                className="flex items-center gap-3.5 px-5 py-3 transition-colors hover:bg-surface-2"
+              >
+                <CompanyAvatar name={j.company} />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[0.875rem] font-semibold">{j.title}</div>
+                  <div className="truncate text-footnote text-fg-muted">
+                    {j.company} · {j.location.split(";")[0]}
                   </div>
-                ))}
-              </div>
-              <div className="mt-2 flex justify-between text-caption text-fg-subtle">
-                <span>{weeks[0] && new Date(weeks[0].week).toLocaleDateString(lang, { day: "numeric", month: "short" })}</span>
-                <span>{t("overview.this_week")}</span>
-              </div>
+                </div>
+                <div className="hidden sm:block">
+                  <RoleBadge category={j.category} roles={roles} />
+                </div>
+                {j.queued && <StatusBadge status="queued" />}
+                <ScoreRing score={j.score} />
+              </Link>
+            ))}
+          </div>
+          {!!top.data?.items.length && (
+            <CardBody className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+              <span className="text-footnote text-fg-muted">{t("overview.queue_hint")}</span>
+              <Button size="sm" variant="soft" onClick={() => queueTop.mutate()} loading={queueTop.isPending}>
+                {t("overview.queue_top")}
+              </Button>
             </CardBody>
-          </Card>
-        </div>
+          )}
+        </Card>
 
-        <div className="space-y-6">
-          <Card>
-            <CardHeader
-              title={t("autopilot.title")}
-              description={
-                status?.autopilot.next_run
-                  ? t("autopilot.next", { when: formatDateTime(status.autopilot.next_run, lang) })
-                  : t("autopilot.off_hint")
-              }
-              icon={<Bot />}
-              action={
-                <Switch
-                  label={t("autopilot.title")}
-                  checked={!!settings.data?.autopilot_enabled}
-                  onCheckedChange={(v) => autopilotToggle.mutate(v)}
-                />
-              }
-            />
-            <CardBody className="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" onClick={() => autopilotRun.mutate()} loading={!!status?.autopilot.running}>
+        <Card className="self-start">
+          <CardHeader title={t("overview.next")} icon={<CalendarClock />} />
+          <div className="divide-y divide-border">
+            {followUps.slice(0, 4).map((app) => (
+              <Link
+                key={app.id}
+                to="/pipeline"
+                className="flex items-center justify-between gap-3 px-5 py-3 hover:bg-surface-2"
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-[0.875rem] font-medium">
+                    {t("overview.followup_with", { company: app.company })}
+                  </div>
+                  <div className="truncate text-footnote text-fg-muted">{app.title}</div>
+                </div>
+                <span className="shrink-0 text-caption text-warning">{formatRelative(app.follow_up_at, lang)}</span>
+              </Link>
+            ))}
+            <div className="flex items-center gap-3 px-5 py-3">
+              <Bot className="size-4 shrink-0 text-fg-muted" />
+              <div className="min-w-0 flex-1">
+                <div className="text-[0.875rem] font-medium">{t("autopilot.title")}</div>
+                <div className="truncate text-footnote text-fg-muted">
+                  {status?.autopilot.next_run
+                    ? t("autopilot.next", { when: formatDateTime(status.autopilot.next_run, lang) })
+                    : t("autopilot.off_hint")}
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => autopilotRun.mutate()}
+                loading={!!status?.autopilot.running}
+                aria-label={t("autopilot.run_now")}
+                disabled={!!status?.demo}
+              >
                 {!status?.autopilot.running && <Play />}
-                {t("autopilot.run_now")}
               </Button>
-              <Button asChild size="sm" variant="ghost">
-                <Link to="/settings/autopilot">{t("autopilot.configure")}</Link>
-              </Button>
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader title={t("overview.followups")} icon={<CalendarClock />} />
-            <div className="divide-y divide-border">
-              {(pipeline.data?.follow_ups_due ?? []).length === 0 ? (
-                <p className="flex items-center gap-2 px-5 pb-5 text-footnote text-fg-muted">
-                  <CircleCheck className="size-4 text-success" />
-                  {t("overview.no_followups")}
-                </p>
-              ) : (
-                pipeline.data?.follow_ups_due.slice(0, 5).map((app) => (
-                  <Link
-                    key={app.id}
-                    to="/pipeline"
-                    className="flex items-center justify-between gap-3 px-5 py-3 hover:bg-surface-2"
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate text-[0.875rem] font-medium">{app.company}</div>
-                      <div className="truncate text-footnote text-fg-muted">{app.title}</div>
-                    </div>
-                    <span className="shrink-0 text-caption text-warning">{formatRelative(app.follow_up_at, lang)}</span>
-                  </Link>
-                ))
-              )}
+              <Switch
+                label={t("autopilot.title")}
+                checked={!!settings.data?.autopilot_enabled}
+                onCheckedChange={(v) => autopilotToggle.mutate(v)}
+              />
             </div>
-          </Card>
-
-          <Card>
-            <CardHeader
-              title={t("overview.activity")}
-              action={
-                <Button asChild variant="ghost" size="sm">
-                  <Link to="/activity">
-                    {t("common.all")} <ArrowRight />
-                  </Link>
-                </Button>
-              }
-            />
-            <ol className="space-y-3 px-5 pb-5">
-              {(activity.data ?? []).length === 0 && <li className="text-footnote text-fg-muted">{t("overview.no_activity")}</li>}
-              {activity.data?.map((item) => (
-                <li key={item.id} className="flex gap-3">
-                  <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary/60" />
-                  <div className="min-w-0">
-                    <div className="text-footnote leading-snug">{item.message}</div>
-                    <div className="text-caption text-fg-subtle">{formatRelative(item.ts, lang)}</div>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </Card>
-        </div>
+            {last && (
+              <Link to="/activity" className="flex items-center gap-3 px-5 py-3 hover:bg-surface-2">
+                <History className="size-4 shrink-0 text-fg-muted" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-footnote">{backendText(...codeOf(last.data), last.message)}</div>
+                  <div className="text-caption text-fg-subtle">{formatRelative(last.ts, lang)}</div>
+                </div>
+                <ArrowRight className="size-4 shrink-0 text-fg-subtle" />
+              </Link>
+            )}
+          </div>
+        </Card>
       </div>
       <ApplyDialog open={applyOpen} onOpenChange={setApplyOpen} queuedCount={queued} />
     </>

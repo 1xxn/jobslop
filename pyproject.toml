@@ -33,6 +33,8 @@ dependencies = [
     "python-multipart>=0.0.18",
     "pillow>=11.0",
     "pypdf>=5.1",
+    # LinkedIn, Indeed, Glassdoor (öffentliche Suche) – MIT, https://github.com/speedyapply/JobSpy
+    "python-jobspy>=1.3.0,<2",
 ]
 
 [project.urls]
@@ -79,4 +81,5 @@ testpaths = ["tests"]
 markers = [
     "browser: Tests, die einen echten Chromium starten",
     "live: Tests, die das echte Claude Code aufrufen (Abo-Kontingent; nur mit JOBSLOP_LIVE=1)",
+    "network: Tests gegen echte Seiten (nur lesen; nur mit JOBSLOP_NETWORK=1)",
 ]

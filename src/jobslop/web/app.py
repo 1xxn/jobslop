@@ -23,9 +23,19 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
 
-from .. import __version__
-from ..autopilot import Scheduler, crawl_and_queue, next_run, record
-from ..config import EDITABLE_SETTINGS, SearchConfig, Settings, save_settings, search_config_from_preset
+from .. import __version__, assist
+from ..autopilot import Scheduler, activity, crawl_and_queue, next_run, record
+from ..classify import job_score_parts
+from ..config import (
+    EDITABLE_SETTINGS,
+    DemoModeError,
+    SearchConfig,
+    Settings,
+    ensure_not_demo,
+    save_settings,
+    search_config_from_preset,
+)
+from ..crawl.sources import BOARD_SOURCES
 from ..db import (
     Activity,
     Answer,
@@ -68,6 +78,17 @@ def _iso(d: datetime | None) -> str | None:
     return d.isoformat() + "Z" if d else None
 
 
+def status_activity(job: Job, status: str) -> Activity:
+    return activity(
+        "status",
+        f"{job.company} · {job.title}: {status}",
+        code="status.changed",
+        company=job.company,
+        title=job.title,
+        status=status,
+    )
+
+
 def job_summary(j: Job) -> dict[str, Any]:
     last = j.applications[-1] if j.applications else None
     return {
@@ -85,6 +106,8 @@ def job_summary(j: Job) -> dict[str, Any]:
         "queued": j.queued,
         "starred": j.starred,
         "source": j.source,
+        # Firmen-Board (Greenhouse, Ashby …): die Adresse ist das Board selbst – sonst zeigt die UI, wohin es geht
+        "board": j.source.split(":", 1)[0] in BOARD_SOURCES,
         "url": j.url,
         "posted": j.posted,
         "first_seen": _iso(j.first_seen),
@@ -217,11 +240,18 @@ class Context:
         self.autopilot_running = False
         self.tasks: set[asyncio.Task[Any]] = set()
         self.crawl_idle = asyncio.Event()
+        self._llm: tuple[Settings, Any] | None = None
         self.crawl_idle.set()
 
     @property
     def db(self) -> Path:
         return self.settings.db_path
+
+    def llm(self) -> Any:
+        """Claude Code einmal pro Einstellungsstand suchen – die Browser-Erweiterung fragt bei jedem Formularschritt."""
+        if self._llm is None or self._llm[0] is not self.settings:
+            self._llm = (self.settings, self.runtime().llm())
+        return self._llm[1]
 
     def runtime(self) -> Runtime:
         """Stand von der Platte; solange Profil/Suche noch nicht gespeichert sind, gilt der Startzustand."""
@@ -241,6 +271,7 @@ class Context:
     async def start_crawl(self, *, queue_count: int = 0) -> bool:
         if self.crawl["running"]:
             return False
+        ensure_not_demo(self.settings, "Crawlen")
         self.crawl.update(running=True, started_at=_iso(utcnow()))
         self.crawl_idle.clear()
 
@@ -255,7 +286,13 @@ class Context:
             except Exception as exc:
                 log.exception("Crawl fehlgeschlagen")
                 self.crawl["last"] = {"error": str(exc)}
-                record(self.settings, "crawl", f"Crawl fehlgeschlagen: {exc}")
+                record(
+                    self.settings,
+                    "crawl",
+                    f"Crawl fehlgeschlagen: {exc}",
+                    code="crawl.failed",
+                    error=str(exc),
+                )
             finally:
                 self.crawl["running"] = False
                 self.crawl_idle.set()
@@ -273,7 +310,7 @@ class Context:
             return
         self.autopilot_running = True
         s = self.settings
-        record(s, "autopilot", "Autopilot gestartet")
+        record(s, "autopilot", "Autopilot gestartet", code="autopilot.started")
         try:
             await self.crawl_idle.wait()
             self.crawl.update(running=True, started_at=_iso(utcnow()))
@@ -293,7 +330,15 @@ class Context:
             text = f"{summary['new']} neue Stellen, {len(summary['queued'])} eingereiht" + (
                 " – Bewerbungen laufen" if started else ""
             )
-            record(s, "autopilot", f"Autopilot: {text}", summary)
+            record(
+                s,
+                "autopilot",
+                f"Autopilot: {text}",
+                summary,
+                code="autopilot.done",
+                new=summary["new"],
+                queued=len(summary["queued"]),
+            )
             await self.notify("jobslop Autopilot", text)
         finally:
             self.autopilot_running = False
@@ -340,7 +385,14 @@ class Context:
         text = (
             ", ".join(f"{n}× {status}" for status, n in counts.most_common()) or "keine Bewerbung gestartet"
         )
-        record(self.settings, "run", f"Bewerbungslauf beendet: {text}", dict(counts))
+        record(
+            self.settings,
+            "run",
+            f"Bewerbungslauf beendet: {text}",
+            dict(counts),
+            code="run.finished",
+            counts=dict(counts),
+        )
         await self.notify("jobslop: Lauf beendet", text)
 
 
@@ -359,6 +411,10 @@ def create_app(runtime: Runtime) -> FastAPI:
 
     app = FastAPI(title="jobslop", version=__version__, docs_url=None, redoc_url=None, lifespan=lifespan)
     app.state.ctx = ctx
+
+    @app.exception_handler(DemoModeError)
+    async def demo_mode(_request: Request, exc: DemoModeError) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=409)
 
     @app.middleware("http")
     async def local_only(request: Request, call_next):
@@ -400,6 +456,7 @@ def create_app(runtime: Runtime) -> FastAPI:
         return {
             "version": __version__,
             "setup_completed": s.setup_completed,
+            "demo": s.demo,
             "prompts": prompts,
             "runner": runner,
             "crawl": ctx.crawl,
@@ -436,6 +493,77 @@ def create_app(runtime: Runtime) -> FastAPI:
     @app.post("/api/system/open-folder")
     def open_home() -> dict[str, Any]:
         return {"opened": open_folder(ctx.settings.home)}
+
+    # ------------------------------------------------------------------ Browser-Erweiterung
+    # Einrichten/Anzeigen gehört zum Dashboard; alles unter /api/assist/ ruft die Erweiterung mit ihrem Token auf.
+    def assist_info() -> dict[str, Any]:
+        installed = assist.installed_version(ctx.settings)
+        return {
+            "path": str(assist.extension_dir(ctx.settings)),
+            "installed": bool(installed),
+            "outdated": bool(installed) and installed != __version__,
+            "version": __version__,
+        } | assist.status(ctx.settings)
+
+    @app.get("/api/extension")
+    def extension_info() -> dict[str, Any]:
+        return assist_info()
+
+    @app.post("/api/extension/install")
+    def extension_install(request: Request) -> dict[str, Any]:
+        assist.install(ctx.settings, server=str(request.base_url))
+        record(ctx.settings, "setup", "Browser-Erweiterung eingerichtet", code="extension.installed")
+        return assist_info()
+
+    @app.post("/api/extension/open-folder")
+    def extension_open_folder() -> dict[str, Any]:
+        path = assist.extension_dir(ctx.settings)
+        return {"opened": path.is_dir() and open_folder(path)}
+
+    def paired(request: Request) -> None:
+        if not assist.token_ok(ctx.settings, request.headers.get("x-jobslop-token", "")):
+            raise HTTPException(
+                401, "Erweiterung nicht gekoppelt – in jobslop unter Einstellungen → Bewerben neu einrichten"
+            )
+
+    @app.get("/api/assist/status")
+    def assist_status(request: Request) -> dict[str, Any]:
+        paired(request)
+        return assist.status(ctx.settings)
+
+    @app.post("/api/assist/step")
+    async def assist_step(request: Request, body: assist.StepIn) -> dict[str, Any]:
+        paired(request)
+        return await assist.step(ctx.runtime(), body, ctx.llm())
+
+    @app.post("/api/assist/result")
+    def assist_result(request: Request, body: assist.ResultIn) -> dict[str, Any]:
+        paired(request)
+        assist.record_results(ctx.settings, body)
+        return {"ok": True}
+
+    @app.post("/api/assist/answers")
+    def assist_answers(request: Request, body: assist.AnswersIn) -> dict[str, Any]:
+        paired(request)
+        return {"saved": assist.save_answers(ctx.settings, body)}
+
+    @app.post("/api/assist/finish")
+    async def assist_finish(request: Request, body: assist.FinishIn) -> dict[str, Any]:
+        paired(request)
+        assist.finish(ctx.settings, body)
+        if body.status == "submitted":
+            await ctx.notify(
+                "jobslop: Bewerbung abgeschickt", body.message[:200] or "über die Browser-Erweiterung"
+            )
+        return {"ok": True}
+
+    @app.get("/api/assist/file")
+    def assist_file(request: Request, application_id: int, value: str, index: int = 0) -> FileResponse:
+        paired(request)
+        path = assist.upload_file(ctx.runtime(), application_id, value, index)
+        if path is None:
+            raise HTTPException(404, "Datei nicht gefunden")
+        return FileResponse(path, filename=path.name)
 
     # ------------------------------------------------------------------ Profil & Dokumente
     @app.get("/api/profile")
@@ -563,8 +691,8 @@ def create_app(runtime: Runtime) -> FastAPI:
     async def setup_complete(start_crawl: bool = True) -> dict[str, Any]:
         ctx.settings = save_settings(ctx.settings, {"setup_completed": True})
         ctx.runner.settings = ctx.settings
-        record(ctx.settings, "setup", "Einrichtung abgeschlossen")
-        started = await ctx.start_crawl() if start_crawl else False
+        record(ctx.settings, "setup", "Einrichtung abgeschlossen", code="setup.done")
+        started = await ctx.start_crawl() if start_crawl and not ctx.settings.demo else False
         return {"ok": True, "crawl_started": started}
 
     # ------------------------------------------------------------------ Stellen
@@ -625,6 +753,7 @@ def create_app(runtime: Runtime) -> FastAPI:
     async def add_job(body: UrlIn) -> dict[str, Any]:
         from ..jobpage import add_fetched_job, fetch_job
 
+        ensure_not_demo(ctx.settings, "Stelle per Link laden")
         rt = ctx.runtime()
         try:
             fetched = await fetch_job(body.url.strip(), llm=rt.llm(), fast_model=ctx.settings.llm_model_fast)
@@ -639,7 +768,11 @@ def create_app(runtime: Runtime) -> FastAPI:
             j = s.get(Job, job_id)
             if j is None:
                 raise HTTPException(404)
-            verdict = check_job(s, j, ctx.runtime().config.limits)
+            config = ctx.runtime().config
+            verdict = check_job(s, j, config.limits)
+            parts = job_score_parts(j, config.role_names)
+            if abs(rest := round(j.score - sum(p for _, p in parts), 2)) >= 0.1:
+                parts.append(("other", rest))  # z. B. Import mit eigener Einordnung
             return job_summary(j) | {
                 "description": j.description,
                 "apply_url": j.apply_url,
@@ -649,7 +782,13 @@ def create_app(runtime: Runtime) -> FastAPI:
                 "segment": j.segment,
                 "language": j.language,
                 "last_seen": _iso(j.last_seen),
-                "verdict": {"ok": verdict.ok, "reason": verdict.reason},
+                "verdict": {
+                    "ok": verdict.ok,
+                    "reason": verdict.reason,
+                    "code": verdict.code,
+                    "params": verdict.params,
+                },
+                "score_parts": [{"key": k, "points": p} for k, p in parts],
                 "history": [
                     {"seen_at": _iso(sn.seen_at), "change": sn.change, "diff": sn.diff} for sn in j.snapshots
                 ],
@@ -705,7 +844,7 @@ def create_app(runtime: Runtime) -> FastAPI:
                     )
                 )
             j.queued = False
-            s.add(Activity(kind="status", message=f"{j.company} · {j.title}: {body.status}"))
+            s.add(status_activity(j, MARK.get(body.status, body.status)))
             s.flush()
             return job_summary(j)
 
@@ -761,7 +900,13 @@ def create_app(runtime: Runtime) -> FastAPI:
                 if not s.scalar(select(func.count(Job.id)).where(Job.queued)):
                     raise HTTPException(409, "Die Warteschlange ist leer")
         ctx.runner.start(body.job_ids or None, mode=mode, max_count=body.max, force=body.force)  # type: ignore[arg-type]
-        record(ctx.settings, "run", f"Bewerbungslauf gestartet ({ctx.runner.label}, {mode})")
+        record(
+            ctx.settings,
+            "run",
+            f"Bewerbungslauf gestartet ({ctx.runner.label}, {mode})",
+            code="run.started",
+            mode=mode,
+        )
         return ctx.runner.state()
 
     @app.get("/api/runner")
@@ -772,7 +917,7 @@ def create_app(runtime: Runtime) -> FastAPI:
     def runner_stop() -> dict[str, Any]:
         stopped = ctx.runner.stop()
         if stopped:
-            record(ctx.settings, "run", "Bewerbungslauf abgebrochen")
+            record(ctx.settings, "run", "Bewerbungslauf abgebrochen", code="run.stopped")
         return ctx.runner.state() | {"stopped": stopped}
 
     # ------------------------------------------------------------------ Crawl & Autopilot
@@ -829,6 +974,7 @@ def create_app(runtime: Runtime) -> FastAPI:
     async def autopilot_run() -> dict[str, Any]:
         if ctx.autopilot_running:
             raise HTTPException(409, "Autopilot läuft bereits")
+        ensure_not_demo(ctx.settings, "Autopilot")
         ctx.spawn(ctx.run_autopilot())
         return {"started": True}
 
@@ -913,7 +1059,7 @@ def create_app(runtime: Runtime) -> FastAPI:
                 a.stage_changed_at = utcnow()
                 if body.status in ("offer", "rejected"):
                     a.follow_up_at = None
-                s.add(Activity(kind="status", message=f"{a.job.company} · {a.job.title}: {body.status}"))
+                s.add(status_activity(a.job, body.status))
             if body.notes is not None:
                 a.notes = body.notes
             if body.clear_follow_up:

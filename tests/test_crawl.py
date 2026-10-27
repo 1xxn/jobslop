@@ -173,7 +173,7 @@ def _config(config):
     )
     s.workday = [WorkdaySite(company="Zeta AG", host="wd.example.com", tenant="ten", site="Careers")]
     s.amazon_queries, s.generic = ["engineer"], []
-    s.arbeitnow, s.himalayas_queries = False, []
+    s.arbeitnow, s.queries, s.portals, s.arbeitsagentur, s.discover_boards = False, [], [], False, False
     return config
 
 
@@ -272,6 +272,37 @@ async def test_source_failure_does_not_close_jobs(settings, config):
     assert report.closed == []  # ausgefallene Quelle schließt keine Stellen
 
 
+async def test_filter_change_does_not_close_listed_jobs(settings, config):
+    config = _config(config)
+    with respx.mock(assert_all_called=False) as router:
+        _mock(router)
+        await run_crawl(settings, config, enrich=False, use_browser=False)
+    # Rolle aus dem Filter genommen: die Stellen sind weiter online und dürfen nicht als geschlossen gelten
+    config.filters.exclude_titles = [*config.filters.exclude_titles, "reliability"]
+    with respx.mock(assert_all_called=False) as router:
+        _mock(router)
+        report = await run_crawl(settings, config, enrich=False, use_browser=False)
+    assert report.closed == []
+    with session_scope(settings.db_path) as s:
+        sre = s.execute(select(Job).where(Job.title == "Site Reliability Engineer")).scalars().one()
+        assert sre.status == "open"
+
+
+async def test_capped_workday_search_is_not_complete():
+    from jobslop.crawl.base import make_client
+    from jobslop.crawl.sources import WorkdaySource
+
+    page = {"total": 1000, "jobPostings": WD_LIST["jobPostings"] * 20}
+    source = WorkdaySource(
+        WorkdaySite(company="Zeta AG", host="wd.example.com", tenant="ten", site="Careers")
+    )
+    with respx.mock() as router:
+        router.post("https://wd.example.com/wday/cxs/ten/Careers/jobs").respond(json=page)
+        async with make_client() as client:
+            postings = await source.fetch(client)
+    assert len(postings) == 400 and source.complete is False
+
+
 ARBEITNOW = {
     "data": [
         {
@@ -346,7 +377,7 @@ async def test_job_boards_add_jobs_without_duplicates(settings, config):
         [],
         [],
     )
-    s.arbeitnow, s.himalayas_queries = True, ["sre"]
+    s.arbeitnow, s.queries, s.portals, s.arbeitsagentur, s.discover_boards = True, ["sre"], [], False, False
     with respx.mock(assert_all_called=False) as router:
         _mock(router)
         router.get("https://www.arbeitnow.com/api/job-board-api").respond(json=ARBEITNOW)
@@ -375,6 +406,22 @@ async def test_job_boards_add_jobs_without_duplicates(settings, config):
     assert status["Kubernetes Engineer"] == "open"
     assert status["Site Reliability Engineer"] == "open"
     assert len(report2.closed) == 1
+
+
+def test_arbeitnow_country_comes_from_the_job_domain():
+    from jobslop.crawl.sources import _arbeitnow_location
+
+    assert _arbeitnow_location("Berlin", "https://www.arbeitnow.com/jobs/a/b") == "Berlin, Germany"
+    assert (
+        _arbeitnow_location("Munich, Bayern, Germany", "https://www.arbeitnow.com/x")
+        == "Munich, Bayern, Germany"
+    )
+    # Länderseiten: früher wurde aus „Remote job“ in Paris eine Remote-Stelle in Deutschland
+    assert _arbeitnow_location("Remote job", "https://www.arbeitnow.fr/jobs/x") == "Remote job, France"
+    assert _arbeitnow_location("London", "https://www.arbeitnow.co.uk/jobs/x") == "London, United Kingdom"
+    assert _arbeitnow_location("Veghel, Nederland", "https://www.arbeitnow.nl/x") == "Veghel, Nederland"
+    assert _arbeitnow_location("", "https://www.arbeitnow.ch/x") == "Switzerland"
+    assert _arbeitnow_location("Wien", "https://example.com/x") == "Wien"  # unbekannt: nichts erfinden
 
 
 async def test_arbeitnow_throttling_keeps_loaded_pages(settings, config, monkeypatch):

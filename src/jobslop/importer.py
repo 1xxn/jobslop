@@ -14,7 +14,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from .classify import classify, fingerprint, match_key, score, where_of
+from .classify import classify, fingerprint, job_score, match_key, where_of
 from .config import SearchConfig
 from .db import Application, Job, JobSnapshot, session_scope, utcnow
 
@@ -71,13 +71,13 @@ def import_jobs(db_path: Path, path: Path, config: SearchConfig) -> tuple[int, i
                 level=level,
                 segment=segment,
                 fit=fit,
-                score=score(category, fit, segment, level, "km" in near, where, config.role_names),
                 description=str(item.get("description", "")),
                 posted=str(item.get("posted", "")),
                 notes=str(item.get("notes", "")),
                 near=near,
                 origin="seed",
             )
+            job.score = job_score(job, config.role_names)
             s.add(job)
             s.flush()
             s.add(JobSnapshot(job=job, change="imported", title=job.title, location=job.location))

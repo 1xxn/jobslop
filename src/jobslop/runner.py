@@ -6,15 +6,48 @@ Dashboard bedienbar, und „Stopp“ beendet den Lauf sauber.
 
 from __future__ import annotations
 
+import contextlib
 import os
+import signal
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .config import ApplyMode, Settings
+from .config import ApplyMode, Settings, ensure_not_demo
 from .db import utcnow
+
+
+def process_group() -> dict[str, Any]:
+    """Popen-Argumente: Kindprozess in eigener Prozessgruppe, damit „Stopp“ den ganzen Baum beenden kann."""
+    if sys.platform == "win32":
+        return {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def kill_tree(proc: subprocess.Popen[Any], timeout: float = 10) -> None:
+    """Beendet den Prozess samt Kindern (Playwright-Treiber, Chromium). Sonst bleiben unter Windows Browser
+    zurück, die das Browserprofil sperren – der nächste Lauf startet dann nicht."""
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+            capture_output=True,
+            check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    else:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGTERM)
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if sys.platform == "win32":
+            proc.kill()
+        else:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait(timeout=5)
 
 
 class Runner:
@@ -52,6 +85,7 @@ class Runner:
     ) -> bool:
         if self.active:
             return False
+        ensure_not_demo(self.settings, "Bewerben")
         args = [sys.executable, "-m", "jobslop", "apply", "--mode", mode]
         args += ["--unattended"] if unattended else ["--via-dashboard"]
         args += [str(i) for i in job_ids] if job_ids else ["--queue"]
@@ -69,8 +103,7 @@ class Runner:
         }
         self.settings.home.mkdir(parents=True, exist_ok=True)
         log = self.log_path.open("wb")
-        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        self.proc = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT, env=env, creationflags=flags)
+        self.proc = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT, env=env, **process_group())
         log.close()  # der Kindprozess hat das Handle geerbt
         self.started_at, self.finished_at, self.returncode = utcnow(), None, None
         self.label = label or (f"{len(job_ids)} Stelle(n)" if job_ids else "Warteschlange")
@@ -80,11 +113,7 @@ class Runner:
     def stop(self) -> bool:
         if not self.active or self.proc is None:
             return False
-        self.proc.terminate()
-        try:
-            self.proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            self.proc.kill()
+        kill_tree(self.proc)
         return True
 
     def tail(self, lines: int = 80) -> str:

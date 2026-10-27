@@ -12,7 +12,17 @@ export default defineConfig({
   build: {
     outDir: "../src/jobslop/web/dist",
     emptyOutDir: true,
-    chunkSizeWarningLimit: 900,
+    rolldownOptions: {
+      output: {
+        // Bibliotheken getrennt vom App-Code: nach einem Update lädt der Browser nur den geänderten App-Teil neu
+        advancedChunks: {
+          groups: [
+            { name: "react", test: /node_modules[\\/](react|react-dom|react-router|scheduler)[\\/]/ },
+            { name: "vendor", test: /node_modules[\\/]/ },
+          ],
+        },
+      },
+    },
   },
   server: {
     port: 5173,

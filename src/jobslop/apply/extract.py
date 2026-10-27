@@ -101,20 +101,38 @@ async def extract_state(page: Any) -> PageState:
             log.debug("Frame %s nicht auswertbar: %s", frame.url, exc)
             continue
         state.frames[str(index)] = frame
-        if index == 0:
-            state.url = data["url"]
-            state.title = data["title"]
-            state.text = data["text"]
-            state.headings = data["headings"]
-        elif data["fields"] or data["text"].strip():
-            state.text += f"\n\n[Frame {index}: {data['url'][:120]}]\n{data['text']}"
-        for f in data["fields"]:
-            f["frame"] = index
-        state.fields += data["fields"]
-        state.buttons += data["buttons"]
-        state.errors += [e for e in data["errors"] if e not in state.errors]
-        for c in data["captcha"]:
+        add_frame(state, index, data)
+    return state
+
+
+def add_frame(state: PageState, index: int, data: dict[str, Any]) -> None:
+    """Ergebnis von extract.js für einen Frame übernehmen (Engine und Browser-Erweiterung)."""
+    if index == 0:
+        state.url = data["url"]
+        state.title = data["title"]
+        state.text = data["text"]
+        state.headings = data["headings"]
+    elif data["fields"] or data["text"].strip():
+        state.text += f"\n\n[Frame {index}: {data['url'][:120]}]\n{data['text']}"
+    for f in data["fields"]:
+        f["frame"] = index
+    state.fields += data["fields"]
+    state.buttons += data["buttons"]
+    state.errors += [e for e in data["errors"] if e not in state.errors]
+    for c in data["captcha"]:
+        state.captcha_present = True
+        if c.get("visible") and c.get("challenge"):
+            state.captcha_visible = True
+
+
+def state_from_frames(frames: dict[int, dict[str, Any]]) -> PageState:
+    """Seitenzustand aus den Frame-Ergebnissen der Browser-Erweiterung (Schlüssel: Frame-Nummer, 0 = Seite)."""
+    state = PageState(url="", title="")
+    for index in sorted(frames):
+        data = frames[index]
+        if index > 0 and any(h in (data.get("url") or "").lower() for h in CAPTCHA_HOST_HINTS):
+            # CAPTCHA-Frames liefern ein „Ich bin kein Roboter“-Kästchen als Feld – das fasst jobslop nie an
             state.captcha_present = True
-            if c.get("visible") and c.get("challenge"):
-                state.captcha_visible = True
+            continue
+        add_frame(state, index, data)
     return state
