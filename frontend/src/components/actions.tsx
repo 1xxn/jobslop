@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, Link2, Play, Rocket, ShieldCheck, Square, TerminalSquare } from "lucide-react";
+import { Eye, Link2, Play, Rocket, ShieldCheck } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
@@ -7,6 +7,8 @@ import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import type { ApplyMode } from "@/lib/types";
 import { cn, formatRelative } from "@/lib/utils";
+import { StatusGlyph } from "./domain";
+import { useRunDrawer } from "./layout/runContext";
 import { Dialog, DialogContent } from "./ui/overlays";
 import { Badge, Button, Field, Input } from "./ui/primitives";
 
@@ -25,7 +27,7 @@ export function ApplyDialog({
 }) {
   const { t } = useI18n();
   const qc = useQueryClient();
-  const navigate = useNavigate();
+  const run = useRunDrawer();
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings, enabled: open });
   const [mode, setMode] = useState<ApplyMode>("review");
   const [max, setMax] = useState(5);
@@ -38,7 +40,7 @@ export function ApplyDialog({
       toast.success(t("apply.started"));
       qc.invalidateQueries({ queryKey: ["status"] });
       onOpenChange(false);
-      navigate("/activity");
+      run.open();
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -55,7 +57,7 @@ export function ApplyDialog({
         description={t("apply.description")}
         footer={
           <>
-            <Button variant="ghost" onClick={() => onOpenChange(false)}>
+            <Button variant="quiet" onClick={() => onOpenChange(false)}>
               {t("common.cancel")}
             </Button>
             <Button variant="primary" onClick={() => start.mutate()} loading={start.isPending} disabled={!count}>
@@ -75,23 +77,23 @@ export function ApplyDialog({
               onClick={() => setMode(m.value)}
               className={cn(
                 "flex w-full items-start gap-3 rounded-lg border p-3.5 text-left transition-colors",
-                mode === m.value ? "border-primary bg-primary-soft" : "border-border hover:bg-surface-2",
+                mode === m.value ? "border-accent bg-accent-soft" : "border-line hover:bg-sunken",
               )}
             >
               <span
                 className={cn(
                   "mt-0.5 grid size-8 shrink-0 place-items-center rounded-md [&_svg]:size-4",
-                  mode === m.value ? "bg-primary text-primary-fg" : "bg-surface-2 text-fg-muted",
+                  mode === m.value ? "bg-accent text-on-accent" : "bg-sunken text-ink-2",
                 )}
               >
                 {m.icon}
               </span>
               <span>
-                <span className="flex items-center gap-2 text-[0.875rem] font-semibold">
+                <span className="flex items-center gap-2 text-body font-semibold">
                   {m.title}
-                  {m.value === "review" && <Badge tone="primary">{t("common.recommended")}</Badge>}
+                  {m.value === "review" && <Badge tone="accent">{t("common.recommended")}</Badge>}
                 </span>
-                <span className="mt-0.5 block text-footnote text-fg-muted">{m.text}</span>
+                <span className="mt-0.5 block text-meta text-ink-2">{m.text}</span>
               </span>
             </button>
           ))}
@@ -138,7 +140,7 @@ export function AddJobDialog({ open, onOpenChange }: { open: boolean; onOpenChan
         description={t("addjob.description")}
         footer={
           <>
-            <Button variant="ghost" onClick={() => onOpenChange(false)}>
+            <Button variant="quiet" onClick={() => onOpenChange(false)}>
               {t("common.cancel")}
             </Button>
             <Button variant="primary" onClick={() => add.mutate()} loading={add.isPending} disabled={!/^https?:\/\//.test(url)}>
@@ -190,22 +192,21 @@ export function RunnerPanel({ className }: { className?: string }) {
   }, [log]);
   const r = runner.data;
   return (
-    <div className={cn("overflow-hidden rounded-lg border border-border bg-surface shadow-sm", className)}>
-      <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className={cn("size-2 rounded-full", r?.active ? "bg-success animate-pulse" : "bg-fg-subtle")} />
-          <span className="truncate text-[0.875rem] font-semibold">
+    <div className={cn("grid gap-3", className)}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <StatusGlyph status={r?.active ? "running" : "skipped"} className={cn(r?.active && "animate-pulse-slow")} />
+          <span className="truncate text-body font-semibold">
             {r?.active ? t("runner.active", { label: r.label }) : t("runner.idle")}
           </span>
           {r?.started_at && (
-            <span className="truncate text-caption text-fg-subtle">
+            <span className="shrink-0 text-small text-ink-3">
               {r.active ? formatRelative(r.started_at, lang) : formatRelative(r.finished_at ?? r.started_at, lang)}
             </span>
           )}
         </div>
         {r?.active && (
-          <Button size="sm" variant="danger-soft" onClick={() => stop.mutate()} loading={stop.isPending}>
-            <Square />
+          <Button size="sm" variant="danger" onClick={() => stop.mutate()} loading={stop.isPending}>
             {t("runner.stop")}
           </Button>
         )}
@@ -213,15 +214,12 @@ export function RunnerPanel({ className }: { className?: string }) {
       {log ? (
         <pre
           ref={pre}
-          className="max-h-[420px] overflow-auto bg-[#0d0d12] px-4 py-3 font-mono text-[0.75rem] leading-relaxed text-[#d6d6e0]"
+          className="max-h-[50dvh] overflow-auto rounded-md border border-line bg-sunken px-3 py-2 font-mono text-small text-ink-2"
         >
           {log}
         </pre>
       ) : (
-        <div className="flex items-center gap-2 px-4 py-6 text-footnote text-fg-muted">
-          <TerminalSquare className="size-4" />
-          {t("runner.empty")}
-        </div>
+        <p className="text-meta text-ink-3">{t("runner.empty")}</p>
       )}
     </div>
   );

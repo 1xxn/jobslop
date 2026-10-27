@@ -127,7 +127,7 @@ export function SearchForm() {
             checked={c.sources.discover_boards}
             onCheckedChange={(v) => update({ ...c, sources: { ...c.sources, discover_boards: v } })}
           />
-          <p className="text-footnote text-fg-muted">{t("search.portals_terms")}</p>
+          <p className="text-meta text-ink-2">{t("search.portals_terms")}</p>
           <div className="grid gap-4 md:grid-cols-2">
             {(["greenhouse", "ashby", "lever", "smartrecruiters", "personio", "recruitee", "workable"] as const).map((key) => (
               <Field key={key} label={sourceName(key, t)} hint={t(`search.board_${key}`)}>
@@ -205,7 +205,7 @@ export function RolesEditor({ config, onChange }: { config: SearchConfig; onChan
         title={t("search.roles")}
         description={t("search.roles_hint")}
         action={
-          <Button size="sm" variant="soft" onClick={() => setRoles([...config.roles, { name: t("search.new_role"), keywords: [] }])}>
+          <Button size="sm" variant="secondary" onClick={() => setRoles([...config.roles, { name: t("search.new_role"), keywords: [] }])}>
             <Plus />
             {t("search.add_role")}
           </Button>
@@ -213,10 +213,10 @@ export function RolesEditor({ config, onChange }: { config: SearchConfig; onChan
       />
       <CardBody className="space-y-3">
         {config.filters.include_titles.length > 0 && (
-          <p className="rounded-md bg-info-soft px-3 py-2 text-footnote">{t("search.legacy_include")}</p>
+          <p className="rounded-md bg-sunken px-3 py-2 text-meta">{t("search.legacy_include")}</p>
         )}
         {config.roles.map((role, i) => (
-          <div key={i} className={`rounded-lg border border-border p-3 ${roleClass(role.name, names)}`}>
+          <div key={i} className={`rounded-lg border border-line p-3 ${roleClass(role.name, names)}`}>
             <div className="mb-2 flex items-center gap-2">
               <span className="size-2.5 shrink-0 rounded-full bg-[var(--role)]" />
               <Input
@@ -225,13 +225,13 @@ export function RolesEditor({ config, onChange }: { config: SearchConfig; onChan
                 className="h-8 max-w-56 font-semibold"
                 aria-label={t("search.role_name")}
               />
-              <span className="ml-auto text-caption text-fg-subtle">{t("search.priority", { n: i + 1 })}</span>
-              <Button size="icon-sm" variant="ghost" disabled={i === 0} onClick={() => move(i, -1)} aria-label={t("common.up")}>
+              <span className="ml-auto text-small text-ink-3">{t("search.priority", { n: i + 1 })}</span>
+              <Button size="icon-sm" variant="quiet" disabled={i === 0} onClick={() => move(i, -1)} aria-label={t("common.up")}>
                 <ArrowUp />
               </Button>
               <Button
                 size="icon-sm"
-                variant="ghost"
+                variant="quiet"
                 disabled={i === config.roles.length - 1}
                 onClick={() => move(i, 1)}
                 aria-label={t("common.down")}
@@ -240,7 +240,7 @@ export function RolesEditor({ config, onChange }: { config: SearchConfig; onChan
               </Button>
               <Button
                 size="icon-sm"
-                variant="ghost"
+                variant="quiet"
                 onClick={() => setRoles(config.roles.filter((_, j) => j !== i))}
                 aria-label={t("common.delete")}
               >
@@ -267,10 +267,10 @@ function GenericPages({ config, onChange }: { config: SearchConfig; onChange: (c
     <div>
       <div className="mb-2 flex items-center justify-between">
         <div>
-          <div className="text-footnote font-medium">{t("search.generic")}</div>
-          <div className="text-caption text-fg-muted">{t("search.generic_hint")}</div>
+          <div className="text-meta font-medium">{t("search.generic")}</div>
+          <div className="text-small text-ink-2">{t("search.generic_hint")}</div>
         </div>
-        <Button size="sm" variant="ghost" onClick={() => set([...pages, { company: "", url: "" }])}>
+        <Button size="sm" variant="quiet" onClick={() => set([...pages, { company: "", url: "" }])}>
           <Plus />
           {t("common.add")}
         </Button>
@@ -288,7 +288,7 @@ function GenericPages({ config, onChange }: { config: SearchConfig; onChange: (c
               value={p.url}
               onChange={(e) => set(pages.map((x, j) => (j === i ? { ...x, url: e.target.value } : x)))}
             />
-            <Button size="icon" variant="ghost" onClick={() => set(pages.filter((_, j) => j !== i))} aria-label={t("common.delete")}>
+            <Button size="icon" variant="quiet" onClick={() => set(pages.filter((_, j) => j !== i))} aria-label={t("common.delete")}>
               <Trash2 />
             </Button>
           </div>

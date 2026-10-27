@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { AddJobDialog, ApplyDialog } from "@/components/actions";
-import { CompanyAvatar, FitDots, PageHeader, RoleBadge, ScoreRing, StatusBadge } from "@/components/domain";
+import { CompanyAvatar, FitDots, PageHeader, Score, StatusLabel } from "@/components/domain";
 import { JobSheet } from "@/components/JobSheet";
 import { Checkbox, Segmented, Switch } from "@/components/ui/controls";
 import { Tooltip } from "@/components/ui/overlays";
@@ -103,11 +103,11 @@ export function JobsPage() {
         description={jobs.data ? t("jobs.count", { n: jobs.data.total }) : " "}
         actions={
           <>
-            <Button variant="outline" onClick={() => setAddOpen(true)}>
+            <Button variant="secondary" onClick={() => setAddOpen(true)}>
               <Link2 />
               {t("addjob.short")}
             </Button>
-            <Button variant="outline" onClick={() => crawl.mutate()} loading={!!status?.crawl.running}>
+            <Button variant="secondary" onClick={() => crawl.mutate()} loading={!!status?.crawl.running}>
               {!status?.crawl.running && <RefreshCw />}
               {status?.crawl.running ? t("crawl.running_short") : t("crawl.start")}
             </Button>
@@ -115,10 +115,10 @@ export function JobsPage() {
         }
       />
 
-      <div className="sticky top-0 z-20 -mx-4 mb-4 space-y-3 bg-bg/85 px-4 py-3 backdrop-blur-xl sm:-mx-6 sm:px-6 lg:-mx-10 lg:px-10">
+      <div className="sticky top-0 z-20 -mx-4 mb-4 space-y-3 bg-paper px-4 py-3 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-56 flex-1">
-            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-fg-subtle" />
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-3" />
             <Input
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -143,7 +143,7 @@ export function JobsPage() {
             className="max-w-full overflow-x-auto"
           />
           <Button
-            variant={filtersOpen ? "soft" : "outline"}
+            variant="secondary"
             size="icon"
             onClick={() => setFiltersOpen(!filtersOpen)}
             aria-label={t("jobs.filters")}
@@ -164,13 +164,13 @@ export function JobsPage() {
                 { value: "R", label: t("where.remote") },
               ]}
             />
-            <label className="flex items-center gap-2 text-footnote text-fg-muted">
+            <label className="flex items-center gap-2 text-meta text-ink-2">
               <Switch checked={stretch} onCheckedChange={setStretch} label={t("jobs.show_stretch")} />
               {t("jobs.show_stretch")}
             </label>
-            <label className="flex items-center gap-2 text-footnote text-fg-muted">
+            <label className="flex items-center gap-2 text-meta text-ink-2">
               {t("jobs.sort")}
-              <Select value={sort} onChange={(e) => setSort(e.target.value)} className="h-8 w-auto text-footnote">
+              <Select value={sort} onChange={(e) => setSort(e.target.value)} className="h-8 w-auto text-meta">
                 <option value="score">{t("jobs.sort_score")}</option>
                 <option value="new">{t("jobs.sort_new")}</option>
                 <option value="company">{t("jobs.sort_company")}</option>
@@ -188,21 +188,21 @@ export function JobsPage() {
                   type="button"
                   onClick={() => setCategory(active ? category.filter((c) => c !== name) : [...category, name])}
                   className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-footnote font-medium transition-colors",
+                    "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-meta font-medium transition-colors",
                     roleClass(name, roles),
                     active
-                      ? "border-[var(--role)] bg-[color-mix(in_oklch,var(--role)_14%,transparent)] text-fg"
-                      : "border-border bg-surface text-fg-muted hover:text-fg",
+                      ? "border-[var(--role)] bg-[color-mix(in_oklch,var(--role)_14%,transparent)] text-ink"
+                      : "border-line bg-raised text-ink-2 hover:text-ink",
                   )}
                 >
                   <span className="size-1.5 rounded-full bg-[var(--role)]" />
                   {name}
-                  <span className="tabular text-fg-subtle">{facets[name] ?? 0}</span>
+                  <span className="tabular text-ink-3">{facets[name] ?? 0}</span>
                 </button>
               );
             })}
             {category.length > 0 && (
-              <Button variant="ghost" size="sm" onClick={() => setCategory([])}>
+              <Button variant="quiet" size="sm" onClick={() => setCategory([])}>
                 <X />
                 {t("common.reset")}
               </Button>
@@ -212,17 +212,17 @@ export function JobsPage() {
       </div>
 
       {selected.size > 0 && (
-        <div className="glass fixed inset-x-4 bottom-20 z-30 mx-auto flex max-w-2xl flex-wrap items-center gap-2 rounded-xl border border-border px-4 py-3 shadow-lg animate-slide-up lg:bottom-6 lg:left-[248px]">
-          <span className="mr-auto text-[0.875rem] font-medium">{t("bulk.selected", { n: selected.size })}</span>
-          <Button size="sm" variant="ghost" onClick={() => bulk.mutate({ action: "star" })}>
+        <div className="fixed inset-x-4 bottom-20 z-30 mx-auto flex max-w-2xl flex-wrap items-center gap-2 rounded-lg border border-line bg-raised px-4 py-2.5 shadow-overlay animate-slide-up lg:bottom-6 lg:left-[208px]">
+          <span className="mr-auto text-body font-medium">{t("bulk.selected", { n: selected.size })}</span>
+          <Button size="sm" variant="quiet" onClick={() => bulk.mutate({ action: "star" })}>
             <Bookmark />
             {t("job.star")}
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => bulk.mutate({ action: "exclude" })}>
+          <Button size="sm" variant="quiet" onClick={() => bulk.mutate({ action: "exclude" })}>
             <Ban />
             {t("bulk.exclude_short")}
           </Button>
-          <Button size="sm" variant="outline" onClick={() => bulk.mutate({ action: "queue" })}>
+          <Button size="sm" variant="secondary" onClick={() => bulk.mutate({ action: "queue" })}>
             <Clock />
             {t("job.queue")}
           </Button>
@@ -234,7 +234,7 @@ export function JobsPage() {
       )}
 
       <Card className="overflow-hidden">
-        <div className="hidden items-center gap-4 border-b border-border px-4 py-2.5 text-caption font-medium text-fg-subtle md:flex">
+        <div className="hidden items-center gap-4 border-b border-line px-4 py-2.5 text-small font-medium text-ink-3 md:flex">
           <Checkbox
             checked={allSelected}
             onCheckedChange={(v) => setSelected(v ? new Set(items.map((j) => j.id)) : new Set())}
@@ -248,7 +248,7 @@ export function JobsPage() {
           <span className="w-20 text-right">{t("jobs.col_score")}</span>
         </div>
         {jobs.isLoading && (
-          <div className="divide-y divide-border">
+          <div className="divide-y divide-line">
             {Array.from({ length: 8 }, (_, i) => (
               <div key={i} className="px-4 py-3.5">
                 <Skeleton className="h-10" />
@@ -258,7 +258,6 @@ export function JobsPage() {
         )}
         {!jobs.isLoading && items.length === 0 && (
           <EmptyState
-            icon={<Search />}
             title={t("jobs.empty")}
             description={t("jobs.empty_hint")}
             action={
@@ -269,12 +268,11 @@ export function JobsPage() {
             }
           />
         )}
-        <ul className={cn("divide-y divide-border transition-opacity", jobs.isFetching && !jobs.isLoading && "opacity-70")}>
+        <ul className={cn("divide-y divide-line transition-opacity", jobs.isFetching && !jobs.isLoading && "opacity-70")}>
           {items.map((job) => (
             <JobRow
               key={job.id}
               job={job}
-              roles={roles}
               lang={lang}
               selected={selected.has(job.id)}
               onSelect={() => toggle(job.id)}
@@ -284,8 +282,8 @@ export function JobsPage() {
           ))}
         </ul>
         {jobs.data && jobs.data.total > items.length && (
-          <div className="border-t border-border p-3 text-center">
-            <Button variant="ghost" onClick={() => setLimit(limit + 60)}>
+          <div className="border-t border-line p-3 text-center">
+            <Button variant="quiet" onClick={() => setLimit(limit + 60)}>
               {t("jobs.more", { n: jobs.data.total - items.length })}
             </Button>
           </div>
@@ -301,7 +299,6 @@ export function JobsPage() {
 
 function JobRow({
   job,
-  roles,
   lang,
   selected,
   onSelect,
@@ -309,7 +306,6 @@ function JobRow({
   onStar,
 }: {
   job: JobSummary;
-  roles: string[];
   lang: string;
   selected: boolean;
   onSelect: () => void;
@@ -320,8 +316,8 @@ function JobRow({
   return (
     <li
       className={cn(
-        "group flex cursor-pointer items-center gap-4 px-4 py-3 transition-colors hover:bg-surface-2/70",
-        selected && "bg-primary-soft hover:bg-primary-soft",
+        "group flex cursor-pointer items-center gap-4 px-4 py-3 transition-colors hover:bg-sunken/70",
+        selected && "bg-accent-soft hover:bg-accent-soft",
       )}
       onClick={onOpen}
       onKeyDown={(e) => e.key === "Enter" && onOpen()}
@@ -331,27 +327,27 @@ function JobRow({
       <CompanyAvatar name={job.company} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="truncate text-[0.9375rem] font-semibold">{job.title}</span>
-          {job.level === "S" && <span className="text-caption text-fg-subtle">· {t("level.S")}</span>}
+          <span className="truncate text-body font-semibold">{job.title}</span>
+          {job.level === "S" && <span className="text-small text-ink-3">· {t("level.S")}</span>}
         </div>
-        <div className="flex items-center gap-1.5 truncate text-footnote text-fg-muted">
+        <div className="flex items-center gap-1.5 truncate text-meta text-ink-2">
           <span className="truncate">{job.company}</span>
-          <span className="text-fg-subtle">·</span>
+          <span className="text-ink-3">·</span>
           <span className="truncate">{job.location.split(";")[0] || t(job.where === "R" ? "where.remote" : "where.onsite")}</span>
           {job.first_seen && (
-            <span className="hidden text-fg-subtle sm:inline">· {formatRelative(job.first_seen, lang)}</span>
+            <span className="hidden text-ink-3 sm:inline">· {formatRelative(job.first_seen, lang)}</span>
           )}
-          <span className="hidden text-fg-subtle lg:inline">· {sourceName(job.source, t)}</span>
+          <span className="hidden text-ink-3 lg:inline">· {sourceName(job.source, t)}</span>
         </div>
       </div>
       <div className="hidden w-36 md:block">
-        <RoleBadge category={job.category} roles={roles} />
+        <span className="text-meta text-ink-2">{job.category}</span>
       </div>
       <div className="hidden w-16 justify-center md:flex">
         <FitDots fit={job.fit} />
       </div>
       <div className="hidden w-28 md:block">
-        <StatusBadge status={job.app_status} />
+        <StatusLabel status={job.app_status} />
       </div>
       <div className="flex w-20 items-center justify-end gap-1">
         <Tooltip content={job.starred ? t("job.unstar") : t("job.star")}>
@@ -362,15 +358,15 @@ function JobRow({
               onStar();
             }}
             className={cn(
-              "grid size-8 place-items-center rounded-full text-fg-subtle transition-opacity hover:bg-surface-3 hover:text-fg",
+              "grid size-8 place-items-center rounded-md text-ink-3 transition-opacity hover:bg-sunken hover:text-ink",
               !job.starred && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
             )}
             aria-label={job.starred ? t("job.unstar") : t("job.star")}
           >
-            {job.starred ? <BookmarkCheck className="size-4 text-primary" /> : <Bookmark className="size-4" />}
+            {job.starred ? <BookmarkCheck className="size-4 text-accent" /> : <Bookmark className="size-4" />}
           </button>
         </Tooltip>
-        <ScoreRing score={job.score} />
+        <Score score={job.score} />
       </div>
     </li>
   );

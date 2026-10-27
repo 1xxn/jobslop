@@ -1,10 +1,11 @@
-import { Ban, BellRing, Bot, Cpu, MessageSquareText, Play, Search, UserRound } from "lucide-react";
+import { Ban, BellRing, Bot, Cpu, History, MessageSquareText, Play, Search, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
 import { NavLink, useParams } from "react-router";
 import { PageHeader } from "@/components/domain";
 import { useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
 import { cn } from "@/lib/utils";
+import { LogSettings } from "./Log";
 import { ProfileForm } from "./ProfileForm";
 import { SearchForm } from "./SearchForm";
 import {
@@ -25,6 +26,7 @@ const TABS: { id: string; label: MessageKey; icon: ReactNode; render: () => Reac
   { id: "answers", label: "settings.answers", icon: <MessageSquareText />, render: () => <AnswersSettings /> },
   { id: "exclusions", label: "settings.exclusions", icon: <Ban />, render: () => <ExclusionSettings /> },
   { id: "system", label: "settings.system", icon: <Cpu />, render: () => <SystemSettings /> },
+  { id: "log", label: "settings.log", icon: <History />, render: () => <LogSettings /> },
 ];
 
 export function SettingsPage() {
@@ -45,8 +47,8 @@ export function SettingsPage() {
               to={`/settings/${x.id}`}
               className={() =>
                 cn(
-                  "flex shrink-0 items-center gap-2.5 rounded-md px-3 py-2 text-[0.875rem] font-medium transition-colors [&_svg]:size-4",
-                  current.id === x.id ? "bg-surface text-fg shadow-sm ring-1 ring-border" : "text-fg-muted hover:bg-surface-2 hover:text-fg",
+                  "flex shrink-0 items-center gap-2.5 rounded-md px-3 py-2 text-body font-medium transition-colors [&_svg]:size-4",
+                  current.id === x.id ? "bg-raised text-ink shadow-sm ring-1 ring-line" : "text-ink-2 hover:bg-sunken hover:text-ink",
                 )
               }
             >

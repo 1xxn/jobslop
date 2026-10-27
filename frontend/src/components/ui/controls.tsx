@@ -1,10 +1,10 @@
-import { X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import { Checkbox as C, Switch as S, Tabs as T, ToggleGroup as TG } from "radix-ui";
-import { Check } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useState } from "react";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-/* ----------------------------------------------------------------- Switch (iOS-Stil) */
+/* ----------------------------------------------------------------- Schalter */
 
 export function Switch({
   checked,
@@ -26,14 +26,15 @@ export function Switch({
       checked={checked}
       onCheckedChange={onCheckedChange}
       disabled={disabled}
-      className="relative inline-flex h-[26px] w-[44px] shrink-0 items-center rounded-full bg-surface-3 transition-colors duration-200 ease-standard data-[state=checked]:bg-success disabled:opacity-50"
+      // sichtbar 32 × 18 px, Klickfläche 24 px hoch (WCAG 2.5.8)
+      className="relative inline-flex h-[18px] w-8 shrink-0 items-center rounded-full bg-line-input transition-colors duration-[120ms] before:absolute before:-inset-y-[3px] before:inset-x-0 data-[state=checked]:bg-accent disabled:opacity-50"
     >
-      <S.Thumb className="block size-[22px] translate-x-[2px] rounded-full bg-white shadow-[0_2px_6px_rgb(0_0_0/0.2)] transition-transform duration-200 ease-standard data-[state=checked]:translate-x-[20px]" />
+      <S.Thumb className="block size-[14px] translate-x-[2px] rounded-full bg-raised transition-transform duration-[120ms] ease-out data-[state=checked]:translate-x-[16px] data-[state=checked]:bg-on-accent" />
     </S.Root>
   );
 }
 
-/** Zeile mit Titel, Beschreibung und Schalter – wie in den iOS/macOS-Einstellungen. */
+/** Zeile mit Titel, optionalem Hinweis und Schalter rechts. */
 export function SwitchRow({
   title,
   description,
@@ -48,10 +49,10 @@ export function SwitchRow({
   disabled?: boolean;
 }) {
   return (
-    <label className="flex cursor-pointer items-center justify-between gap-6 py-3">
+    <label className="flex cursor-pointer items-center justify-between gap-6 border-b border-line py-2.5 last:border-b-0">
       <span className="min-w-0">
-        <span className="block text-[0.875rem] font-medium">{title}</span>
-        {description && <span className="mt-0.5 block text-footnote text-fg-muted">{description}</span>}
+        <span className="block text-body">{title}</span>
+        {description && <span className="mt-0.5 block text-meta text-ink-2">{description}</span>}
       </span>
       <Switch checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} />
     </label>
@@ -75,19 +76,20 @@ export function Checkbox({
       onCheckedChange={(v) => onCheckedChange(v === true)}
       aria-label={label}
       onClick={(e) => e.stopPropagation()}
+      // sichtbar 16 px, Klickfläche 24 px
       className={cn(
-        "grid size-[18px] shrink-0 place-items-center rounded-[5px] border border-border-strong bg-surface transition-colors data-[state=checked]:border-primary data-[state=checked]:bg-primary",
+        "relative grid size-4 shrink-0 place-items-center rounded-sm border border-line-input bg-raised transition-colors before:absolute before:-inset-1 data-[state=checked]:border-accent data-[state=checked]:bg-accent",
         className,
       )}
     >
       <C.Indicator>
-        <Check className="size-3 text-primary-fg" strokeWidth={3} />
+        <Check className="size-3 text-on-accent" strokeWidth={3} />
       </C.Indicator>
     </C.Root>
   );
 }
 
-/* ----------------------------------------------------------------- Tabs */
+/* ----------------------------------------------------------------- Tabs: Unterstrich in Tinte, Zähler grau */
 
 export const Tabs = T.Root;
 export const TabsContent = T.Content;
@@ -96,7 +98,7 @@ export function TabsList({ children, className }: { children: ReactNode; classNa
   return (
     <T.List
       className={cn(
-        "flex gap-1 overflow-x-auto border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        "flex gap-5 overflow-x-auto border-b border-line [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
         className,
       )}
     >
@@ -109,17 +111,15 @@ export function TabsTrigger({ value, children, count }: { value: string; childre
   return (
     <T.Trigger
       value={value}
-      className="relative -mb-px flex items-center gap-2 whitespace-nowrap border-b-2 border-transparent px-3 py-2.5 text-[0.875rem] font-medium text-fg-muted transition-colors hover:text-fg data-[state=active]:border-primary data-[state=active]:text-fg"
+      className="relative flex items-center gap-1.5 whitespace-nowrap py-2 text-body text-ink-2 transition-colors hover:text-ink data-[state=active]:font-semibold data-[state=active]:text-ink data-[state=active]:shadow-[inset_0_-2px_0_var(--ink)]"
     >
       {children}
-      {count !== undefined && count > 0 && (
-        <span className="tabular rounded-full bg-surface-2 px-1.5 text-caption text-fg-muted">{count}</span>
-      )}
+      {count !== undefined && count > 0 && <span className="tabular font-normal text-ink-3">{count}</span>}
     </T.Trigger>
   );
 }
 
-/* ----------------------------------------------------------------- Segmented Control (HIG) */
+/* ----------------------------------------------------------------- Segmente (wenige gleichwertige Optionen) */
 
 export function Segmented<V extends string>({
   value,
@@ -127,27 +127,30 @@ export function Segmented<V extends string>({
   options,
   className,
   size = "md",
+  label,
 }: {
   value: V;
   onChange: (v: V) => void;
   options: { value: V; label: ReactNode; icon?: ReactNode }[];
   className?: string;
   size?: "sm" | "md";
+  label?: string;
 }) {
   return (
     <TG.Root
       type="single"
       value={value}
       onValueChange={(v) => v && onChange(v as V)}
-      className={cn("inline-flex rounded-md bg-surface-2 p-0.5", className)}
+      aria-label={label}
+      className={cn("inline-flex gap-0.5 rounded-md border border-line p-0.5", className)}
     >
       {options.map((o) => (
         <TG.Item
           key={o.value}
           value={o.value}
           className={cn(
-            "flex items-center gap-1.5 whitespace-nowrap rounded-[7px] font-medium text-fg-muted transition-all duration-150 hover:text-fg data-[state=on]:bg-surface data-[state=on]:text-fg data-[state=on]:shadow-sm dark:data-[state=on]:bg-surface-3 [&_svg]:size-3.5",
-            size === "sm" ? "px-2.5 py-1 text-caption" : "px-3 py-1.5 text-footnote",
+            "flex items-center gap-1.5 whitespace-nowrap rounded-sm text-ink-2 transition-colors duration-[120ms] hover:text-ink data-[state=on]:bg-sunken data-[state=on]:font-medium data-[state=on]:text-ink [&_svg]:size-3.5",
+            size === "sm" ? "px-2 py-0.5 text-small" : "px-2.5 py-1 text-meta",
           )}
         >
           {o.icon}
@@ -173,6 +176,7 @@ export function ChipsInput({
   className?: string;
   tone?: "neutral" | "danger";
 }) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState("");
   const add = (raw: string) => {
     const items = raw
@@ -194,7 +198,7 @@ export function ChipsInput({
   return (
     <div
       className={cn(
-        "flex min-h-9 w-full flex-wrap items-center gap-1.5 rounded-md border border-border-strong bg-surface px-2 py-1.5 shadow-sm focus-within:border-primary focus-within:ring-4 focus-within:ring-primary/15",
+        "flex min-h-8 w-full flex-wrap items-center gap-1 rounded-md border border-line-input bg-raised px-1.5 py-1 focus-within:border-accent focus-within:shadow-[0_0_0_1px_var(--accent)]",
         className,
       )}
     >
@@ -202,16 +206,16 @@ export function ChipsInput({
         <span
           key={v}
           className={cn(
-            "inline-flex items-center gap-1 rounded-full py-0.5 pr-1 pl-2.5 text-footnote",
-            tone === "danger" ? "bg-danger-soft text-danger" : "bg-surface-2 text-fg",
+            "inline-flex items-center gap-0.5 rounded-sm py-px pr-0.5 pl-1.5 text-meta",
+            tone === "danger" ? "bg-danger-soft text-danger" : "bg-sunken text-ink",
           )}
         >
           {v}
           <button
             type="button"
             onClick={() => onChange(value.filter((x) => x !== v))}
-            className="grid size-4 place-items-center rounded-full text-fg-muted hover:bg-surface-3 hover:text-fg"
-            aria-label={`${v} entfernen`}
+            className="grid size-4 place-items-center rounded-sm text-ink-3 hover:bg-line hover:text-ink"
+            aria-label={t("common.remove_item", { item: v })}
           >
             <X className="size-3" />
           </button>
@@ -230,7 +234,7 @@ export function ChipsInput({
           }
         }}
         placeholder={value.length ? "" : placeholder}
-        className="min-w-24 flex-1 bg-transparent px-1 text-[0.875rem] outline-none placeholder:text-fg-subtle"
+        className="min-w-24 flex-1 bg-transparent px-1 text-body outline-none placeholder:text-ink-3"
       />
     </div>
   );

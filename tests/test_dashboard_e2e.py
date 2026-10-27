@@ -53,7 +53,7 @@ async def test_dashboard_end_to_end(dashboard):
         try:
             # Übersicht: Demo-Hinweis, Rückfragen, beste Treffer, „Als Nächstes“ – ohne den alten Ballast
             await page.goto(base)
-            await page.get_by_text("Demo-Modus").first.wait_for()
+            await page.get_by_text("Demo · erfundene Daten").first.wait_for()
             for text in ("Braucht dich", "Beste Treffer", "Als Nächstes"):
                 await page.get_by_text(text, exact=True).first.wait_for()
             assert await page.get_by_text("Bewerbungen pro Woche").count() == 0
@@ -81,9 +81,29 @@ async def test_dashboard_end_to_end(dashboard):
             config = SearchConfig.load(home / "search.toml")
             assert "linkedin" not in config.sources.portals and "indeed" in config.sources.portals
 
-            # Sprache wechseln: Oberfläche und Backend-Meldungen auf Englisch
+            # Alte Adressen: Pipeline ist die Board-Ansicht der Bewerbungen
+            await page.goto(f"{base}/pipeline")
+            await page.wait_for_url("**/applications?view=board")
+            await page.get_by_role("heading", name="Interview").wait_for()
+
+            # Laufender Lauf, Suche und Autopilot öffnen sich als Seitenleiste von überall
+            await page.get_by_role("button", name="Lauf und Suche anzeigen").click()
+            await page.get_by_role("dialog", name="Was gerade läuft").wait_for()
+            await page.keyboard.press("Escape")
+
+            # Tastenkürzel: G dann E öffnet die Einstellungen, ? zeigt die Übersicht
+            await page.keyboard.press("g")
+            await page.keyboard.press("e")
+            await page.wait_for_url("**/settings")
+            await page.keyboard.press("?")
+            await page.get_by_role("dialog", name="Tastenkürzel").wait_for()
+            await page.keyboard.press("Escape")
+
+            # Sprache wechseln (Aktivität ist jetzt das Protokoll): Oberfläche und Backend-Meldungen auf Englisch
             await page.goto(f"{base}/activity")
-            await page.get_by_role("radio", name="English").click()
+            await page.wait_for_url("**/settings/log")
+            await page.get_by_role("button", name="Sprache und Farbschema").click()
+            await page.get_by_role("menuitemradio", name="English").click()
             await page.get_by_text("Search #6: 18 new jobs, 5 queued").wait_for()
             await page.get_by_text("Application run finished: 3× Sent, 1× Question").wait_for()
         finally:

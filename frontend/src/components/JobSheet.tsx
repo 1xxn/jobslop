@@ -19,13 +19,12 @@ import { Link } from "react-router";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useBackendText } from "@/lib/backendText";
-import { useRoleNames } from "@/lib/hooks";
 import { useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
 import type { JobDetail } from "@/lib/types";
 import { cn, formatDate, formatRelative, hostOf, sourceName } from "@/lib/utils";
 import { ApplyDialog } from "./actions";
-import { CompanyAvatar, FitDots, RoleBadge, SCORE_MAX, ScoreRing, StatusBadge, WhereLabel } from "./domain";
+import { CompanyAvatar, FitDots, SCORE_MAX, Score, StatusLabel, WhereLabel } from "./domain";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Sheet } from "./ui/overlays";
 import { Badge, Button, Skeleton, Textarea } from "./ui/primitives";
 
@@ -39,21 +38,21 @@ function ScoreBreakdown({ job }: { job: JobDetail }) {
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center justify-between text-[0.875rem] font-semibold"
+        className="flex w-full items-center justify-between text-body font-semibold"
         aria-expanded={open}
       >
         {t("score.title")}
-        <span className="flex items-center gap-2 font-normal text-fg-muted">
+        <span className="flex items-center gap-2 font-normal text-ink-2">
           {t("score.total", { score: Math.round(job.score * 10) / 10, max: SCORE_MAX })}
           <ChevronDown className={cn("size-4 transition-transform", open && "rotate-180")} />
         </span>
       </button>
       {open && (
-        <ul className="mt-2 divide-y divide-border rounded-lg border border-border text-footnote">
+        <ul className="mt-2 divide-y divide-line rounded-lg border border-line text-meta">
           {job.score_parts.map((p) => (
             <li key={p.key} className="flex items-center justify-between gap-3 px-3 py-2">
-              <span className="text-fg-muted">{label(p.key)}</span>
-              <span className={cn("tabular font-medium", p.points < 0 ? "text-danger" : p.points > 0 ? "text-fg" : "text-fg-subtle")}>
+              <span className="text-ink-2">{label(p.key)}</span>
+              <span className={cn("tabular font-medium", p.points < 0 ? "text-danger" : p.points > 0 ? "text-ink" : "text-ink-3")}>
                 {p.points > 0 ? "+" : ""}
                 {Math.round(p.points * 10) / 10}
               </span>
@@ -69,7 +68,6 @@ export function JobSheet({ jobId, onClose }: { jobId: number | null; onClose: ()
   const { t, lang } = useI18n();
   const backendText = useBackendText();
   const qc = useQueryClient();
-  const roles = useRoleNames();
   const { data: job, isLoading } = useQuery({
     queryKey: ["job", jobId],
     queryFn: () => api.job(jobId as number),
@@ -118,7 +116,7 @@ export function JobSheet({ jobId, onClose }: { jobId: number | null; onClose: ()
       title={job ? job.company : t("common.loading")}
       actions={
         job && (
-          <Button asChild variant="ghost" size="icon-sm" aria-label={t("job.open_posting")}>
+          <Button asChild variant="quiet" size="icon-sm" aria-label={t("job.open_posting")}>
             <a href={job.url} target="_blank" rel="noreferrer">
               <ExternalLink />
             </a>
@@ -138,8 +136,8 @@ export function JobSheet({ jobId, onClose }: { jobId: number | null; onClose: ()
             <div className="flex items-start gap-4">
               <CompanyAvatar name={job.company} size={48} />
               <div className="min-w-0 flex-1">
-                <h2 className="text-title2 font-bold tracking-[-0.02em] text-balance">{job.title}</h2>
-                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-footnote text-fg-muted">
+                <h2 className="text-title font-bold tracking-[-0.02em] text-balance">{job.title}</h2>
+                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-ink-2">
                   <span className="inline-flex items-center gap-1">
                     <Building2 className="size-3.5" />
                     {job.company}
@@ -148,17 +146,17 @@ export function JobSheet({ jobId, onClose }: { jobId: number | null; onClose: ()
                   <WhereLabel where={job.where} workplace={job.workplace} location={job.location} />
                 </div>
               </div>
-              <ScoreRing score={job.score} size={44} />
+              <Score score={job.score} />
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-1.5">
-              <RoleBadge category={job.category} roles={roles} />
+              <span className="text-meta text-ink-2">{job.category}</span>
               <Badge>{t(`level.${job.level}` as MessageKey)}</Badge>
               <Badge tone="outline">
                 <FitDots fit={job.fit} />
                 <span className="ml-1">{t("job.stack")}</span>
               </Badge>
               {job.status === "closed" && <Badge tone="danger">{t("job.closed")}</Badge>}
-              <StatusBadge status={job.app_status} />
+              <StatusLabel status={job.app_status} />
               <Badge tone="outline">
                 {sourceName(job.source, t)}
                 {!job.board && hostOf(job.url) ? ` · ${hostOf(job.url)}` : ""}
@@ -175,19 +173,19 @@ export function JobSheet({ jobId, onClose }: { jobId: number | null; onClose: ()
                 {t("job.apply_now")}
               </Button>
               <Button
-                variant={job.queued ? "soft" : "outline"}
+                variant={job.queued ? "primary" : "secondary"}
                 onClick={() => patchJob.mutate({ queued: !job.queued })}
                 disabled={!job.verdict.ok && !job.queued}
               >
                 <Clock />
                 {job.queued ? t("job.queued") : t("job.queue")}
               </Button>
-              <Button variant="outline" size="icon" onClick={() => patchJob.mutate({ starred: !job.starred })} aria-label={t("job.star")}>
-                {job.starred ? <BookmarkCheck className="text-primary" /> : <Bookmark />}
+              <Button variant="secondary" size="icon" onClick={() => patchJob.mutate({ starred: !job.starred })} aria-label={t("job.star")}>
+                {job.starred ? <BookmarkCheck className="text-accent" /> : <Bookmark />}
               </Button>
               <Menu>
                 <MenuTrigger asChild>
-                  <Button variant="outline" size="icon" aria-label={t("common.more")}>
+                  <Button variant="secondary" size="icon" aria-label={t("common.more")}>
                     <Ellipsis />
                   </Button>
                 </MenuTrigger>
@@ -209,7 +207,7 @@ export function JobSheet({ jobId, onClose }: { jobId: number | null; onClose: ()
               </Menu>
             </div>
             {!job.verdict.ok && (
-              <p className="mt-3 flex items-start gap-2 rounded-md bg-surface-2 px-3 py-2 text-footnote text-fg-muted">
+              <p className="mt-3 flex items-start gap-2 rounded-md bg-sunken px-3 py-2 text-meta text-ink-2">
                 <CircleAlert className="mt-0.5 size-4 shrink-0" />
                 {backendText(job.verdict.code, job.verdict.params, job.verdict.reason)}
               </p>
@@ -219,15 +217,15 @@ export function JobSheet({ jobId, onClose }: { jobId: number | null; onClose: ()
           <ScoreBreakdown job={job} />
 
           {job.enriched && (
-            <section className="mx-6 mt-6 rounded-lg border border-border bg-surface-2/50 p-4">
-              <h3 className="flex items-center gap-2 text-[0.875rem] font-semibold">
-                <Sparkles className="size-4 text-primary" />
+            <section className="mx-6 mt-6 rounded-lg border border-line bg-sunken/50 p-4">
+              <h3 className="flex items-center gap-2 text-body font-semibold">
+                <Sparkles className="size-4 text-accent" />
                 {t("job.assessment")}
               </h3>
-              {job.enrichment.summary && <p className="mt-2 text-body leading-relaxed">{job.enrichment.summary}</p>}
+              {job.enrichment.summary && <p className="mt-2 text-read leading-relaxed">{job.enrichment.summary}</p>}
               {job.enrichment.fit_reason && (
-                <p className="mt-2 text-footnote text-fg-muted">
-                  <span className="font-medium text-fg">{t("job.fit_reason")}: </span>
+                <p className="mt-2 text-meta text-ink-2">
+                  <span className="font-medium text-ink">{t("job.fit_reason")}: </span>
                   {job.enrichment.fit_reason}
                 </p>
               )}
@@ -242,7 +240,7 @@ export function JobSheet({ jobId, onClose }: { jobId: number | null; onClose: ()
                   </Badge>
                 )}
                 {(job.enrichment.red_flags ?? []).map((f) => (
-                  <Badge key={f} tone="warning">
+                  <Badge key={f} tone="amber">
                     <CircleAlert />
                     {f}
                   </Badge>
@@ -252,7 +250,7 @@ export function JobSheet({ jobId, onClose }: { jobId: number | null; onClose: ()
           )}
 
           <section className="mx-6 mt-6">
-            <h3 className="mb-2 text-[0.875rem] font-semibold">{t("job.notes")}</h3>
+            <h3 className="mb-2 text-body font-semibold">{t("job.notes")}</h3>
             <Textarea
               value={notes}
               placeholder={t("job.notes_placeholder")}
@@ -264,21 +262,21 @@ export function JobSheet({ jobId, onClose }: { jobId: number | null; onClose: ()
 
           {job.applications.length > 0 && (
             <section className="mx-6 mt-6">
-              <h3 className="mb-2 text-[0.875rem] font-semibold">{t("job.applications")}</h3>
-              <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
+              <h3 className="mb-2 text-body font-semibold">{t("job.applications")}</h3>
+              <div className="divide-y divide-line overflow-hidden rounded-lg border border-line">
                 {job.applications.map((a) => (
                   <Link
                     key={a.id}
                     to={`/applications/${a.id}`}
-                    className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-surface-2"
+                    className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-sunken"
                   >
                     <div className="min-w-0">
-                      <div className="text-footnote text-fg-muted">
+                      <div className="text-meta text-ink-2">
                         #{a.id} · {formatRelative(a.started_at, lang)}
                       </div>
-                      <div className="truncate text-[0.875rem]">{a.error || a.confirmation || t(`mode.${a.mode}` as MessageKey)}</div>
+                      <div className="truncate text-body">{a.error || a.confirmation || t(`mode.${a.mode}` as MessageKey)}</div>
                     </div>
-                    <StatusBadge status={a.status} />
+                    <StatusLabel status={a.status} />
                   </Link>
                 ))}
               </div>
@@ -290,14 +288,14 @@ export function JobSheet({ jobId, onClose }: { jobId: number | null; onClose: ()
               <button
                 type="button"
                 onClick={() => setShowDesc(!showDesc)}
-                className="flex w-full items-center justify-between text-[0.875rem] font-semibold"
+                className="flex w-full items-center justify-between text-body font-semibold"
               >
                 {t("job.description")}
-                <ChevronDown className={cn("size-4 text-fg-muted transition-transform", showDesc && "rotate-180")} />
+                <ChevronDown className={cn("size-4 text-ink-2 transition-transform", showDesc && "rotate-180")} />
               </button>
               <div
                 className={cn(
-                  "mt-2 whitespace-pre-line text-footnote leading-relaxed text-fg-muted",
+                  "mt-2 whitespace-pre-line text-meta leading-relaxed text-ink-2",
                   !showDesc && "line-clamp-6",
                 )}
               >
@@ -307,11 +305,11 @@ export function JobSheet({ jobId, onClose }: { jobId: number | null; onClose: ()
           )}
 
           <section className="mx-6 mt-6">
-            <h3 className="mb-2 flex items-center gap-2 text-[0.875rem] font-semibold">
-              <CalendarClock className="size-4 text-fg-muted" />
+            <h3 className="mb-2 flex items-center gap-2 text-body font-semibold">
+              <CalendarClock className="size-4 text-ink-2" />
               {t("job.history")}
             </h3>
-            <ol className="space-y-1.5 text-footnote text-fg-muted">
+            <ol className="space-y-1.5 text-meta text-ink-2">
               {job.history.map((h, i) => (
                 <li key={i} className="flex gap-3">
                   <span className="tabular w-28 shrink-0">{formatDate(h.seen_at, lang)}</span>

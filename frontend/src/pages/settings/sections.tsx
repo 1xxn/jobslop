@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  BellRing,
   CircleAlert,
   CircleCheck,
   Download,
@@ -9,7 +8,6 @@ import {
   Pencil,
   Plus,
   RefreshCw,
-  Send,
   Trash2,
   Wand2,
 } from "lucide-react";
@@ -86,7 +84,7 @@ export function ApplySettings() {
               <option value="dry-run">{t("mode.dry")}</option>
             </Select>
           </Field>
-          <div className="divide-y divide-border">
+          <div className="divide-y divide-line">
             <SwitchRow
               title={t("applyset.autofill")}
               description={t("applyset.autofill_hint")}
@@ -176,7 +174,7 @@ function ExtensionCard({
           <StatusLine
             ok={x.installed && !x.outdated}
             title={x.installed ? (x.outdated ? t("ext.outdated") : t("ext.ready")) : t("ext.missing")}
-            text={x.installed ? <code className="break-all text-footnote">{x.path}</code> : t("ext.missing_hint")}
+            text={x.installed ? <code className="break-all text-meta">{x.path}</code> : t("ext.missing_hint")}
             action={
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" variant={x.installed && !x.outdated ? "secondary" : "primary"} onClick={() => install.mutate()} disabled={install.isPending}>
@@ -191,13 +189,13 @@ function ExtensionCard({
             }
           />
         )}
-        <ol className="list-decimal space-y-1 pl-5 text-[0.875rem] text-fg-muted">
+        <ol className="list-decimal space-y-1 pl-5 text-body text-ink-2">
           <li>{t("ext.step1")}</li>
           <li>{t("ext.step2")}</li>
           <li>{t("ext.step3")}</li>
           <li>{t("ext.step4")}</li>
         </ol>
-        <div className="divide-y divide-border">
+        <div className="divide-y divide-line">
           <SwitchRow title={t("ext.portals")} description={t("ext.portals_hint")} checked={portals} onCheckedChange={onPortals} />
         </div>
         {portals && (
@@ -244,8 +242,8 @@ export function AutopilotSettings() {
                         set("autopilot_days", on ? s.autopilot_days.filter((x) => x !== i) : [...s.autopilot_days, i].sort())
                       }
                       className={cn(
-                        "h-9 w-12 rounded-md border text-footnote font-medium transition-colors",
-                        on ? "border-primary bg-primary text-primary-fg" : "border-border-strong bg-surface text-fg-muted hover:bg-surface-2",
+                        "h-9 w-12 rounded-md border text-meta font-medium transition-colors",
+                        on ? "border-accent bg-accent text-on-accent" : "border-line-input bg-raised text-ink-2 hover:bg-sunken",
                       )}
                       aria-pressed={on}
                     >
@@ -289,11 +287,11 @@ export function AutopilotSettings() {
       <Card>
         <CardHeader title={t("autopilot.os_title")} description={t("autopilot.os_hint")} />
         <CardBody>
-          <pre className="overflow-x-auto rounded-md bg-surface-2 px-4 py-3 font-mono text-footnote">
+          <pre className="overflow-x-auto rounded-md bg-sunken px-4 py-3 font-mono text-meta">
             {`schtasks /Create /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST ${s.autopilot_time} /TN jobslop /TR "jobslop autopilot"`}
           </pre>
-          <p className="mt-2 text-caption text-fg-muted">{t("autopilot.os_unix")}</p>
-          <pre className="mt-1 overflow-x-auto rounded-md bg-surface-2 px-4 py-3 font-mono text-footnote">{`${Number(s.autopilot_time.split(":")[1] ?? 0)} ${Number(s.autopilot_time.split(":")[0] ?? 8)} * * 1-5  jobslop autopilot`}</pre>
+          <p className="mt-2 text-small text-ink-2">{t("autopilot.os_unix")}</p>
+          <pre className="mt-1 overflow-x-auto rounded-md bg-sunken px-4 py-3 font-mono text-meta">{`${Number(s.autopilot_time.split(":")[1] ?? 0)} ${Number(s.autopilot_time.split(":")[0] ?? 8)} * * 1-5  jobslop autopilot`}</pre>
         </CardBody>
       </Card>
       {bar}
@@ -316,12 +314,12 @@ export function NotificationSettings() {
   return (
     <div className="space-y-6 pb-24">
       <Card>
-        <CardHeader title={t("notify.browser")} description={t("notify.browser_hint")} icon={<BellRing />} />
+        <CardHeader title={t("notify.browser")} description={t("notify.browser_hint")} />
         <CardBody className="space-y-3">
           <SwitchRow title={t("notify.desktop")} checked={s.notify_desktop} onCheckedChange={(v) => set("notify_desktop", v)} />
           {permission !== "granted" && (
             <Button
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={async () => setPermission(await Notification.requestPermission())}
               disabled={permission === "denied"}
@@ -332,7 +330,7 @@ export function NotificationSettings() {
         </CardBody>
       </Card>
       <Card>
-        <CardHeader title={t("notify.push")} description={t("notify.push_hint")} icon={<Send />} />
+        <CardHeader title={t("notify.push")} description={t("notify.push_hint")} />
         <CardBody className="space-y-4">
           <Field label="ntfy" hint={t("notify.ntfy_hint")}>
             <Input
@@ -350,7 +348,7 @@ export function NotificationSettings() {
               onChange={(e) => set("notify_webhook_url", e.target.value.trim())}
             />
           </Field>
-          <Button variant="outline" size="sm" onClick={() => test.mutate()} loading={test.isPending}>
+          <Button variant="secondary" size="sm" onClick={() => test.mutate()} loading={test.isPending}>
             {t("notify.test")}
           </Button>
         </CardBody>
@@ -388,7 +386,7 @@ export function AnswersSettings() {
         title={t("answers.title")}
         description={t("answers.hint")}
         action={
-          <Button size="sm" variant="soft" onClick={() => setEditing({ question: "", answer: "" })}>
+          <Button size="sm" variant="secondary" onClick={() => setEditing({ question: "", answer: "" })}>
             <Plus />
             {t("common.add")}
           </Button>
@@ -399,18 +397,18 @@ export function AnswersSettings() {
         {rows.length === 0 ? (
           <EmptyState title={t("answers.empty")} description={t("answers.empty_hint")} />
         ) : (
-          <ul className="divide-y divide-border rounded-lg border border-border">
+          <ul className="divide-y divide-line rounded-lg border border-line">
             {rows.map((a) => (
               <li key={a.id} className="flex items-start gap-3 px-4 py-3">
                 <div className="min-w-0 flex-1">
-                  <div className="text-[0.875rem] font-medium">{a.question}</div>
-                  <div className="mt-0.5 text-footnote text-fg-muted whitespace-pre-line">{a.answer}</div>
-                  <div className="mt-1 text-caption text-fg-subtle">{formatRelative(a.updated_at, lang)}</div>
+                  <div className="text-body font-medium">{a.question}</div>
+                  <div className="mt-0.5 text-meta text-ink-2 whitespace-pre-line">{a.answer}</div>
+                  <div className="mt-1 text-small text-ink-3">{formatRelative(a.updated_at, lang)}</div>
                 </div>
-                <Button size="icon-sm" variant="ghost" onClick={() => setEditing(a)} aria-label={t("common.edit")}>
+                <Button size="icon-sm" variant="quiet" onClick={() => setEditing(a)} aria-label={t("common.edit")}>
                   <Pencil />
                 </Button>
-                <Button size="icon-sm" variant="ghost" onClick={() => remove.mutate(a.id)} aria-label={t("common.delete")}>
+                <Button size="icon-sm" variant="quiet" onClick={() => remove.mutate(a.id)} aria-label={t("common.delete")}>
                   <Trash2 />
                 </Button>
               </li>
@@ -424,7 +422,7 @@ export function AnswersSettings() {
             title={editing.id ? t("answers.edit") : t("answers.new")}
             footer={
               <>
-                <Button variant="ghost" onClick={() => setEditing(null)}>
+                <Button variant="quiet" onClick={() => setEditing(null)}>
                   {t("common.cancel")}
                 </Button>
                 <Button
@@ -498,13 +496,13 @@ export function ExclusionSettings() {
         {rows.data?.length === 0 ? (
           <EmptyState title={t("excl.empty")} />
         ) : (
-          <ul className="divide-y divide-border rounded-lg border border-border">
+          <ul className="divide-y divide-line rounded-lg border border-line">
             {rows.data?.map((e) => (
               <li key={e.id} className="flex items-center gap-3 px-4 py-2.5">
                 <Badge tone="outline">{t(`excl.${e.kind === "title" ? "title_rx" : e.kind}`)}</Badge>
-                <span className="min-w-0 flex-1 truncate text-[0.875rem]">{e.value}</span>
-                <span className="hidden text-caption text-fg-subtle sm:inline">{formatRelative(e.created_at, lang)}</span>
-                <Button size="icon-sm" variant="ghost" onClick={() => remove.mutate(e.id)} aria-label={t("common.delete")}>
+                <span className="min-w-0 flex-1 truncate text-body">{e.value}</span>
+                <span className="hidden text-small text-ink-3 sm:inline">{formatRelative(e.created_at, lang)}</span>
+                <Button size="icon-sm" variant="quiet" onClick={() => remove.mutate(e.id)} aria-label={t("common.delete")}>
                   <Trash2 />
                 </Button>
               </li>
@@ -548,13 +546,13 @@ export function SystemSettings() {
         <CardHeader
           title={t("system.status")}
           action={
-            <Button size="sm" variant="ghost" onClick={() => refresh.mutate()} loading={refresh.isPending}>
+            <Button size="sm" variant="quiet" onClick={() => refresh.mutate()} loading={refresh.isPending}>
               {!refresh.isPending && <RefreshCw />}
               {t("system.recheck")}
             </Button>
           }
         />
-        <CardBody className="divide-y divide-border">
+        <CardBody className="divide-y divide-line">
           <StatusLine
             ok={s.claude.ok}
             title="Claude Code"
@@ -596,22 +594,22 @@ export function SystemSettings() {
         <CardHeader title={t("system.data")} description={t("system.data_hint")} />
         <CardBody className="flex flex-wrap items-center gap-2">
           <Kbd>{s.home}</Kbd>
-          <Button size="sm" variant="outline" onClick={() => folder.mutate()}>
+          <Button size="sm" variant="secondary" onClick={() => folder.mutate()}>
             <FolderOpen />
             {t("system.open_folder")}
           </Button>
-          <Button size="sm" variant="outline" asChild>
+          <Button size="sm" variant="secondary" asChild>
             <a href="/api/export.csv">
               <Download />
               {t("system.export")}
             </a>
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => rerun.mutate()}>
+          <Button size="sm" variant="quiet" onClick={() => rerun.mutate()}>
             <Wand2 />
             {t("system.rerun_setup")}
           </Button>
         </CardBody>
-        <CardBody className="text-caption text-fg-subtle">jobslop {s.version}</CardBody>
+        <CardBody className="text-small text-ink-3">jobslop {s.version}</CardBody>
       </Card>
     </div>
   );
@@ -620,10 +618,10 @@ export function SystemSettings() {
 export function StatusLine({ ok, title, text, action }: { ok: boolean; title: ReactNode; text: ReactNode; action?: ReactNode }) {
   return (
     <div className="flex flex-wrap items-center gap-3 py-3">
-      {ok ? <CircleCheck className="size-5 shrink-0 text-success" /> : <CircleAlert className="size-5 shrink-0 text-warning" />}
+      {ok ? <CircleCheck className="size-5 shrink-0 text-positive" /> : <CircleAlert className="size-5 shrink-0 text-amber" />}
       <div className="min-w-0 flex-1">
-        <div className="text-[0.875rem] font-medium">{title}</div>
-        <div className="truncate text-footnote text-fg-muted">{text}</div>
+        <div className="text-body font-medium">{title}</div>
+        <div className="truncate text-meta text-ink-2">{text}</div>
       </div>
       {action}
     </div>
