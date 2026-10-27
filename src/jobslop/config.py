@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     notify_webhook_url: str = ""  # Discord-/Slack-kompatibel (JSON mit "content" und "text")
     follow_up_days: int = 10  # Nachfassen-Erinnerung nach dem Absenden
     setup_completed: bool = False
+    # Demo-Ordner (scripts/demo_data.py): nichts darf echt crawlen, bewerben oder Nachrichten verschicken
+    demo: bool = False
 
     @property
     def db_path(self) -> Path:
@@ -95,6 +97,17 @@ class Settings(BaseSettings):
     def ensure_dirs(self) -> None:
         for path in (self.home, self.artifacts_dir, self.documents_dir, self.browser_profile_dir):
             path.mkdir(parents=True, exist_ok=True)
+
+
+class DemoModeError(RuntimeError):
+    """Aktion mit echten Folgen (Crawl, Bewerbung, Nachricht) in einem Demo-Ordner."""
+
+
+def ensure_not_demo(settings: Settings, action: str) -> None:
+    if settings.demo:
+        raise DemoModeError(
+            f"Demo-Modus: {action} ist gesperrt – die Daten in {settings.home} sind erfunden."
+        )
 
 
 # Felder, die das Dashboard ändern darf (Rest nur über Umgebung/.env)

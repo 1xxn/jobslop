@@ -1049,8 +1049,24 @@ def export(
         console.print(f"[green]✓[/green] {len(rows)} Zeilen → {out}")
 
 
+def utf8_output() -> None:
+    """Unter Windows schreiben umgeleitete Ausgaben (Pipe, Aufgabenplanung, Log-Datei) sonst cp1252 –
+    und schon ein „↺“ oder „−“ bricht den Befehl mit UnicodeEncodeError ab."""
+    for stream in (sys.stdout, sys.stderr):
+        encoding = (getattr(stream, "encoding", "") or "").lower().replace("-", "")
+        if encoding != "utf8" and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 def main() -> None:
-    app()
+    from .config import DemoModeError
+
+    utf8_output()
+    try:
+        app()
+    except DemoModeError as exc:
+        console.print(f"[red]{escape(str(exc))}[/red]")
+        raise SystemExit(2) from None
 
 
 if __name__ == "__main__":

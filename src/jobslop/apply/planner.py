@@ -262,11 +262,34 @@ _SUBMIT_RX = re.compile(
 )
 _NEXT_RX = re.compile(r"^(weiter|next|continue|fortfahren|review|überprüfen)\b", re.I)
 _APPLY_RX = re.compile(r"apply|bewerb", re.I)
+# Eindeutig endgültiges Absenden – im Gegensatz zu „Jetzt bewerben“, das auf Stellenseiten nur das Formular öffnet
+_FINAL_SUBMIT_RX = re.compile(
+    r"submit|absenden|abschicken|einreichen|send application|^send$|^senden$|"
+    r"bewerbung (senden|abschicken|einreichen|abschließen)|(complete|finish) (my |your )?application",
+    re.I,
+)
+_STEP_RX = re.compile(r"\b(weiter|next|continue|fortfahren|review|überprüfen|zurück|back)\b", re.I)
 _CONFIRM_RX = re.compile(
     r"thank you for (your )?appl|application (has been )?(submitted|received)|we have received your application|"
     r"vielen dank für (deine|ihre) bewerbung|bewerbung (ist )?(erfolgreich )?(eingegangen|versendet|übermittelt)|danke für deine bewerbung",
     re.I,
 )
+
+
+def is_final_submit(button: dict[str, Any], *, form_filled: bool) -> bool:
+    """Schickt dieser Button die Bewerbung ab? Solche Klicks laufen immer über Freigabe bzw. Testlauf.
+
+    „Bewerben“/„Apply“ zählt nur als Absenden, wenn es im Formular steht und dort schon etwas ausgefüllt ist –
+    auf der Stellenanzeige öffnet derselbe Text bloß das Formular.
+    """
+    if button.get("cookie") or button.get("autofill"):
+        return False
+    text = button.get("text", "")
+    if _STEP_RX.search(text):
+        return False
+    if _FINAL_SUBMIT_RX.search(text):
+        return True
+    return form_filled and bool(button.get("form")) and bool(_APPLY_RX.search(text))
 
 
 def _same_value(current: str, expected: str) -> bool:

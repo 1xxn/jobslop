@@ -7,6 +7,7 @@ import sqlite3
 from pathlib import Path
 
 from conftest import add_job
+from jobslop.apply.planner import is_final_submit
 from jobslop.classify import categorize, html_to_text, level_of, match_key, score, title_allowed, where_of
 from jobslop.config import (
     SearchConfig,
@@ -99,6 +100,20 @@ def test_html_to_text():
         "•",
         "B",
     ]
+
+
+def test_final_submit_detection():
+    def btn(text, form=True, **kw):
+        return {"text": text, "form": form, **kw}
+
+    assert is_final_submit(btn("Submit application"), form_filled=False)
+    assert is_final_submit(btn("Bewerbung absenden", form=False), form_filled=False)
+    assert is_final_submit(btn("Apply"), form_filled=True)  # „Apply“ unter einem ausgefüllten Formular
+    assert not is_final_submit(btn("Jetzt bewerben", form=False), form_filled=False)  # Stellenanzeige
+    assert not is_final_submit(btn("Apply"), form_filled=False)
+    assert not is_final_submit(btn("Weiter"), form_filled=True)
+    assert not is_final_submit(btn("Review and submit"), form_filled=True)
+    assert not is_final_submit(btn("Submit", cookie=True), form_filled=True)
 
 
 def test_guard_rules(settings, config):
@@ -205,3 +220,63 @@ def test_old_database_gets_new_columns(tmp_path):
 def test_import_file_format_is_documented():
     data = json.loads((FIXTURES / "jobs_import.json").read_text(encoding="utf-8"))
     assert {"company", "title", "url"} <= set(data["jobs"][0])
+
+
+def test_cli_output_survives_non_utf8_streams(monkeypatch):
+    import io
+    import sys
+
+    from jobslop.cli import utf8_output
+
+    # So sieht stdout unter Windows aus, wenn die Ausgabe umgeleitet wird (Pipe, Aufgabenplanung)
+    raw = io.BytesIO()
+    stream = io.TextIOWrapper(raw, encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", stream)
+    utf8_output()
+    print("↺ 2 wieder offen  − 1 geschlossen")
+    stream.flush()
+    assert "↺".encode() in raw.getvalue()
+
+
+def _alive(pid: int) -> bool:
+    import os
+    import subprocess
+    import sys
+
+    if sys.platform == "win32":
+        out = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, errors="replace"
+        ).stdout
+        return str(pid) in out
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def test_runner_stop_kills_the_whole_process_tree():
+    """„Stopp“ muss auch Enkelprozesse (Playwright-Treiber, Chromium) beenden, sonst bleibt das Profil gesperrt."""
+    import subprocess
+    import sys
+    import time
+
+    from jobslop.runner import kill_tree, process_group
+
+    script = (
+        "import subprocess, sys, time\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        "print(child.pid, flush=True)\n"
+        "time.sleep(60)\n"
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-c", script], stdout=subprocess.PIPE, text=True, **process_group()
+    )
+    assert proc.stdout is not None
+    grandchild = int(proc.stdout.readline())
+    kill_tree(proc)
+    assert proc.poll() is not None
+    deadline = time.monotonic() + 5
+    while _alive(grandchild) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert not _alive(grandchild)

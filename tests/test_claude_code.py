@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import stat
 import sys
 from pathlib import Path
 
@@ -18,11 +17,10 @@ from jobslop.llm import (
     LLMUnavailable,
     check_login,
     file_block,
+    find_claude,
     image_block,
     strict_schema,
 )
-
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Attrappe ist ein Shebang-Skript")
 
 FAKE = Path(__file__).parent / "fake_claude.py"
 
@@ -39,16 +37,15 @@ class Answer(BaseModel):
 
 @pytest.fixture
 def fake(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    exe = tmp_path / "claude"
-    exe.write_text(f"#!{sys.executable}\nimport runpy; runpy.run_path({str(FAKE)!r}, run_name='__main__')\n")
-    exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
+    # Die Attrappe läuft über den Python-Interpreter – so auch unter Windows, wo Shebang-Skripte nicht starten.
+    monkeypatch.setattr("jobslop.llm.find_claude", lambda explicit="": [sys.executable, str(FAKE)])
     log = tmp_path / "calls.jsonl"
     monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log))
     monkeypatch.setenv(
         "FAKE_CLAUDE_OUTPUT", json.dumps({"verdict": "ok", "items": [{"title": "a", "tags": []}]})
     )
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-sollte-nie-ankommen")
-    settings = Settings(home=tmp_path / "home", claude_bin=str(exe))
+    settings = Settings(home=tmp_path / "home")
 
     def calls() -> list[dict]:
         return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
@@ -99,6 +96,7 @@ async def test_parse_with_files_enables_read(fake, tmp_path):
     call = calls()[0]
     args = call["args"]
     assert args[args.index("--tools") + 1] == "Read"
+    assert args[args.index("--allowedTools") + 1] == "Read(./**)"  # nur der Arbeitsordner, nie ~/.ssh & Co.
     assert "datei-1.pdf" in call["files"] and "screenshot-3.jpg" in call["files"]
     assert "datei-1.pdf" in call["stdin"] and "screenshot-3.jpg" in call["stdin"]
 
@@ -128,6 +126,12 @@ def test_check_login(fake, monkeypatch, mode, ok):
     assert result.ok is ok
     if ok:
         assert "2.1.310" in result.message and "pro" in result.message
+
+
+def test_find_claude_prefers_explicit_path(tmp_path):
+    exe = tmp_path / ("claude.exe" if sys.platform == "win32" else "claude")
+    exe.write_bytes(b"")
+    assert find_claude(str(exe)) == [str(exe)]
 
 
 def test_missing_binary(tmp_path, monkeypatch):
