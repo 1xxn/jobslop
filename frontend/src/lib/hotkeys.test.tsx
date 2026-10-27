@@ -21,6 +21,23 @@ describe("useHotkeys", () => {
     expect(settings).toHaveBeenCalledOnce();
   });
 
+  it("lets a started sequence win over a single key of another component", () => {
+    const settings = vi.fn();
+    const star = vi.fn();
+    render(
+      <>
+        <Probe keys={{ "g s": settings }} />
+        <Probe keys={{ s: star }} />
+      </>,
+    );
+    fireEvent.keyDown(window, { key: "g" });
+    fireEvent.keyDown(window, { key: "s" });
+    expect(settings).toHaveBeenCalledOnce();
+    expect(star).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: "s" });
+    expect(star).toHaveBeenCalledOnce();
+  });
+
   it("stays out of the way while typing or with modifier keys", () => {
     const jump = vi.fn();
     const { getByLabelText } = render(<Probe keys={{ j: jump }} />);
