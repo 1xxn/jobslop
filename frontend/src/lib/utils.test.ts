@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "./messages";
-import { hostOf, initials, sourceName } from "./utils";
+import { formatWhen, hostOf, initials, sourceName } from "./utils";
 
 const t = (key: keyof typeof messages.en) => messages.en[key];
 
@@ -28,5 +28,24 @@ describe("hostOf / initials", () => {
 
   it("builds avatar initials", () => {
     expect(initials("Brandenburg Data AG")).toBe("BD");
+  });
+});
+
+describe("formatWhen", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 9, 27, 14, 0));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("says today and tomorrow in words", () => {
+    expect(formatWhen(new Date(2026, 9, 27, 18, 0).toISOString(), "de")).toBe("heute 18:00");
+    expect(formatWhen(new Date(2026, 9, 28, 8, 0).toISOString(), "de")).toBe("morgen 08:00");
+    expect(formatWhen(new Date(2026, 9, 28, 8, 0).toISOString(), "en")).toMatch(/^tomorrow 0?8:00/);
+  });
+
+  it("uses the weekday within a week and is empty without a date", () => {
+    expect(formatWhen(new Date(2026, 9, 30, 8, 0).toISOString(), "de")).toMatch(/^Fr\.? 08:00$/);
+    expect(formatWhen(null, "de")).toBe("");
   });
 });

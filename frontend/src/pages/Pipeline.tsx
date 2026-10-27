@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BellRing, CalendarClock, Ellipsis, ExternalLink, Handshake, MessagesSquare, Send, ThumbsDown } from "lucide-react";
+import { CalendarClock, Ellipsis, ExternalLink, Handshake, MessagesSquare, Send, ThumbsDown } from "lucide-react";
 import { type DragEvent, type ReactNode, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
-import { CompanyAvatar, PageHeader } from "@/components/domain";
+import { CompanyAvatar, StatusGlyph } from "@/components/domain";
 import { Dialog, DialogContent, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/overlays";
 import { Button, EmptyState, Field, Input, Skeleton, Textarea } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
@@ -14,14 +14,15 @@ import { cn, formatDate, formatRelative, parseDate } from "@/lib/utils";
 
 type Stage = "applied" | "interview" | "offer" | "rejected";
 const STAGE_STATUS: Record<Stage, string> = { applied: "submitted", interview: "interview", offer: "offer", rejected: "rejected" };
-const STAGES: { id: Stage; icon: ReactNode; tone: string }[] = [
-  { id: "applied", icon: <Send />, tone: "text-info" },
-  { id: "interview", icon: <MessagesSquare />, tone: "text-primary" },
-  { id: "offer", icon: <Handshake />, tone: "text-success" },
-  { id: "rejected", icon: <ThumbsDown />, tone: "text-fg-subtle" },
+const STAGES: { id: Stage; icon: ReactNode }[] = [
+  { id: "applied", icon: <Send /> },
+  { id: "interview", icon: <MessagesSquare /> },
+  { id: "offer", icon: <Handshake /> },
+  { id: "rejected", icon: <ThumbsDown /> },
 ];
 
-export function PipelinePage() {
+/** Bewerbungen ab „gesendet“ als Board – zweite Ansicht der Seite Bewerbungen. */
+export function PipelineBoard() {
   const { t, lang } = useI18n();
   const qc = useQueryClient();
   const pipeline = useQuery({ queryKey: ["pipeline"], queryFn: api.pipeline });
@@ -48,21 +49,16 @@ export function PipelinePage() {
 
   return (
     <>
-      <PageHeader title={t("pipeline.title")} description={t("pipeline.description")} />
-
       {due.length > 0 && (
-        <div className="mb-6 rounded-lg border border-warning/40 bg-warning-soft p-4">
-          <h2 className="flex items-center gap-2 text-[0.875rem] font-semibold">
-            <BellRing className="size-4 text-warning" />
-            {t("pipeline.due", { n: due.length })}
-          </h2>
+        <div className="mb-6">
+          <h2 className="text-body font-semibold text-accent">{t("pipeline.due", { n: due.length })}</h2>
           <div className="mt-3 flex flex-wrap gap-2">
             {due.map((a) => (
               <button
                 key={a.id}
                 type="button"
                 onClick={() => setEditing(a)}
-                className="rounded-full border border-warning/40 bg-surface px-3 py-1 text-footnote hover:bg-surface-2"
+                className="rounded-md border border-line-input px-2.5 py-1 text-meta hover:bg-sunken"
               >
                 {a.company} · {formatRelative(a.follow_up_at, lang)}
               </button>
@@ -74,11 +70,11 @@ export function PipelinePage() {
       {pipeline.isLoading ? (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {STAGES.map((s) => (
-            <Skeleton key={s.id} className="h-80 rounded-xl" />
+            <Skeleton key={s.id} className="h-80 rounded-lg" />
           ))}
         </div>
       ) : total === 0 ? (
-        <EmptyState icon={<Send />} title={t("pipeline.empty")} description={t("pipeline.empty_hint")} />
+        <EmptyState title={t("pipeline.empty")} description={t("pipeline.empty_hint")} />
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {STAGES.map((stage) => {
@@ -93,15 +89,15 @@ export function PipelinePage() {
                 onDragLeave={() => setDragOver(null)}
                 onDrop={(e) => onDrop(e, stage.id)}
                 className={cn(
-                  "flex min-h-64 flex-col rounded-xl bg-surface-2/60 p-2 transition-colors",
-                  dragOver === stage.id && "bg-primary-soft ring-2 ring-primary/40",
+                  "flex min-h-64 flex-col rounded-lg p-1 transition-colors",
+                  dragOver === stage.id && "bg-accent-soft",
                 )}
                 aria-label={t(`pipeline.${stage.id}` as MessageKey)}
               >
-                <header className="flex items-center gap-2 px-2 pt-1.5 pb-3">
-                  <span className={cn("[&_svg]:size-4", stage.tone)}>{stage.icon}</span>
-                  <h2 className="text-[0.875rem] font-semibold">{t(`pipeline.${stage.id}` as MessageKey)}</h2>
-                  <span className="tabular ml-auto rounded-full bg-surface px-2 text-caption text-fg-muted">{cards.length}</span>
+                <header className="mb-2 flex items-center gap-2 border-b border-line px-1 pt-1 pb-2">
+                  <StatusGlyph status={STAGE_STATUS[stage.id]} />
+                  <h2 className="text-body font-semibold">{t(`pipeline.${stage.id}` as MessageKey)}</h2>
+                  <span className="tabular ml-auto text-small text-ink-3">{cards.length}</span>
                 </header>
                 <div className="flex flex-col gap-2">
                   {cards.map((a) => (
@@ -135,21 +131,21 @@ function PipelineCard({
     <article
       draggable
       onDragStart={(e) => e.dataTransfer.setData("text/plain", String(app.id))}
-      className="group cursor-grab rounded-lg border border-border bg-surface p-3 shadow-sm transition-shadow hover:shadow-md active:cursor-grabbing"
+      className="group cursor-grab rounded-md border border-line bg-raised p-3 transition-colors hover:border-line-input active:cursor-grabbing"
     >
       <div className="flex items-start gap-2.5">
         <CompanyAvatar name={app.company} size={30} />
         <div className="min-w-0 flex-1">
           <button type="button" onClick={onEdit} className="block w-full text-left">
-            <div className="truncate text-[0.875rem] font-semibold">{app.company}</div>
-            <div className="line-clamp-2 text-footnote text-fg-muted">{app.title}</div>
+            <div className="truncate text-body font-semibold">{app.company}</div>
+            <div className="line-clamp-2 text-meta text-ink-2">{app.title}</div>
           </button>
         </div>
         <Menu>
           <MenuTrigger asChild>
             <button
               type="button"
-              className="grid size-7 place-items-center rounded-md text-fg-subtle opacity-0 hover:bg-surface-2 group-hover:opacity-100 focus-visible:opacity-100"
+              className="grid size-7 place-items-center rounded-md text-ink-3 opacity-0 hover:bg-sunken group-hover:opacity-100 focus-visible:opacity-100"
               aria-label={t("common.more")}
             >
               <Ellipsis className="size-4" />
@@ -172,11 +168,11 @@ function PipelineCard({
           </MenuContent>
         </Menu>
       </div>
-      {app.notes && <p className="mt-2 line-clamp-2 text-caption text-fg-muted">{app.notes}</p>}
-      <div className="mt-2.5 flex items-center justify-between text-caption text-fg-subtle">
+      {app.notes && <p className="mt-2 line-clamp-2 text-small text-ink-2">{app.notes}</p>}
+      <div className="mt-2.5 flex items-center justify-between text-small text-ink-3">
         <span>{formatDate(app.submitted_at ?? app.started_at, lang)}</span>
         {due && (
-          <span className={cn("inline-flex items-center gap-1", overdue ? "font-medium text-warning" : "")}>
+          <span className={cn("inline-flex items-center gap-1", overdue ? "font-medium text-accent" : "")}>
             <CalendarClock className="size-3" />
             {formatRelative(app.follow_up_at, lang)}
           </span>
@@ -210,7 +206,7 @@ function EditDialog({ app, onClose }: { app: ApplicationSummary; onClose: () => 
         description={app.title}
         footer={
           <>
-            <Button variant="ghost" onClick={onClose}>
+            <Button variant="quiet" onClick={onClose}>
               {t("common.cancel")}
             </Button>
             <Button variant="primary" onClick={() => save.mutate()} loading={save.isPending}>

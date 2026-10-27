@@ -3,10 +3,10 @@ import { extendTailwindMerge } from "tailwind-merge";
 import { hasMessage, type MessageKey } from "./messages";
 
 // Eigene Schriftstufen (styles.css → --text-*) bekannt machen: sonst hält tailwind-merge z. B. `text-body`
-// für eine Textfarbe und verwirft dafür `text-primary-fg`.
+// für eine Textfarbe und verwirft dafür `text-on-accent`.
 const twMerge = extendTailwindMerge({
   extend: {
-    theme: { text: ["caption", "footnote", "body", "headline", "title3", "title2", "title1", "large"] },
+    theme: { text: ["small", "meta", "body", "read", "heading", "title", "display"] },
   },
 });
 
@@ -37,6 +37,20 @@ export function formatDateTime(value: string | null | undefined, lang: string): 
   const d = parseDate(value);
   if (!d) return "";
   return d.toLocaleString(lang, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+/** Zeitpunkt in der nahen Zukunft oder Vergangenheit: „heute 08:00“, „morgen 08:00“, „Mi. 08:00“, sonst Datum. */
+export function formatWhen(value: string | null | undefined, lang: string): string {
+  const d = parseDate(value);
+  if (!d) return "";
+  const time = d.toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit" });
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((startOf(d) - startOf(new Date())) / 86_400_000);
+  if (Math.abs(days) <= 1) {
+    return `${new Intl.RelativeTimeFormat(lang, { numeric: "auto" }).format(days, "day")} ${time}`;
+  }
+  if (Math.abs(days) < 7) return `${d.toLocaleDateString(lang, { weekday: "short" })} ${time}`;
+  return formatDateTime(value, lang);
 }
 
 export function formatDate(value: string | null | undefined, lang: string): string {

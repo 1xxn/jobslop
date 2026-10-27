@@ -1,105 +1,142 @@
-import { CircleCheck, CircleX, Clock, Hand, Hourglass, LoaderCircle, MessageCircleQuestion, Pause, Send, Star } from "lucide-react";
-import { type ReactNode, useId } from "react";
+import type { ReactNode } from "react";
 import { useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
 import type { AppStatus } from "@/lib/types";
-import { cn, initials, roleClass } from "@/lib/utils";
-import { Badge } from "./ui/primitives";
+import { cn, initials } from "@/lib/utils";
 import { Tooltip } from "./ui/overlays";
 
+/** Wortmarke: einfarbiges Zeichen in Petrol – der Tropfen im Logo ist die Herkunft der Akzentfarbe. */
 export function Logo({ className, withText = true }: { className?: string; withText?: boolean }) {
-  // eigene Verlaufs-ID je Instanz: eine ausgeblendete Kopie (z. B. Seitenleiste auf dem Handy) würde sie sonst „verschlucken“
-  const gradient = `jl-${useId().replace(/:/g, "")}`;
   return (
-    <span className={cn("inline-flex items-center gap-2.5", className)}>
-      <svg viewBox="0 0 64 64" className="size-7 shrink-0" aria-hidden>
-        <defs>
-          <linearGradient id={gradient} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stopColor="#7c6cff" />
-            <stop offset="1" stopColor="#3b5bfd" />
-          </linearGradient>
-        </defs>
-        <rect width="64" height="64" rx="16" fill={`url(#${gradient})`} />
+    <span className={cn("inline-flex items-center gap-2", className)}>
+      <svg viewBox="0 0 64 64" className="size-6 shrink-0" aria-hidden>
+        <rect width="64" height="64" rx="14" className="fill-accent" />
         <path
           d="M38 14v23.5c0 6.4-4.6 11.5-11 11.5-3.6 0-6.7-1.6-8.7-4.2"
           fill="none"
-          stroke="#fff"
+          className="stroke-on-accent"
           strokeWidth="6"
           strokeLinecap="round"
         />
-        <circle cx="38" cy="14" r="3" fill="#fff" />
-        <path d="M46 40c0 2.8-1.9 5-4.2 5s-4.2-2.2-4.2-5c0-3.2 4.2-8.3 4.2-8.3s4.2 5.1 4.2 8.3z" fill="#c7f9e8" />
+        <circle cx="38" cy="14" r="3" className="fill-on-accent" />
+        <path
+          d="M46 40c0 2.8-1.9 5-4.2 5s-4.2-2.2-4.2-5c0-3.2 4.2-8.3 4.2-8.3s4.2 5.1 4.2 8.3z"
+          className="fill-on-accent"
+          opacity="0.7"
+        />
       </svg>
-      {withText && <span className="text-[1.0625rem] font-semibold tracking-[-0.02em]">jobslop</span>}
+      {withText && <span className="text-heading font-semibold tracking-[-0.01em]">jobslop</span>}
     </span>
   );
 }
 
-const STATUS: Record<string, { tone: "neutral" | "primary" | "success" | "warning" | "danger" | "info"; icon: ReactNode }> = {
-  running: { tone: "info", icon: <LoaderCircle className="animate-spin" /> },
-  queued: { tone: "primary", icon: <Clock /> },
-  needs_input: { tone: "warning", icon: <MessageCircleQuestion /> },
-  needs_review: { tone: "warning", icon: <Hand /> },
-  ready: { tone: "info", icon: <CircleCheck /> },
-  paused: { tone: "neutral", icon: <Pause /> },
-  submitted: { tone: "success", icon: <Send /> },
-  manual: { tone: "success", icon: <Send /> },
-  interview: { tone: "primary", icon: <Star /> },
-  offer: { tone: "success", icon: <Star /> },
-  rejected: { tone: "neutral", icon: <CircleX /> },
-  failed: { tone: "danger", icon: <CircleX /> },
-  skipped: { tone: "neutral", icon: <Hourglass /> },
+/* ----------------------------------------------------------------- Status: Glyphe + Wort statt farbiger Pill */
+
+type Glyph = "ring" | "pie" | "you" | "pause" | "dot" | "good" | "slash" | "fail" | "dash";
+
+const GLYPH: Record<string, Glyph> = {
+  queued: "ring",
+  running: "pie",
+  needs_input: "you",
+  needs_review: "you",
+  ready: "you",
+  paused: "pause",
+  submitted: "dot",
+  manual: "dot",
+  interview: "good",
+  offer: "good",
+  rejected: "slash",
+  failed: "fail",
+  skipped: "dash",
 };
 
-export function StatusBadge({ status, className }: { status: AppStatus | string; className?: string }) {
+/** Statuszeichen (12 px). Nie allein verwenden – immer mit Wort daneben oder als Gruppentitel. */
+export function StatusGlyph({ status, className }: { status: string; className?: string }) {
+  const g = GLYPH[status] ?? "ring";
+  return (
+    <svg viewBox="0 0 12 12" className={cn("size-3 shrink-0", className)} aria-hidden>
+      {g === "ring" && <circle cx="6" cy="6" r="4.25" fill="none" strokeWidth="1.5" className="stroke-ink-3" />}
+      {g === "pie" && (
+        <>
+          <circle cx="6" cy="6" r="4.25" fill="none" strokeWidth="1.5" className="stroke-accent" />
+          <path d="M6 6V2.5A3.5 3.5 0 0 1 9.5 6Z" className="fill-accent" />
+        </>
+      )}
+      {g === "you" && (
+        <>
+          <circle cx="6" cy="6" r="6" className="fill-accent-soft" />
+          <circle cx="6" cy="6" r="3.5" className="fill-accent" />
+        </>
+      )}
+      {g === "pause" && (
+        <>
+          <circle cx="6" cy="6" r="4.25" fill="none" strokeWidth="1.5" className="stroke-ink-3" />
+          <path d="M4.75 4.25v3.5M7.25 4.25v3.5" strokeWidth="1.25" className="stroke-ink-3" />
+        </>
+      )}
+      {g === "dot" && <circle cx="6" cy="6" r="4" className="fill-ink-3" />}
+      {g === "good" && <circle cx="6" cy="6" r="4" className="fill-positive" />}
+      {g === "fail" && <circle cx="6" cy="6" r="4" className="fill-danger" />}
+      {g === "slash" && (
+        <>
+          <circle cx="6" cy="6" r="4.25" fill="none" strokeWidth="1.5" className="stroke-ink-3" />
+          <path d="M3.25 8.75l5.5-5.5" strokeWidth="1.25" className="stroke-ink-3" />
+        </>
+      )}
+      {g === "dash" && (
+        <>
+          <circle cx="6" cy="6" r="4.25" fill="none" strokeWidth="1.5" className="stroke-ink-3" />
+          <path d="M4 6h4" strokeWidth="1.25" className="stroke-ink-3" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+/** Wartet der Status auf dich? (Rückfrage, Freigabe, ausgefüllt) */
+export function waitsForYou(status: string): boolean {
+  return GLYPH[status] === "you";
+}
+
+export function StatusLabel({ status, className }: { status: AppStatus | string; className?: string }) {
   const { t } = useI18n();
   if (!status) return null;
-  const s = STATUS[status] ?? { tone: "neutral" as const, icon: null };
   return (
-    <Badge tone={s.tone} className={className}>
-      {s.icon}
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 whitespace-nowrap text-meta",
+        waitsForYou(status) ? "font-medium text-accent" : status === "failed" ? "text-danger" : "text-ink-2",
+        className,
+      )}
+    >
+      <StatusGlyph status={status} />
       {t(`status.${status}` as MessageKey)}
-    </Badge>
+    </span>
   );
 }
 
-export function RoleBadge({ category, roles }: { category: string; roles: string[] }) {
-  return (
-    <Badge tone="role" className={roleClass(category, roles)}>
-      <span className="size-1.5 rounded-full bg-[var(--role)]" />
-      {category}
-    </Badge>
-  );
-}
+/* ----------------------------------------------------------------- Score: Zahl mit schmalem Balken darunter, ohne Ampelfarben */
 
-/** Score als kleiner Ring – auf einen Blick vergleichbar (max. ~20 Punkte). */
 /** Höchster möglicher Score (classify.SCORE_MAX): erste Zielrolle, Stack ●●●, große Firma, Level, in der Nähe. */
 export const SCORE_MAX = 21;
 
-export function ScoreRing({ score, size = 36 }: { score: number; size?: number }) {
+export function Score({ score, className }: { score: number; className?: string }) {
   const { t } = useI18n();
   const pct = Math.max(0, Math.min(1, score / SCORE_MAX));
-  const r = (size - 5) / 2;
-  const c = 2 * Math.PI * r;
-  const tone = pct >= 0.75 ? "var(--success)" : pct >= 0.5 ? "var(--primary)" : pct >= 0.3 ? "var(--warning)" : "var(--fg-subtle)";
+  const label = t("job.score_label", { score: Math.round(score), max: SCORE_MAX });
   return (
     <Tooltip content={t("job.score_hint", { max: SCORE_MAX })}>
-      <span className="relative inline-grid shrink-0 place-items-center" style={{ width: size, height: size }}>
-        <svg width={size} height={size} className="-rotate-90">
-          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-3)" strokeWidth="3" />
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={r}
-            fill="none"
-            stroke={tone}
-            strokeWidth="3"
-            strokeLinecap="round"
-            strokeDasharray={`${c * pct} ${c}`}
-            className="transition-[stroke-dasharray] duration-500"
-          />
-        </svg>
-        <span className="tabular absolute text-[0.6875rem] font-semibold">{Math.round(score)}</span>
+      <span
+        className={cn("inline-grid w-7 shrink-0 justify-items-end gap-1", className)}
+        aria-label={label}
+        role="img"
+      >
+        <span className="tabular text-body leading-none font-semibold" aria-hidden>
+          {Math.round(score)}
+        </span>
+        <span className="relative h-[3px] w-full overflow-hidden rounded-full bg-line" aria-hidden>
+          <span className="absolute inset-y-0 left-0 rounded-full bg-ink-2" style={{ width: `${pct * 100}%` }} />
+        </span>
       </span>
     </Tooltip>
   );
@@ -109,27 +146,20 @@ export function FitDots({ fit }: { fit: number }) {
   const { t } = useI18n();
   return (
     <Tooltip content={t("job.fit_hint", { n: fit })}>
-      <span className="inline-flex gap-0.5" aria-label={t("job.fit_hint", { n: fit })}>
+      <span className="inline-flex gap-0.5" aria-label={t("job.fit_hint", { n: fit })} role="img">
         {[1, 2, 3].map((i) => (
-          <span key={i} className={cn("h-3 w-1 rounded-full", i <= fit ? "bg-primary" : "bg-surface-3")} />
+          <span key={i} className={cn("h-3 w-1 rounded-full", i <= fit ? "bg-ink-2" : "bg-sunken")} />
         ))}
       </span>
     </Tooltip>
   );
 }
 
-function hue(text: string): number {
-  let h = 0;
-  for (const ch of text) h = (h * 31 + ch.charCodeAt(0)) % 360;
-  return h;
-}
-
 export function CompanyAvatar({ name, size = 36 }: { name: string; size?: number }) {
-  const h = hue(name || "?");
   return (
     <span
-      className="avatar grid shrink-0 place-items-center rounded-[10px] text-[0.75rem] font-semibold"
-      style={{ width: size, height: size, ["--h" as string]: h }}
+      className="avatar grid shrink-0 place-items-center rounded-md text-small font-semibold"
+      style={{ width: size, height: size }}
       aria-hidden
     >
       {initials(name) || "?"}
@@ -141,9 +171,9 @@ export function WhereLabel({ where, workplace, location }: { where: string; work
   const { t } = useI18n();
   const label = where === "R" ? t("where.remote") : where === "BR" ? t("where.both") : t("where.onsite");
   return (
-    <span className="truncate text-footnote text-fg-muted">
+    <span className="truncate text-meta text-ink-2">
       {location ? location.split(";")[0] : label}
-      {workplace && <span className="text-fg-subtle"> · {workplace}</span>}
+      {workplace && <span className="text-ink-3"> · {workplace}</span>}
     </span>
   );
 }
@@ -160,46 +190,25 @@ export function PageHeader({
   children?: ReactNode;
 }) {
   return (
-    <header className="mb-6 animate-slide-up">
-      <div className="flex flex-wrap items-end justify-between gap-4">
+    <header className="mb-5">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div className="min-w-0">
-          <h1 className="text-title1 font-bold tracking-[-0.025em]">{title}</h1>
-          {description && <p className="mt-1 text-body text-fg-muted">{description}</p>}
+          <h1 className="text-title font-semibold tracking-[-0.01em] text-balance">{title}</h1>
+          {description && <p className="mt-0.5 text-meta text-ink-2">{description}</p>}
         </div>
-        {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+        {actions && <div className="flex flex-wrap items-center gap-1">{actions}</div>}
       </div>
       {children}
     </header>
   );
 }
 
-export function Stat({
-  label,
-  value,
-  hint,
-  icon,
-  tone = "neutral",
-}: {
-  label: ReactNode;
-  value: ReactNode;
-  hint?: ReactNode;
-  icon?: ReactNode;
-  tone?: "neutral" | "primary" | "success" | "warning";
-}) {
-  const tones = {
-    neutral: "bg-surface-2 text-fg-muted",
-    primary: "bg-primary-soft text-primary",
-    success: "bg-success-soft text-success",
-    warning: "bg-warning-soft text-warning",
-  };
+export function Stat({ label, value, hint }: { label: ReactNode; value: ReactNode; hint?: ReactNode }) {
   return (
-    <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
-      <div className="flex items-center justify-between">
-        <span className="text-footnote font-medium text-fg-muted">{label}</span>
-        {icon && <span className={cn("grid size-7 place-items-center rounded-md [&_svg]:size-4", tones[tone])}>{icon}</span>}
-      </div>
-      <div className="tabular mt-2 text-title1 font-bold tracking-[-0.02em]">{value}</div>
-      {hint && <div className="mt-0.5 text-caption text-fg-subtle">{hint}</div>}
+    <div className="border-t border-line pt-3">
+      <div className="text-meta text-ink-2">{label}</div>
+      <div className="tabular mt-1 text-title font-semibold">{value}</div>
+      {hint && <div className="text-small text-ink-3">{hint}</div>}
     </div>
   );
 }
@@ -210,20 +219,20 @@ export function WeeklyChart({ weeks }: { weeks: { week: string; sent: number }[]
   const max = Math.max(1, ...weeks.map((w) => w.sent));
   return (
     <>
-      <div className="flex h-28 items-end gap-1.5" role="img" aria-label={t("overview.weekly")}>
-        {weeks.map((w) => (
-          <div key={w.week} className="group flex flex-1 flex-col items-center gap-1.5">
-            <span className="tabular text-caption text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100">
+      <div className="flex h-24 items-end gap-1" role="img" aria-label={t("overview.weekly")}>
+        {weeks.map((w, i) => (
+          <div key={w.week} className="group flex flex-1 flex-col items-center gap-1">
+            <span className="tabular text-small text-ink-3 opacity-0 transition-opacity group-hover:opacity-100">
               {w.sent}
             </span>
             <div
-              className="w-full rounded-t-[5px] bg-primary/80 transition-[height] duration-500 group-hover:bg-primary"
-              style={{ height: `${Math.max(3, (w.sent / max) * 80)}px`, opacity: w.sent ? 1 : 0.25 }}
+              className={cn("w-full rounded-t-sm", i === weeks.length - 1 ? "bg-accent" : "bg-ink-3/50")}
+              style={{ height: `${Math.max(2, (w.sent / max) * 72)}px` }}
             />
           </div>
         ))}
       </div>
-      <div className="mt-2 flex justify-between text-caption text-fg-subtle">
+      <div className="mt-2 flex justify-between text-small text-ink-3">
         <span>{weeks[0] && new Date(weeks[0].week).toLocaleDateString(lang, { day: "numeric", month: "short" })}</span>
         <span>{t("overview.this_week")}</span>
       </div>

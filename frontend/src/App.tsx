@@ -9,14 +9,12 @@ import { useStatus } from "./lib/hooks";
 import { useI18n } from "./lib/i18n";
 
 // Jede Seite ist ein eigener Chunk – geladen wird nur, was du öffnest.
-const ActivityPage = lazy(() => import("./pages/Activity").then((m) => ({ default: m.ActivityPage })));
 const ApplicationDetailPage = lazy(() =>
   import("./pages/ApplicationDetail").then((m) => ({ default: m.ApplicationDetailPage })),
 );
 const ApplicationsPage = lazy(() => import("./pages/Applications").then((m) => ({ default: m.ApplicationsPage })));
 const JobsPage = lazy(() => import("./pages/Jobs").then((m) => ({ default: m.JobsPage })));
 const OverviewPage = lazy(() => import("./pages/Overview").then((m) => ({ default: m.OverviewPage })));
-const PipelinePage = lazy(() => import("./pages/Pipeline").then((m) => ({ default: m.PipelinePage })));
 const SettingsPage = lazy(() => import("./pages/settings/Settings").then((m) => ({ default: m.SettingsPage })));
 const SetupWizard = lazy(() => import("./pages/setup/SetupWizard").then((m) => ({ default: m.SetupWizard })));
 
@@ -42,7 +40,7 @@ function SetupGate({ children }: { children: ReactNode }) {
       <div className="grid min-h-dvh place-items-center p-6 text-center">
         <div>
           <Logo />
-          <p className="mt-4 text-fg-muted">{t("app.offline")}</p>
+          <p className="mt-4 text-ink-2">{t("app.offline")}</p>
         </div>
       </div>
     );
@@ -75,10 +73,11 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <OverviewPage /> },
       { path: "jobs", element: <JobsPage /> },
-      { path: "pipeline", element: <PipelinePage /> },
+      // alte Adressen: Pipeline ist jetzt die Board-Ansicht der Bewerbungen, Aktivität das Protokoll
+      { path: "pipeline", element: <Navigate to="/applications?view=board" replace /> },
       { path: "applications", element: <ApplicationsPage /> },
       { path: "applications/:id", element: <ApplicationDetailPage /> },
-      { path: "activity", element: <ActivityPage /> },
+      { path: "activity", element: <Navigate to="/settings/log" replace /> },
       { path: "settings", element: <SettingsPage /> },
       { path: "settings/:tab", element: <SettingsPage /> },
       { path: "*", element: <Navigate to="/" replace /> },
@@ -99,8 +98,8 @@ export function App() {
         offset={{ bottom: 88, right: 16 }}
         toastOptions={{
           classNames: {
-            toast: "!rounded-lg !border !border-border !bg-surface !text-fg !shadow-lg !font-sans",
-            description: "!text-fg-muted",
+            toast: "!rounded-lg !border !border-line !bg-raised !text-ink !shadow-lg !font-sans",
+            description: "!text-ink-2",
           },
         }}
       />

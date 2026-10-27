@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CircleAlert, CircleCheck, ExternalLink, FileText, Image, ListTree, MessageCircleQuestion } from "lucide-react";
+import { ArrowLeft, CircleAlert, CircleCheck, ExternalLink, FileText, Image, ListTree } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
-import { CompanyAvatar, StatusBadge } from "@/components/domain";
+import { CompanyAvatar, StatusLabel } from "@/components/domain";
 import { PromptCard } from "@/components/PromptCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/controls";
 import { Dialog, DialogContent } from "@/components/ui/overlays";
@@ -51,21 +51,21 @@ export function ApplicationDetailPage() {
 
   return (
     <>
-      <Link to="/applications" className="mb-4 inline-flex items-center gap-1.5 text-footnote font-medium text-fg-muted hover:text-fg">
+      <Link to="/applications" className="mb-4 inline-flex items-center gap-1.5 text-meta font-medium text-ink-2 hover:text-ink">
         <ArrowLeft className="size-4" />
         {t("nav.applications")}
       </Link>
       <header className="mb-6 flex flex-wrap items-start gap-4 animate-slide-up">
         <CompanyAvatar name={a.company} size={52} />
         <div className="min-w-0 flex-1">
-          <h1 className="text-title1 font-bold tracking-[-0.025em] text-balance">{a.title}</h1>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-footnote text-fg-muted">
+          <h1 className="text-title font-bold tracking-[-0.025em] text-balance">{a.title}</h1>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-meta text-ink-2">
             <span>{a.company}</span>
             <span>·</span>
             <span>
               #{a.id} · {t(`mode.${a.mode}` as MessageKey)} · {formatDateTime(a.started_at, lang)}
             </span>
-            <StatusBadge status={a.status} />
+            <StatusLabel status={a.status} />
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -78,11 +78,11 @@ export function ApplicationDetailPage() {
               ))}
             </Select>
           )}
-          <Button asChild variant="outline">
+          <Button asChild variant="secondary">
             <Link to={`/jobs?job=${a.job_id}`}>{t("detail.job")}</Link>
           </Button>
           {a.final_url && (
-            <Button asChild variant="ghost" size="icon" aria-label={t("detail.final_url")}>
+            <Button asChild variant="quiet" size="icon" aria-label={t("detail.final_url")}>
               <a href={a.final_url} target="_blank" rel="noreferrer">
                 <ExternalLink />
               </a>
@@ -92,14 +92,14 @@ export function ApplicationDetailPage() {
       </header>
 
       {a.error && (
-        <div className="mb-6 flex items-start gap-3 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-[0.875rem]">
+        <div className="mb-6 flex items-start gap-3 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-body">
           <CircleAlert className="mt-0.5 size-4 shrink-0 text-danger" />
           <span className="break-words">{a.error}</span>
         </div>
       )}
       {!a.error && a.confirmation && (
-        <div className="mb-6 flex items-start gap-3 rounded-lg border border-border bg-surface-2 px-4 py-3 text-[0.875rem]">
-          <CircleCheck className="mt-0.5 size-4 shrink-0 text-success" />
+        <div className="mb-6 flex items-start gap-3 rounded-lg border border-line bg-sunken px-4 py-3 text-body">
+          <CircleCheck className="mt-0.5 size-4 shrink-0 text-positive" />
           <span className="break-words">{a.confirmation}</span>
         </div>
       )}
@@ -114,7 +114,7 @@ export function ApplicationDetailPage() {
 
       {a.questions.length > 0 && a.prompts.length === 0 && (
         <Card className="mb-6">
-          <CardHeader title={t("detail.questions")} description={t("detail.questions_hint")} icon={<MessageCircleQuestion />} />
+          <CardHeader title={t("detail.questions")} description={t("detail.questions_hint")} />
           <CardBody>
             <form
               className="space-y-4"
@@ -125,7 +125,7 @@ export function ApplicationDetailPage() {
             >
               {a.questions.map((q, i) => (
                 <div key={i} className="space-y-1.5">
-                  <label className="block text-[0.875rem] font-medium" htmlFor={`aq-${i}`}>
+                  <label className="block text-body font-medium" htmlFor={`aq-${i}`}>
                     {q.label || q.question}
                   </label>
                   {q.options?.length ? (
@@ -174,20 +174,20 @@ export function ApplicationDetailPage() {
           {a.events.length === 0 ? (
             <EmptyState title={t("detail.no_events")} />
           ) : (
-            <ol className="relative ml-2 border-l border-border">
+            <ol className="relative ml-2 border-l border-line">
               {a.events.map((e, i) => (
                 <li key={i} className="relative pb-5 pl-6 last:pb-0">
                   <span
                     className={cn(
-                      "absolute top-1.5 -left-[5px] size-[9px] rounded-full border-2 border-bg",
-                      e.kind === "error" ? "bg-danger" : e.kind === "submit" ? "bg-success" : "bg-primary",
+                      "absolute top-1.5 -left-[5px] size-[9px] rounded-full border-2 border-paper",
+                      e.kind === "error" ? "bg-danger" : e.kind === "submit" ? "bg-positive" : "bg-accent",
                     )}
                   />
                   <div className="flex flex-wrap items-baseline gap-2">
                     <Badge tone="outline">{e.kind}</Badge>
-                    <span className="tabular text-caption text-fg-subtle">{formatDateTime(e.ts, lang)}</span>
+                    <span className="tabular text-small text-ink-3">{formatDateTime(e.ts, lang)}</span>
                   </div>
-                  <p className="mt-1 text-[0.875rem] leading-relaxed break-words whitespace-pre-line">{e.message}</p>
+                  <p className="mt-1 text-body leading-relaxed break-words whitespace-pre-line">{e.message}</p>
                 </li>
               ))}
             </ol>
@@ -204,10 +204,10 @@ export function ApplicationDetailPage() {
                   key={s}
                   type="button"
                   onClick={() => setShot(s)}
-                  className="group overflow-hidden rounded-lg border border-border bg-surface-2 text-left"
+                  className="group overflow-hidden rounded-lg border border-line bg-sunken text-left"
                 >
                   <img src={artifactUrl(a.id, s)} alt={s} loading="lazy" className="aspect-[4/3] w-full object-cover object-top transition-transform group-hover:scale-[1.02]" />
-                  <div className="truncate px-3 py-2 text-caption text-fg-muted">{s}</div>
+                  <div className="truncate px-3 py-2 text-small text-ink-2">{s}</div>
                 </button>
               ))}
             </div>
@@ -219,8 +219,8 @@ export function ApplicationDetailPage() {
             <EmptyState title={t("detail.no_filled")} />
           ) : (
             <Card className="overflow-x-auto">
-              <table className="w-full text-footnote">
-                <thead className="border-b border-border text-left text-caption text-fg-subtle">
+              <table className="w-full text-meta">
+                <thead className="border-b border-line text-left text-small text-ink-3">
                   <tr>
                     <th className="px-4 py-2 font-medium">{t("detail.field")}</th>
                     <th className="px-4 py-2 font-medium">{t("detail.value")}</th>
@@ -229,8 +229,8 @@ export function ApplicationDetailPage() {
                 </thead>
                 <tbody>
                   {a.filled.map((r, i) => (
-                    <tr key={i} className="border-b border-border last:border-0">
-                      <td className="max-w-56 px-4 py-2 align-top text-fg-muted">{r.label}</td>
+                    <tr key={i} className="border-b border-line last:border-0">
+                      <td className="max-w-56 px-4 py-2 align-top text-ink-2">{r.label}</td>
                       <td className="px-4 py-2 align-top break-words">
                         {r.ok === false ? (
                           <span className="text-danger">
@@ -240,8 +240,8 @@ export function ApplicationDetailPage() {
                           r.value
                         )}
                       </td>
-                      <td className="px-4 py-2 align-top whitespace-nowrap text-fg-subtle">
-                        {r.source} {r.confidence === "low" && <Badge tone="warning">{t("prompt.unsure")}</Badge>}
+                      <td className="px-4 py-2 align-top whitespace-nowrap text-ink-3">
+                        {r.source} {r.confidence === "low" && <Badge tone="amber">{t("prompt.unsure")}</Badge>}
                       </td>
                     </tr>
                   ))}
@@ -257,7 +257,7 @@ export function ApplicationDetailPage() {
           ) : (
             <div className="flex flex-wrap gap-2">
               {a.documents.map((d) => (
-                <Button key={d} asChild variant="outline">
+                <Button key={d} asChild variant="secondary">
                   <a href={artifactUrl(a.id, d)} target="_blank" rel="noreferrer">
                     <FileText />
                     {d}
@@ -272,7 +272,7 @@ export function ApplicationDetailPage() {
       <Dialog open={shot !== null} onOpenChange={(v) => !v && setShot(null)}>
         {shot && (
           <DialogContent title={shot} wide>
-            <img src={artifactUrl(a.id, shot)} alt={shot} className="w-full rounded-md border border-border" />
+            <img src={artifactUrl(a.id, shot)} alt={shot} className="w-full rounded-md border border-line" />
           </DialogContent>
         )}
       </Dialog>
