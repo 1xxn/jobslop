@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
@@ -40,18 +41,32 @@ def company_key(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", n).strip()
 
 
+def _exclusion_verdict(ex: Exclusion, job: Job) -> Verdict | None:
+    v = ex.value
+    if ex.kind == "company" and company_key(v) and company_key(v) in company_key(job.company):
+        return _no(f"Firma ausgeschlossen ({v})", "excluded_company", value=v)
+    if ex.kind == "job" and v == str(job.id):
+        return _no("Stelle ausgeschlossen", "excluded_job")
+    if ex.kind == "title" and re.search(v, job.title, re.I):
+        return _no(f"Titel-Ausschluss ({v})", "excluded_title", value=v)
+    if ex.kind == "url" and v.lower() in job.url.lower():
+        return _no(f"URL-Ausschluss ({v})", "excluded_url", value=v)
+    return None
+
+
 def is_excluded(session: Session, job: Job) -> Verdict | None:
     for ex in session.execute(select(Exclusion)).scalars():
-        v = ex.value
-        if ex.kind == "company" and company_key(v) and company_key(v) in company_key(job.company):
-            return _no(f"Firma ausgeschlossen ({v})", "excluded_company", value=v)
-        if ex.kind == "job" and v == str(job.id):
-            return _no("Stelle ausgeschlossen", "excluded_job")
-        if ex.kind == "title" and re.search(v, job.title, re.I):
-            return _no(f"Titel-Ausschluss ({v})", "excluded_title", value=v)
-        if ex.kind == "url" and v.lower() in job.url.lower():
-            return _no(f"URL-Ausschluss ({v})", "excluded_url", value=v)
+        if verdict := _exclusion_verdict(ex, job):
+            return verdict
     return None
+
+
+def excluded_job_ids(session: Session, jobs: Iterable[Job]) -> set[int]:
+    """IDs der Stellen, die eine Ausschlussregel trifft – eine Abfrage der Regeln für die ganze Liste."""
+    rules = list(session.execute(select(Exclusion)).scalars())
+    if not rules:
+        return set()
+    return {j.id for j in jobs if any(_exclusion_verdict(ex, j) for ex in rules)}
 
 
 def already_applied(session: Session, job: Job) -> Verdict | None:

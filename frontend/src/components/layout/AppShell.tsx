@@ -34,7 +34,9 @@ export function AppShell() {
   const navigate = useNavigate();
   const [help, setHelp] = useState(false);
   useDesktopNotifications(status, { prompt: t("notify.prompt"), done: t("notify.done") });
-  const waiting = status?.prompts.length ?? 0;
+  // Heute zählt, was auf dich wartet (Rückfragen, Freigaben, fälliges Nachfassen); Stellen, was zu sichten ist
+  const waiting = (status?.prompts.length ?? 0) + (status?.counts.follow_ups_due ?? 0);
+  const toReview = status?.counts.to_review ?? 0;
 
   const go = GO_KEYS[lang];
   useHotkeys({
@@ -54,7 +56,7 @@ export function AppShell() {
         >
           {t("nav.skip")}
         </a>
-        <Sidebar status={status} waiting={waiting} onHelp={() => setHelp(true)} />
+        <Sidebar status={status} waiting={waiting} toReview={toReview} onHelp={() => setHelp(true)} />
         <MobileTop status={status} onHelp={() => setHelp(true)} />
         {status?.demo && (
           <div className="border-b border-line bg-sunken px-4 py-1.5 text-small text-ink-2 sm:px-6 lg:px-8">
@@ -112,7 +114,17 @@ function NavRow({ item, count }: { item: NavItem; count?: ReactNode }) {
   );
 }
 
-function Sidebar({ status, waiting, onHelp }: { status: Status | undefined; waiting: number; onHelp: () => void }) {
+function Sidebar({
+  status,
+  waiting,
+  toReview,
+  onHelp,
+}: {
+  status: Status | undefined;
+  waiting: number;
+  toReview: number;
+  onHelp: () => void;
+}) {
   const { t } = useI18n();
   return (
     <aside className="fixed inset-y-0 left-0 z-30 hidden w-[208px] flex-col border-r border-line bg-paper px-2 py-4 lg:flex">
@@ -121,7 +133,13 @@ function Sidebar({ status, waiting, onHelp }: { status: Status | undefined; wait
       </Link>
       <nav className="flex flex-1 flex-col gap-0.5" aria-label={t("nav.main")}>
         {WORK.map((item) => (
-          <NavRow key={item.to} item={item} count={item.key === "today" && <Count n={waiting} you />} />
+          <NavRow
+            key={item.to}
+            item={item}
+            count={
+              item.key === "today" ? <Count n={waiting} you /> : item.key === "jobs" ? <Count n={toReview} /> : null
+            }
+          />
         ))}
         <div className="flex-1" />
         <NavRow item={SETTINGS} />

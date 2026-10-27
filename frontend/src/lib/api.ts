@@ -132,7 +132,7 @@ export const api = {
   markJob: (id: number, status: "applied" | "interview" | "rejected" | "offer", note = "") =>
     post<JobSummary>(`/api/jobs/${id}/status`, { status, note }),
   bulk: (ids: number[], action: "queue" | "unqueue" | "star" | "unstar" | "exclude") =>
-    post<{ changed: number[]; skipped: string[] }>("/api/jobs/bulk", { ids, action }),
+    post<{ changed: number[]; skipped: string[]; exclusions?: number[] }>("/api/jobs/bulk", { ids, action }),
   queueTop: (count: number) => post<{ changed: number[]; skipped: string[] }>(`/api/queue/top${qs({ count })}`),
   queueClear: () => post<{ changed: number[] }>("/api/queue/clear"),
 
