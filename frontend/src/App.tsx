@@ -14,7 +14,7 @@ const ApplicationDetailPage = lazy(() =>
 );
 const ApplicationsPage = lazy(() => import("./pages/Applications").then((m) => ({ default: m.ApplicationsPage })));
 const JobsPage = lazy(() => import("./pages/Jobs").then((m) => ({ default: m.JobsPage })));
-const OverviewPage = lazy(() => import("./pages/Overview").then((m) => ({ default: m.OverviewPage })));
+const TodayPage = lazy(() => import("./pages/Today").then((m) => ({ default: m.TodayPage })));
 const SettingsPage = lazy(() => import("./pages/settings/Settings").then((m) => ({ default: m.SettingsPage })));
 const SetupWizard = lazy(() => import("./pages/setup/SetupWizard").then((m) => ({ default: m.SetupWizard })));
 
@@ -71,7 +71,7 @@ const router = createBrowserRouter([
       </Gated>
     ),
     children: [
-      { index: true, element: <OverviewPage /> },
+      { index: true, element: <TodayPage /> },
       { path: "jobs", element: <JobsPage /> },
       // alte Adressen: Pipeline ist jetzt die Board-Ansicht der Bewerbungen, Aktivität das Protokoll
       { path: "pipeline", element: <Navigate to="/applications?view=board" replace /> },

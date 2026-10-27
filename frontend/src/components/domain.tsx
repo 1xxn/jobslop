@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 import { useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
-import type { AppStatus } from "@/lib/types";
-import { cn, initials } from "@/lib/utils";
+import type { AppStatus, Stats } from "@/lib/types";
+import { cn, initials, percent } from "@/lib/utils";
 import { Tooltip } from "./ui/overlays";
 
 /** Wortmarke: einfarbiges Zeichen in Petrol – der Tropfen im Logo ist die Herkunft der Akzentfarbe. */
@@ -237,5 +237,48 @@ export function WeeklyChart({ weeks }: { weeks: { week: string; sent: number }[]
         <span>{t("overview.this_week")}</span>
       </div>
     </>
+  );
+}
+
+/** Bewerbungen in einer Zeile statt Kennzahl-Kacheln: gesendet, Antworten, Interviews, Verlauf über 12 Wochen. */
+export function ApplicationsSummary({ stats, className }: { stats: Stats; className?: string }) {
+  const { t, lang } = useI18n();
+  const a = stats.applications;
+  const weeks = a.per_week;
+  const max = Math.max(1, ...weeks.map((w) => w.sent));
+  const num = "tabular font-semibold text-ink";
+  return (
+    <div className={cn("flex flex-wrap items-center gap-x-5 gap-y-2 text-meta text-ink-2", className)}>
+      <span>
+        <span className={num}>{a.sent_7d}</span> {t("summary.sent_7d")}
+      </span>
+      <span>
+        <span className={num}>{a.sent_total}</span> {t("summary.sent_total")}
+      </span>
+      <span>
+        <span className={num}>{percent(a.response_rate, lang)}</span> {t("summary.answered")}
+      </span>
+      <span>
+        <span className={num}>{percent(a.interview_rate, lang)}</span> {t("summary.interviews")}
+      </span>
+      <span
+        className="inline-flex items-center gap-2"
+        role="img"
+        aria-label={t("summary.weeks_label", { list: weeks.map((w) => w.sent).join(", ") })}
+      >
+        <span className="flex h-4 items-end gap-0.5" aria-hidden>
+          {weeks.map((w, i) => (
+            <span
+              key={w.week}
+              className={cn("w-1.5 rounded-[1px]", i === weeks.length - 1 ? "bg-accent" : "bg-ink-3/50")}
+              style={{ height: `${Math.max(2, (w.sent / max) * 16)}px` }}
+            />
+          ))}
+        </span>
+        <span className="text-ink-3" aria-hidden>
+          {t("summary.weeks")}
+        </span>
+      </span>
+    </div>
   );
 }
