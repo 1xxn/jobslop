@@ -1,7 +1,8 @@
-import { Ban, BellRing, Bot, Cpu, History, MessageSquareText, Play, Search, UserRound } from "lucide-react";
+import { ArrowLeft, ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
-import { NavLink, useParams } from "react-router";
+import { Link, NavLink, Navigate, useParams } from "react-router";
 import { PageHeader } from "@/components/domain";
+import { useMediaQuery } from "@/lib/hooks";
 import { useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
 import { cn } from "@/lib/utils";
@@ -13,54 +14,120 @@ import {
   ApplySettings,
   AutopilotSettings,
   ExclusionSettings,
+  ExtensionSettings,
   NotificationSettings,
   SystemSettings,
 } from "./sections";
 
-const TABS: { id: string; label: MessageKey; icon: ReactNode; render: () => ReactNode }[] = [
-  { id: "profile", label: "settings.profile", icon: <UserRound />, render: () => <ProfileForm /> },
-  { id: "search", label: "settings.search", icon: <Search />, render: () => <SearchForm /> },
-  { id: "apply", label: "settings.apply", icon: <Play />, render: () => <ApplySettings /> },
-  { id: "autopilot", label: "settings.autopilot", icon: <Bot />, render: () => <AutopilotSettings /> },
-  { id: "notifications", label: "settings.notifications", icon: <BellRing />, render: () => <NotificationSettings /> },
-  { id: "answers", label: "settings.answers", icon: <MessageSquareText />, render: () => <AnswersSettings /> },
-  { id: "exclusions", label: "settings.exclusions", icon: <Ban />, render: () => <ExclusionSettings /> },
-  { id: "system", label: "settings.system", icon: <Cpu />, render: () => <SystemSettings /> },
-  { id: "log", label: "settings.log", icon: <History />, render: () => <LogSettings /> },
-];
+type Tab = { id: string; label: MessageKey; render: () => ReactNode };
 
+// Gruppen statt acht gleichrangiger Reiter: das bin ich · das suche ich · so bewirbt es sich · Technik
+const GROUPS: { label: MessageKey; tabs: Tab[] }[] = [
+  {
+    label: "settings.group_you",
+    tabs: [
+      { id: "profile", label: "settings.profile", render: () => <ProfileForm /> },
+      { id: "answers", label: "settings.answers", render: () => <AnswersSettings /> },
+    ],
+  },
+  {
+    label: "settings.group_search",
+    tabs: [
+      { id: "search", label: "settings.search", render: () => <SearchForm part="roles" /> },
+      { id: "sources", label: "settings.sources", render: () => <SearchForm part="sources" /> },
+      { id: "exclusions", label: "settings.exclusions", render: () => <ExclusionSettings /> },
+    ],
+  },
+  {
+    label: "settings.group_apply",
+    tabs: [
+      { id: "apply", label: "settings.apply", render: () => <ApplySettings /> },
+      { id: "limits", label: "settings.limits", render: () => <SearchForm part="limits" /> },
+      { id: "autopilot", label: "settings.autopilot", render: () => <AutopilotSettings /> },
+      { id: "extension", label: "settings.extension", render: () => <ExtensionSettings /> },
+      { id: "notifications", label: "settings.notifications", render: () => <NotificationSettings /> },
+    ],
+  },
+  {
+    label: "settings.group_system",
+    tabs: [
+      { id: "system", label: "settings.system", render: () => <SystemSettings /> },
+      { id: "log", label: "settings.log", render: () => <LogSettings /> },
+    ],
+  },
+];
+const TABS = GROUPS.flatMap((g) => g.tabs);
+
+/** Einstellungen: breit Navigation links und Inhalt rechts, schmal erst die Liste, dann die Seite mit Zurück-Link. */
 export function SettingsPage() {
   const { t } = useI18n();
-  const { tab = "profile" } = useParams();
-  const current = TABS.find((x) => x.id === tab) ?? TABS[0];
+  const { tab } = useParams();
+  const wide = useMediaQuery("(min-width: 1024px)");
+  const current = TABS.find((x) => x.id === tab);
+  if (tab && !current) return <Navigate to="/settings" replace />;
+
+  if (!wide && !current) {
+    return (
+      <>
+        <PageHeader title={t("nav.settings")} />
+        <SettingsNav list />
+      </>
+    );
+  }
+  const shown = current ?? TABS[0];
+  // Die Seite trägt ihren eigenen Namen als Überschrift („Profil“), „Einstellungen“ steht als Weg darüber
   return (
-    <>
-      <PageHeader title={t("nav.settings")} />
-      <div className="grid gap-6 lg:grid-cols-[200px_minmax(0,1fr)]">
-        <nav
-          className="-mx-4 flex gap-1 overflow-x-auto px-4 pb-1 [scrollbar-width:none] lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0"
-          aria-label={t("nav.settings")}
-        >
-          {TABS.map((x) => (
-            <NavLink
-              key={x.id}
-              to={`/settings/${x.id}`}
-              className={() =>
-                cn(
-                  "flex shrink-0 items-center gap-2.5 rounded-md px-3 py-2 text-body font-medium transition-colors [&_svg]:size-4",
-                  current.id === x.id ? "bg-raised text-ink shadow-sm ring-1 ring-line" : "text-ink-2 hover:bg-sunken hover:text-ink",
-                )
-              }
-            >
-              {x.icon}
-              {t(x.label)}
-            </NavLink>
-          ))}
-        </nav>
-        <div key={current.id} className="min-w-0 animate-fade-in">
-          {current.render()}
-        </div>
+    <div className="grid gap-10 lg:grid-cols-[12rem_minmax(0,1fr)]">
+      {wide && <SettingsNav current={shown.id} />}
+      <div key={shown.id} className="min-w-0 max-w-3xl animate-fade-in">
+        {wide ? (
+          <p className="text-small text-ink-3">{t("nav.settings")}</p>
+        ) : (
+          <Link to="/settings" className="mb-2 inline-flex items-center gap-1 text-meta font-medium text-ink-2 hover:text-ink">
+            <ArrowLeft className="size-4" aria-hidden />
+            {t("nav.settings")}
+          </Link>
+        )}
+        <PageHeader title={t(shown.label)} />
+        {shown.render()}
       </div>
-    </>
+    </div>
+  );
+}
+
+function SettingsNav({ current, list }: { current?: string; list?: boolean }) {
+  const { t } = useI18n();
+  return (
+    <nav aria-label={t("nav.settings")} className={cn("grid content-start gap-5", !list && "sticky top-6 pt-5")}>
+      {GROUPS.map((g) => (
+        <div key={g.label} className="grid gap-0.5">
+          <h3 className={cn("px-2.5 pb-1 text-small font-medium text-ink-3", list && "border-b border-line px-0")}>{t(g.label)}</h3>
+          {g.tabs.map((x) =>
+            list ? (
+              <Link
+                key={x.id}
+                to={`/settings/${x.id}`}
+                className="flex items-center justify-between border-b border-line py-3 text-body font-medium"
+              >
+                {t(x.label)}
+                <ChevronRight className="size-4 text-ink-3" aria-hidden />
+              </Link>
+            ) : (
+              <NavLink
+                key={x.id}
+                to={`/settings/${x.id}`}
+                aria-current={current === x.id ? "page" : undefined}
+                className={cn(
+                  "rounded-md px-2.5 py-1.5 text-body transition-colors duration-[120ms]",
+                  current === x.id ? "bg-sunken font-medium text-ink" : "text-ink-2 hover:bg-sunken hover:text-ink",
+                )}
+              >
+                {t(x.label)}
+              </NavLink>
+            ),
+          )}
+        </div>
+      ))}
+    </nav>
   );
 }
