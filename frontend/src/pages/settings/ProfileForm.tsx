@@ -3,7 +3,7 @@ import { CircleAlert, FileText, Plus, Trash2, Upload } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ChipsInput, Switch } from "@/components/ui/controls";
-import { Button, Card, CardBody, CardHeader, Field, Input, Select, Skeleton, Textarea } from "@/components/ui/primitives";
+import { Button, SectionBody, SectionHeader, Field, Input, Select, Skeleton, Textarea } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import type { Profile } from "@/lib/types";
@@ -68,9 +68,9 @@ export function ProfileForm({
       {show("documents") && <DocumentsCard />}
 
       {show("personal") && (
-        <Card>
-          <CardHeader title={t("profile.personal")} description={t("profile.personal_hint")} />
-          <CardBody className="grid gap-4 sm:grid-cols-2">
+        <section>
+          <SectionHeader title={t("profile.personal")} description={t("profile.personal_hint")} />
+          <SectionBody className="grid gap-4 sm:grid-cols-2">
             <Field label={t("profile.first_name")} error={warn("personal.first_name")}>
               <Input autoComplete="given-name" {...personal("first_name")} />
             </Field>
@@ -98,14 +98,14 @@ export function ProfileForm({
             <Field label="GitHub / Portfolio">
               <Input type="url" placeholder="https://…" {...personal("github")} />
             </Field>
-          </CardBody>
-        </Card>
+          </SectionBody>
+        </section>
       )}
 
       {show("work") && (
-        <Card>
-          <CardHeader title={t("profile.work")} description={t("profile.work_hint")} />
-          <CardBody className="grid gap-4 sm:grid-cols-2">
+        <section>
+          <SectionHeader title={t("profile.work")} description={t("profile.work_hint")} />
+          <SectionBody className="grid gap-4 sm:grid-cols-2">
             <Field label={t("profile.current_title")}>
               <Input {...work("current_title")} />
             </Field>
@@ -147,14 +147,14 @@ export function ProfileForm({
                 onChange={(v) => set("work", { ...p.work, willing_to_relocate: v })}
               />
             </div>
-          </CardBody>
-        </Card>
+          </SectionBody>
+        </section>
       )}
 
       {show("experience") && (
-        <Card>
-          <CardHeader title={t("profile.skills")} description={t("profile.skills_hint")} />
-          <CardBody className="space-y-4">
+        <section>
+          <SectionHeader title={t("profile.skills")} description={t("profile.skills_hint")} />
+          <SectionBody className="space-y-4">
             <Field label={t("profile.summary")}>
               <Textarea value={p.summary} onChange={(e) => set("summary", e.target.value)} />
             </Field>
@@ -177,14 +177,14 @@ export function ProfileForm({
               />
             </Field>
             <ExperienceList value={p.experience} onChange={(v) => set("experience", v)} />
-          </CardBody>
-        </Card>
+          </SectionBody>
+        </section>
       )}
 
       {show("preferences") && (
-        <Card>
-          <CardHeader title={t("profile.preferences")} description={t("profile.preferences_hint")} />
-          <CardBody className="grid gap-4 sm:grid-cols-2">
+        <section>
+          <SectionHeader title={t("profile.preferences")} description={t("profile.preferences_hint")} />
+          <SectionBody className="grid gap-4 sm:grid-cols-2">
             <Field label={t("profile.cover_letter")} hint={t("profile.cover_letter_hint")}>
               <Select
                 value={p.documents.cover_letter === "none" ? "none" : "auto"}
@@ -238,8 +238,8 @@ export function ProfileForm({
                 onChange={(v) => set("preferences", { ...p.preferences, consent_talent_pool: v })}
               />
             </div>
-          </CardBody>
-        </Card>
+          </SectionBody>
+        </section>
       )}
 
       {!autosave && (
@@ -277,7 +277,7 @@ function ExperienceList({ value, onChange }: { value: Profile["experience"]; onC
       </div>
       <div className="space-y-3">
         {value.map((e, i) => (
-          <div key={i} className="grid gap-2 rounded-lg border border-line p-3 sm:grid-cols-[1fr_1fr_110px_110px_auto]">
+          <div key={i} className="grid gap-2 border-b border-line pb-3 last:border-b-0 sm:grid-cols-[1fr_1fr_110px_110px_auto]">
             <Input placeholder={t("profile.exp_title")} value={e.title} onChange={(ev) => update(i, { title: ev.target.value })} />
             <Input placeholder={t("profile.exp_company")} value={e.company} onChange={(ev) => update(i, { company: ev.target.value })} />
             <Input placeholder="2022-01" value={e.start} onChange={(ev) => update(i, { start: ev.target.value })} />
@@ -326,13 +326,13 @@ export function DocumentsCard({ importOnUpload = false, onImported }: { importOn
     );
   };
   return (
-    <Card>
-      <CardHeader title={t("profile.documents")} description={t("profile.documents_hint")} />
-      <CardBody className="grid gap-3 sm:grid-cols-2">
+    <section>
+      <SectionHeader title={t("profile.documents")} description={t("profile.documents_hint")} />
+      <SectionBody className="grid gap-3 sm:grid-cols-2">
         {slot("cv", t("profile.cv"), t("profile.cv_hint"))}
         {slot("cv_en", t("profile.cv_en"), t("profile.cv_en_hint"))}
-      </CardBody>
-    </Card>
+      </SectionBody>
+    </section>
   );
 }
 

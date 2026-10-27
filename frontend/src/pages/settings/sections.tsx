@@ -1,31 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  CircleAlert,
-  CircleCheck,
-  Download,
-  FolderOpen,
-  LogIn,
   Pencil,
   Plus,
-  RefreshCw,
   Trash2,
-  Wand2,
 } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
+import { StatusGlyph } from "@/components/domain";
 import { SwitchRow } from "@/components/ui/controls";
 import { Dialog, DialogContent } from "@/components/ui/overlays";
 import {
   Badge,
   Button,
-  Card,
-  CardBody,
-  CardHeader,
+  SectionBody,
+  SectionHeader,
   EmptyState,
   Field,
   Input,
-  Kbd,
   Select,
   Skeleton,
   Textarea,
@@ -73,10 +65,10 @@ export function ApplySettings() {
   const { s, set, bar } = useSettingsForm();
   if (!s) return <Skeleton className="h-80 rounded-lg" />;
   return (
-    <div className="space-y-6 pb-24">
-      <Card>
-        <CardHeader title={t("applyset.title")} description={t("applyset.hint")} />
-        <CardBody className="space-y-4">
+    <div className="space-y-10">
+      <section>
+        <SectionHeader title={t("applyset.title")} />
+        <SectionBody className="space-y-4">
           <Field label={t("applyset.mode")} hint={t("applyset.mode_hint")}>
             <Select value={s.apply_mode} onChange={(e) => set("apply_mode", e.target.value as ApplyMode)} className="max-w-72">
               <option value="review">{t("mode.review")}</option>
@@ -101,11 +93,11 @@ export function ApplySettings() {
           <Field label={t("applyset.followup")} hint={t("applyset.followup_hint")}>
             <Input type="number" min={1} value={s.follow_up_days} onChange={(e) => set("follow_up_days", Number(e.target.value) || 7)} className="w-28" />
           </Field>
-        </CardBody>
-      </Card>
-      <Card>
-        <CardHeader title={t("applyset.ai")} description={t("applyset.ai_hint")} />
-        <CardBody className="grid gap-4 sm:grid-cols-2">
+        </SectionBody>
+      </section>
+      <section>
+        <SectionHeader title={t("applyset.ai")} description={t("applyset.ai_hint")} />
+        <SectionBody className="grid gap-4 sm:grid-cols-2">
           <Field label={t("applyset.model")} hint={t("applyset.model_hint")}>
             <Select value={s.llm_model} onChange={(e) => set("llm_model", e.target.value)}>
               <option value="sonnet">Sonnet</option>
@@ -129,9 +121,21 @@ export function ApplySettings() {
           <Field label={t("applyset.parallel")} hint={t("applyset.parallel_hint")}>
             <Input type="number" min={1} max={6} value={s.claude_parallel} onChange={(e) => set("claude_parallel", Number(e.target.value) || 1)} className="w-28" />
           </Field>
-        </CardBody>
-      </Card>
-      <ExtensionCard
+        </SectionBody>
+      </section>
+      {bar}
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------------- Browser-Erweiterung */
+
+export function ExtensionSettings() {
+  const { s, set, bar } = useSettingsForm();
+  if (!s) return <Skeleton className="h-80 rounded-lg" />;
+  return (
+    <div className="space-y-10">
+      <ExtensionSection
         portals={s.extension_portals}
         limit={s.extension_portal_daily_limit}
         onPortals={(v) => set("extension_portals", v)}
@@ -142,7 +146,7 @@ export function ApplySettings() {
   );
 }
 
-function ExtensionCard({
+function ExtensionSection({
   portals,
   limit,
   onPortals,
@@ -167,9 +171,9 @@ function ExtensionCard({
   const folder = useMutation({ mutationFn: api.openExtensionFolder });
   const x = info.data;
   return (
-    <Card>
-      <CardHeader title={t("ext.title")} description={t("ext.hint")} />
-      <CardBody className="space-y-4">
+    <section>
+      <p className="max-w-prose text-meta text-ink-2">{t("ext.hint")}</p>
+      <SectionBody className="space-y-4">
         {x && (
           <StatusLine
             ok={x.installed && !x.outdated}
@@ -178,11 +182,11 @@ function ExtensionCard({
             action={
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" variant={x.installed && !x.outdated ? "secondary" : "primary"} onClick={() => install.mutate()} disabled={install.isPending}>
-                  <Wand2 /> {x.installed ? t("ext.update") : t("ext.install")}
+                  {x.installed ? t("ext.update") : t("ext.install")}
                 </Button>
                 {x.installed && (
                   <Button size="sm" variant="secondary" onClick={() => folder.mutate()}>
-                    <FolderOpen /> {t("ext.open_folder")}
+                    {t("ext.open_folder")}
                   </Button>
                 )}
               </div>
@@ -206,8 +210,8 @@ function ExtensionCard({
             <Input type="number" min={0} max={100} value={limit} onChange={(e) => onLimit(Number(e.target.value) || 0)} className="w-28" />
           </Field>
         )}
-      </CardBody>
-    </Card>
+      </SectionBody>
+    </section>
   );
 }
 
@@ -219,10 +223,10 @@ export function AutopilotSettings() {
   if (!s) return <Skeleton className="h-80 rounded-lg" />;
   const days = [t("day.mon"), t("day.tue"), t("day.wed"), t("day.thu"), t("day.fri"), t("day.sat"), t("day.sun")];
   return (
-    <div className="space-y-6 pb-24">
-      <Card>
-        <CardHeader title={t("autopilot.title")} description={t("autopilot.hint")} />
-        <CardBody className="space-y-5">
+    <div className="space-y-10">
+      <section>
+        <SectionHeader description={t("autopilot.hint")} />
+        <SectionBody className="space-y-5">
           <SwitchRow
             title={t("autopilot.enable")}
             description={t("autopilot.enable_hint")}
@@ -282,18 +286,18 @@ export function AutopilotSettings() {
               </Field>
             </div>
           </div>
-        </CardBody>
-      </Card>
-      <Card>
-        <CardHeader title={t("autopilot.os_title")} description={t("autopilot.os_hint")} />
-        <CardBody>
+        </SectionBody>
+      </section>
+      <section>
+        <SectionHeader title={t("autopilot.os_title")} description={t("autopilot.os_hint")} />
+        <SectionBody>
           <pre className="overflow-x-auto rounded-md bg-sunken px-4 py-3 font-mono text-meta">
             {`schtasks /Create /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST ${s.autopilot_time} /TN jobslop /TR "jobslop autopilot"`}
           </pre>
           <p className="mt-2 text-small text-ink-2">{t("autopilot.os_unix")}</p>
           <pre className="mt-1 overflow-x-auto rounded-md bg-sunken px-4 py-3 font-mono text-meta">{`${Number(s.autopilot_time.split(":")[1] ?? 0)} ${Number(s.autopilot_time.split(":")[0] ?? 8)} * * 1-5  jobslop autopilot`}</pre>
-        </CardBody>
-      </Card>
+        </SectionBody>
+      </section>
       {bar}
     </div>
   );
@@ -312,10 +316,10 @@ export function NotificationSettings() {
   });
   if (!s) return <Skeleton className="h-80 rounded-lg" />;
   return (
-    <div className="space-y-6 pb-24">
-      <Card>
-        <CardHeader title={t("notify.browser")} description={t("notify.browser_hint")} />
-        <CardBody className="space-y-3">
+    <div className="space-y-10">
+      <section>
+        <SectionHeader title={t("notify.browser")} description={t("notify.browser_hint")} />
+        <SectionBody className="space-y-3">
           <SwitchRow title={t("notify.desktop")} checked={s.notify_desktop} onCheckedChange={(v) => set("notify_desktop", v)} />
           {permission !== "granted" && (
             <Button
@@ -327,11 +331,11 @@ export function NotificationSettings() {
               {permission === "denied" ? t("notify.blocked") : t("notify.allow")}
             </Button>
           )}
-        </CardBody>
-      </Card>
-      <Card>
-        <CardHeader title={t("notify.push")} description={t("notify.push_hint")} />
-        <CardBody className="space-y-4">
+        </SectionBody>
+      </section>
+      <section>
+        <SectionHeader title={t("notify.push")} description={t("notify.push_hint")} />
+        <SectionBody className="space-y-4">
           <Field label="ntfy" hint={t("notify.ntfy_hint")}>
             <Input
               type="url"
@@ -351,8 +355,8 @@ export function NotificationSettings() {
           <Button variant="secondary" size="sm" onClick={() => test.mutate()} loading={test.isPending}>
             {t("notify.test")}
           </Button>
-        </CardBody>
-      </Card>
+        </SectionBody>
+      </section>
       {bar}
     </div>
   );
@@ -381,9 +385,8 @@ export function AnswersSettings() {
   });
   const rows = (answers.data ?? []).filter((a) => `${a.question} ${a.answer}`.toLowerCase().includes(filter.toLowerCase()));
   return (
-    <Card>
-      <CardHeader
-        title={t("answers.title")}
+    <section>
+      <SectionHeader
         description={t("answers.hint")}
         action={
           <Button size="sm" variant="secondary" onClick={() => setEditing({ question: "", answer: "" })}>
@@ -392,14 +395,14 @@ export function AnswersSettings() {
           </Button>
         }
       />
-      <CardBody>
+      <SectionBody>
         <Input placeholder={t("answers.search")} value={filter} onChange={(e) => setFilter(e.target.value)} className="mb-3" />
         {rows.length === 0 ? (
           <EmptyState title={t("answers.empty")} description={t("answers.empty_hint")} />
         ) : (
-          <ul className="divide-y divide-line rounded-lg border border-line">
+          <ul className="divide-y divide-line border-y border-line">
             {rows.map((a) => (
-              <li key={a.id} className="flex items-start gap-3 px-4 py-3">
+              <li key={a.id} className="flex items-start gap-3 py-3">
                 <div className="min-w-0 flex-1">
                   <div className="text-body font-medium">{a.question}</div>
                   <div className="mt-0.5 text-meta text-ink-2 whitespace-pre-line">{a.answer}</div>
@@ -415,7 +418,7 @@ export function AnswersSettings() {
             ))}
           </ul>
         )}
-      </CardBody>
+      </SectionBody>
       <Dialog open={editing !== null} onOpenChange={(v) => !v && setEditing(null)}>
         {editing && (
           <DialogContent
@@ -447,7 +450,7 @@ export function AnswersSettings() {
           </DialogContent>
         )}
       </Dialog>
-    </Card>
+    </section>
   );
 }
 
@@ -472,9 +475,9 @@ export function ExclusionSettings() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["exclusions"] }),
   });
   return (
-    <Card>
-      <CardHeader title={t("excl.title")} description={t("excl.hint")} />
-      <CardBody>
+    <section>
+      <SectionHeader description={t("excl.hint")} />
+      <SectionBody>
         <form
           className="mb-4 flex flex-wrap gap-2"
           onSubmit={(e) => {
@@ -496,9 +499,9 @@ export function ExclusionSettings() {
         {rows.data?.length === 0 ? (
           <EmptyState title={t("excl.empty")} />
         ) : (
-          <ul className="divide-y divide-line rounded-lg border border-line">
+          <ul className="divide-y divide-line border-y border-line">
             {rows.data?.map((e) => (
-              <li key={e.id} className="flex items-center gap-3 px-4 py-2.5">
+              <li key={e.id} className="flex items-center gap-3 py-2.5">
                 <Badge tone="outline">{t(`excl.${e.kind === "title" ? "title_rx" : e.kind}`)}</Badge>
                 <span className="min-w-0 flex-1 truncate text-body">{e.value}</span>
                 <span className="hidden text-small text-ink-3 sm:inline">{formatRelative(e.created_at, lang)}</span>
@@ -509,8 +512,8 @@ export function ExclusionSettings() {
             ))}
           </ul>
         )}
-      </CardBody>
-    </Card>
+      </SectionBody>
+    </section>
   );
 }
 
@@ -542,17 +545,16 @@ export function SystemSettings() {
   const s = sys.data;
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader
+      <section>
+        <SectionHeader
           title={t("system.status")}
           action={
             <Button size="sm" variant="quiet" onClick={() => refresh.mutate()} loading={refresh.isPending}>
-              {!refresh.isPending && <RefreshCw />}
-              {t("system.recheck")}
+                            {t("system.recheck")}
             </Button>
           }
         />
-        <CardBody className="divide-y divide-line">
+        <SectionBody className="divide-y divide-line">
           <StatusLine
             ok={s.claude.ok}
             title="Claude Code"
@@ -560,7 +562,6 @@ export function SystemSettings() {
             action={
               !s.claude.ok && (
                 <Button size="sm" variant="primary" onClick={() => login.mutate()} loading={login.isPending}>
-                  <LogIn />
                   {t("system.claude_login")}
                 </Button>
               )
@@ -573,7 +574,6 @@ export function SystemSettings() {
             action={
               !s.browser.ok && (
                 <Button size="sm" variant="primary" onClick={() => install.mutate()} loading={s.browser_install.running}>
-                  <Download />
                   {t("system.browser_install")}
                 </Button>
               )
@@ -588,40 +588,38 @@ export function SystemSettings() {
                 : t("system.profile_ok", { name: s.profile.name })
             }
           />
-        </CardBody>
-      </Card>
-      <Card>
-        <CardHeader title={t("system.data")} description={t("system.data_hint")} />
-        <CardBody className="flex flex-wrap items-center gap-2">
-          <Kbd>{s.home}</Kbd>
+        </SectionBody>
+      </section>
+      <section>
+        <SectionHeader title={t("system.data")} description={t("system.data_hint")} />
+        <SectionBody className="flex flex-wrap items-center gap-2">
+          <code className="rounded-sm bg-sunken px-1.5 py-0.5 font-mono text-small [overflow-wrap:anywhere]">{s.home}</code>
           <Button size="sm" variant="secondary" onClick={() => folder.mutate()}>
-            <FolderOpen />
             {t("system.open_folder")}
           </Button>
           <Button size="sm" variant="secondary" asChild>
             <a href="/api/export.csv">
-              <Download />
               {t("system.export")}
             </a>
           </Button>
           <Button size="sm" variant="quiet" onClick={() => rerun.mutate()}>
-            <Wand2 />
             {t("system.rerun_setup")}
           </Button>
-        </CardBody>
-        <CardBody className="text-small text-ink-3">jobslop {s.version}</CardBody>
-      </Card>
+        </SectionBody>
+        <SectionBody className="text-small text-ink-3">jobslop {s.version}</SectionBody>
+      </section>
     </div>
   );
 }
 
+/** Zeile für einen Prüfpunkt: grünes Zeichen = in Ordnung, Petrol = du bist dran. */
 export function StatusLine({ ok, title, text, action }: { ok: boolean; title: ReactNode; text: ReactNode; action?: ReactNode }) {
   return (
     <div className="flex flex-wrap items-center gap-3 py-3">
-      {ok ? <CircleCheck className="size-5 shrink-0 text-positive" /> : <CircleAlert className="size-5 shrink-0 text-amber" />}
+      <StatusGlyph status={ok ? "offer" : "needs_input"} />
       <div className="min-w-0 flex-1">
         <div className="text-body font-medium">{title}</div>
-        <div className="truncate text-meta text-ink-2">{text}</div>
+        <div className="text-meta text-ink-2 [overflow-wrap:anywhere]">{text}</div>
       </div>
       {action}
     </div>

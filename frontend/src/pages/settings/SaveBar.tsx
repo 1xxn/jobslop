@@ -1,7 +1,7 @@
-import { useI18n } from "@/lib/i18n";
 import { Button } from "@/components/ui/primitives";
+import { useI18n } from "@/lib/i18n";
 
-/** Schwebende Leiste für ungespeicherte Änderungen (wie in den macOS-Einstellungen mit „Sichern“). */
+/** Leiste für ungespeicherte Änderungen: klebt unten am Formular und trägt die einzige Hauptaktion der Seite. */
 export function SaveBar({
   dirty,
   saving,
@@ -16,8 +16,10 @@ export function SaveBar({
   const { t } = useI18n();
   if (!dirty) return null;
   return (
-    <div className="fixed inset-x-4 bottom-20 z-30 mx-auto flex max-w-xl items-center gap-3 rounded-lg border border-line bg-raised px-4 py-2.5 shadow-overlay animate-slide-up lg:bottom-6 lg:left-[208px]">
-      <span className="mr-auto text-body font-medium">{t("common.unsaved")}</span>
+    <div className="sticky bottom-[calc(3.25rem+env(safe-area-inset-bottom))] z-20 -mx-4 flex items-center gap-2 border-t border-line bg-paper px-4 py-3 animate-fade-in sm:-mx-6 sm:px-6 lg:bottom-0 lg:-mx-8 lg:px-8">
+      <span className="mr-auto text-meta font-medium" role="status">
+        {t("common.unsaved")}
+      </span>
       <Button variant="quiet" size="sm" onClick={onReset}>
         {t("common.discard")}
       </Button>

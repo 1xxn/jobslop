@@ -1,7 +1,7 @@
 import { cva, type VariantProps } from "class-variance-authority";
 import { LoaderCircle } from "lucide-react";
 import { Slot } from "radix-ui";
-import { type ComponentProps, forwardRef, type ReactNode } from "react";
+import { cloneElement, type ComponentProps, forwardRef, isValidElement, type ReactElement, type ReactNode, useId } from "react";
 import { cn } from "@/lib/utils";
 
 /* ----------------------------------------------------------------- Button
@@ -69,30 +69,35 @@ export function Card({ className, ...props }: ComponentProps<"div">) {
   return <div className={cn("rounded-lg border border-line bg-raised", className)} {...props} />;
 }
 
-export function CardHeader({
+/* ----------------------------------------------------------------- Formular-Abschnitt (Einstellungen, Einrichtung)
+ * Überschrift mit Linie statt Kasten; ein Hinweis nur, wo die Bedeutung nicht aus Label und Wert hervorgeht.
+ */
+
+export function SectionHeader({
   title,
   description,
   action,
   className,
 }: {
-  title: ReactNode;
+  /** ohne Titel, wenn die Seite selbst schon so heißt (z. B. „Antwortbank“) – dann bleiben Hinweis und Aktion */
+  title?: ReactNode;
   description?: ReactNode;
   action?: ReactNode;
   className?: string;
 }) {
   return (
-    <div className={cn("flex items-start justify-between gap-4 px-5 pt-4 pb-3", className)}>
+    <div className={cn("flex items-start justify-between gap-4", title && "border-b border-line pb-2", className)}>
       <div className="min-w-0">
-        <h2 className="text-heading font-semibold">{title}</h2>
-        {description && <p className="mt-0.5 text-meta text-ink-2">{description}</p>}
+        {title && <h2 className="text-heading font-semibold">{title}</h2>}
+        {description && <p className={cn("max-w-prose text-meta text-ink-2", title && "mt-0.5")}>{description}</p>}
       </div>
       {action && <div className="shrink-0">{action}</div>}
     </div>
   );
 }
 
-export function CardBody({ className, ...props }: ComponentProps<"div">) {
-  return <div className={cn("px-5 pb-5", className)} {...props} />;
+export function SectionBody({ className, ...props }: ComponentProps<"div">) {
+  return <div className={cn("pt-4", className)} {...props} />;
 }
 
 /* ----------------------------------------------------------------- Abschnitt: Überschrift + Linie statt Kasten */
@@ -200,6 +205,10 @@ export function Label({ className, ...props }: ComponentProps<"label">) {
   return <label className={cn("text-meta font-medium text-ink", className)} {...props} />;
 }
 
+/**
+ * Beschriftetes Feld. Verknüpft Label und Hinweis automatisch mit dem Eingabeelement (eigene ID per useId, sofern das
+ * Kind keine hat) – Screenreader lesen so Beschriftung und Hinweis vor, und ein Klick aufs Label fokussiert das Feld.
+ */
 export function Field({
   label,
   hint,
@@ -215,14 +224,27 @@ export function Field({
   className?: string;
   htmlFor?: string;
 }) {
+  const auto = useId();
+  const child = isValidElement<{ id?: string }>(children) ? children : null;
+  const id = htmlFor ?? child?.props.id ?? auto;
+  const noteId = `${id}-note`;
+  const note = error || hint;
+  const control =
+    child && !htmlFor
+      ? cloneElement(child as ReactElement<Record<string, unknown>>, {
+          id,
+          "aria-describedby": note ? noteId : undefined,
+          "aria-invalid": error ? true : undefined,
+        })
+      : children;
   return (
     <div className={cn("flex flex-col gap-1", className)}>
-      <Label htmlFor={htmlFor}>{label}</Label>
-      {children}
-      {error ? (
-        <p className="text-small text-danger">{error}</p>
-      ) : (
-        hint && <p className="text-small text-ink-3">{hint}</p>
+      <Label htmlFor={id}>{label}</Label>
+      {control}
+      {note && (
+        <p id={noteId} className={cn("text-small", error ? "text-danger" : "text-ink-3")}>
+          {note}
+        </p>
       )}
     </div>
   );

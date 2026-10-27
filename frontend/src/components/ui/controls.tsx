@@ -169,12 +169,17 @@ export function ChipsInput({
   placeholder,
   className,
   tone = "neutral",
+  id,
+  "aria-describedby": describedBy,
 }: {
   value: string[];
   onChange: (v: string[]) => void;
   placeholder?: string;
   className?: string;
   tone?: "neutral" | "danger";
+  /** landet am Texteingabefeld, damit ein umgebendes Field-Label es beschriftet */
+  id?: string;
+  "aria-describedby"?: string;
 }) {
   const { t } = useI18n();
   const [draft, setDraft] = useState("");
@@ -222,6 +227,8 @@ export function ChipsInput({
         </span>
       ))}
       <input
+        id={id}
+        aria-describedby={describedBy}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={onKey}
