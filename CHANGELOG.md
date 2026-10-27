@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### New
+- Many more jobs: the German Federal Employment Agency (official job search, every industry, without temp
+  agencies), LinkedIn, Indeed and Glassdoor (public search via JobSpy, no login), Recruitee and Workable boards.
+  One list of search terms now serves all job boards (`queries`, formerly `himalayas_queries`).
+- Company boards are discovered automatically: companies from job boards are looked up on Greenhouse, Ashby,
+  Lever, Recruitee, Workable and Personio; found boards are crawled and replace the job-board entries.
+- Jobs on pages behind bot checks (Himalayas, Glassdoor) are marked as browser-only: never queued automatically,
+  ranked lower, applied to in your own browser.
+- Browser extension: fills application forms in your own Chrome (same form reader and planner as the engine),
+  asks for missing answers in an in-page panel and only submits after your click. LinkedIn/Indeed Easy Apply
+  can be enabled explicitly, with a daily limit.
+- Read-only smoke tests against real sites (`JOBSLOP_NETWORK=1`).
+
 ### Fixed
 - The submit button can no longer be clicked past the review: a planner that lists it as a plain click action or as
   "next" is routed through approval / dry run.
@@ -15,6 +28,7 @@
 - "Stop" ends the whole application run including browser processes; LinkedIn/Indeed are detected at every step,
   not only on the first page; a dry-run batch keeps only the last filled page open.
 - Claude Code tests now also run on Windows.
+- The rule planner recognises "Send" as a submit button (Recruitee).
 
 ## 1.0.0 – jobslop
 

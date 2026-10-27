@@ -34,6 +34,8 @@ environment variables `JOBSLOP_*`. The old prefix `JOBPILOT_*` is still understo
 | `notify_webhook_url` | – | Receives `{"title","message","content","text","url"}` |
 | `follow_up_days` | `10` | Follow-up reminder after submitting |
 | `dashboard_host` / `dashboard_port` | `127.0.0.1` / `8765` | Where the dashboard listens (environment only) |
+| `extension_portals` | `false` | Let the browser extension fill LinkedIn/Indeed (their terms prohibit automation) |
+| `extension_portal_daily_limit` | `15` | Max. LinkedIn/Indeed submissions per day through the extension |
 | `demo` | `false` | Demo folder: crawling, applying, autopilot, add-by-link and notifications are blocked. Set by `scripts/demo_data.py`, not editable in the dashboard |
 
 ## Search (`search.toml`)
@@ -65,9 +67,22 @@ ashby = ["deepl"]               # jobs.ashbyhq.com/<name>
 lever = ["spotify"]             # jobs.lever.co/<name>
 smartrecruiters = ["Auto1"]     # jobs.smartrecruiters.com/<ID>
 personio = ["tado"]             # <name>.jobs.personio.de
+recruitee = ["acme"]            # <name>.recruitee.com
+workable = ["acme"]             # apply.workable.com/<name>
 amazon_queries = ["devops"]
+
+# Job boards with keyword search share these terms; locations come from filters.onsite_locations (+ remote)
+queries = ["devops", "platform engineer"]   # was himalayas_queries (still read)
+arbeitsagentur = true           # German Federal Employment Agency – all of Germany, every industry
+arbeitsagentur_radius_km = 30
+arbeitsagentur_skip_agencies = true         # no temp agencies / private recruiters
+portals = ["linkedin", "indeed"]            # public search via JobSpy, no login; "glassdoor" too
+portal_results = 25             # per term, location and portal
+portal_hours_old = 336          # only postings of the last two weeks
+himalayas = true
 arbeitnow = true
-himalayas_queries = ["devops", "platform engineer"]
+discover_boards = true          # look up companies from job boards on their own boards
+discover_max_per_crawl = 40
 
 [[sources.workday]]
 company = "Example AG"

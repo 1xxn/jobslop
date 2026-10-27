@@ -6,6 +6,7 @@ import type {
   ApplyMode,
   CrawlRun,
   Exclusion,
+  ExtensionInfo,
   JobDetail,
   JobList,
   JobSummary,
@@ -98,6 +99,9 @@ export const api = {
   claudeInstall: () => post<{ opened: boolean }>("/api/system/claude-install"),
   browserInstall: () => post<SystemReport["browser_install"]>("/api/system/browser-install"),
   openFolder: () => post<{ opened: boolean }>("/api/system/open-folder"),
+  extension: () => get<ExtensionInfo>("/api/extension"),
+  installExtension: () => post<ExtensionInfo>("/api/extension/install"),
+  openExtensionFolder: () => post<{ opened: boolean }>("/api/extension/open-folder"),
 
   profile: () => get<ProfileResponse>("/api/profile"),
   saveProfile: (profile: Profile) => put<ProfileResponse>("/api/profile", profile),

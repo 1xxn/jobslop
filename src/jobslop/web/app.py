@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
 
-from .. import __version__
+from .. import __version__, assist
 from ..autopilot import Scheduler, crawl_and_queue, next_run, record
 from ..config import (
     EDITABLE_SETTINGS,
@@ -450,6 +450,77 @@ def create_app(runtime: Runtime) -> FastAPI:
     @app.post("/api/system/open-folder")
     def open_home() -> dict[str, Any]:
         return {"opened": open_folder(ctx.settings.home)}
+
+    # ------------------------------------------------------------------ Browser-Erweiterung
+    # Einrichten/Anzeigen gehört zum Dashboard; alles unter /api/assist/ ruft die Erweiterung mit ihrem Token auf.
+    def assist_info() -> dict[str, Any]:
+        installed = assist.installed_version(ctx.settings)
+        return {
+            "path": str(assist.extension_dir(ctx.settings)),
+            "installed": bool(installed),
+            "outdated": bool(installed) and installed != __version__,
+            "version": __version__,
+        } | assist.status(ctx.settings)
+
+    @app.get("/api/extension")
+    def extension_info() -> dict[str, Any]:
+        return assist_info()
+
+    @app.post("/api/extension/install")
+    def extension_install(request: Request) -> dict[str, Any]:
+        assist.install(ctx.settings, server=str(request.base_url))
+        record(ctx.settings, "setup", "Browser-Erweiterung eingerichtet")
+        return assist_info()
+
+    @app.post("/api/extension/open-folder")
+    def extension_open_folder() -> dict[str, Any]:
+        path = assist.extension_dir(ctx.settings)
+        return {"opened": path.is_dir() and open_folder(path)}
+
+    def paired(request: Request) -> None:
+        if not assist.token_ok(ctx.settings, request.headers.get("x-jobslop-token", "")):
+            raise HTTPException(
+                401, "Erweiterung nicht gekoppelt – in jobslop unter Einstellungen → Bewerben neu einrichten"
+            )
+
+    @app.get("/api/assist/status")
+    def assist_status(request: Request) -> dict[str, Any]:
+        paired(request)
+        return assist.status(ctx.settings)
+
+    @app.post("/api/assist/step")
+    async def assist_step(request: Request, body: assist.StepIn) -> dict[str, Any]:
+        paired(request)
+        return await assist.step(ctx.runtime(), body)
+
+    @app.post("/api/assist/result")
+    def assist_result(request: Request, body: assist.ResultIn) -> dict[str, Any]:
+        paired(request)
+        assist.record_results(ctx.settings, body)
+        return {"ok": True}
+
+    @app.post("/api/assist/answers")
+    def assist_answers(request: Request, body: assist.AnswersIn) -> dict[str, Any]:
+        paired(request)
+        return {"saved": assist.save_answers(ctx.settings, body)}
+
+    @app.post("/api/assist/finish")
+    async def assist_finish(request: Request, body: assist.FinishIn) -> dict[str, Any]:
+        paired(request)
+        assist.finish(ctx.settings, body)
+        if body.status == "submitted":
+            await ctx.notify(
+                "jobslop: Bewerbung abgeschickt", body.message[:200] or "über die Browser-Erweiterung"
+            )
+        return {"ok": True}
+
+    @app.get("/api/assist/file")
+    def assist_file(request: Request, application_id: int, value: str, index: int = 0) -> FileResponse:
+        paired(request)
+        path = assist.upload_file(ctx.runtime(), application_id, value, index)
+        if path is None:
+            raise HTTPException(404, "Datei nicht gefunden")
+        return FileResponse(path, filename=path.name)
 
     # ------------------------------------------------------------------ Profil & Dokumente
     @app.get("/api/profile")

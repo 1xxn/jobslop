@@ -28,8 +28,11 @@ and asks before it submits anything.
 Applying for jobs is 10 % deciding and 90 % copy‑pasting the same answers into slightly different forms.
 jobslop does the copy‑pasting. You keep the deciding.
 
-- **Finds jobs** on job boards (Arbeitnow, Himalayas), company boards (Greenhouse, Ashby, Lever,
-  SmartRecruiters, Personio, Workday, amazon.jobs) and any careers page – de‑duplicated, with history.
+- **Finds jobs everywhere**: the German Federal Employment Agency (every industry), LinkedIn, Indeed and
+  Glassdoor (public search, no login), Arbeitnow, Himalayas, company boards (Greenhouse, Ashby, Lever,
+  SmartRecruiters, Personio, Recruitee, Workable, Workday, amazon.jobs) and any careers page – de‑duplicated,
+  with history. Companies found on job boards are looked up on their own boards automatically, so you apply
+  directly at the employer.
 - **Ranks them honestly.** Claude reads the requirements and tells you what fits, what doesn't and what
   to watch out for (on‑call, German C2, “senior” in disguise …).
 - **Applies in a real browser.** It handles iframes, shadow DOM, custom dropdowns, multi‑step wizards,
@@ -50,7 +53,8 @@ jobslop does the copy‑pasting. You keep the deciding.
 | 🔔 **Notifications** | Browser notifications, plus push to your phone via [ntfy](https://ntfy.sh) or any webhook (Discord, Slack, Home Assistant). |
 | 🗂️ **Pipeline** | Drag‑and‑drop board, notes, follow‑up dates, response and interview rates. |
 | 🔗 **Add any job by link** | Paste a URL – jobslop reads title, company and location (schema.org JobPosting first, Claude only if needed). |
-| 🛡️ **Guard rails** | Company limits, exclusions, duplicate detection, no double submissions, LinkedIn/Indeed are never automated. |
+| 🧩 **Browser extension** | Fills forms in your own Chrome where an automated browser gets stuck (bot checks, logins) – incl. LinkedIn/Indeed Easy Apply if you allow it. Nothing is sent without your click. |
+| 🛡️ **Guard rails** | Company limits, exclusions, duplicate detection, no double submissions, approval before every submit, LinkedIn/Indeed only opt‑in with a daily limit. |
 | 🌗 **Polished UI** | Light & dark mode, German & English, keyboard friendly, responsive down to phone size. |
 
 <table>
@@ -112,10 +116,10 @@ your Claude account (`claude`, then `/login`).
 ```
  Sources                      Local database              Your dashboard
 ┌──────────────────────┐     ┌──────────────────┐        ┌──────────────────────────┐
-│ Arbeitnow, Himalayas  │     │ jobs + history    │        │ overview · jobs · pipeline│
-│ Greenhouse, Ashby,    │──▶ │ applications      │ ◀────▶ │ questions & approvals     │
-│ Lever, SmartRecruiters│     │ answer bank       │        │ settings · autopilot      │
-│ Personio, Workday, …  │     └──────────────────┘        └──────────────────────────┘
+│ Job agency, LinkedIn, │     │ jobs + history    │        │ overview · jobs · pipeline│
+│ Indeed, Himalayas, …  │──▶ │ applications      │ ◀────▶ │ questions & approvals     │
+│ Greenhouse, Ashby,    │     │ answer bank       │        │ settings · autopilot      │
+│ Lever, Recruitee, …   │     └──────────────────┘        └──────────────────────────┘
 └──────────────────────┘              │                               ▲
                                       ▼                               │ asks you
                         ┌───────────────────────────────────┐         │
@@ -160,9 +164,11 @@ Configuration reference: [docs/configuration.md](docs/configuration.md).
   The dashboard only listens on `127.0.0.1` and rejects requests from other sites.
 - **Your data leaves your computer** only towards Claude (through your own subscription) and into the forms
   of the applications you start.
-- **You are responsible for what is sent in your name.** Start with *dry run* or *with approval*. Respect the
-  terms of the sites you use. jobslop deliberately does not automate LinkedIn or Indeed, solves no CAPTCHAs
-  and hands logins over to you.
+- **You are responsible for what is sent in your name.** Start with *dry run* or *with approval*.
+- **LinkedIn, Indeed and Glassdoor** prohibit automated access in their terms. jobslop only queries their public
+  search, throttled and never signed in. Applying there happens only in your own Chrome through the extension,
+  only if you switch it on, with a daily limit and your approval for every submission – your account, your risk.
+- **CAPTCHAs and logins stay yours.** jobslop never solves or bypasses security checks; it pauses and you click.
 
 ## FAQ
 
@@ -192,8 +198,10 @@ fields. The bundled sources focus on Germany/Europe; any careers page can be add
 <details>
 <summary><b>Can it apply via LinkedIn “Easy Apply”?</b></summary>
 
-No, on purpose – LinkedIn and Indeed detect automation and ban accounts. For such links jobslop opens the page,
-you click through to the employer's site, and jobslop takes over there.
+With the browser extension, if you allow it (Settings → Applying → Browser extension). It runs in your own,
+signed‑in Chrome, fills the Easy Apply steps and stops before “Submit” until you approve. A daily limit keeps
+it moderate. LinkedIn's terms prohibit automation and accounts can be restricted – it's off by default.
+Jobs that link to the employer's site are applied to there instead.
 </details>
 
 <details>
@@ -215,7 +223,9 @@ npm run build                            # builds into src/jobslop/web/dist (com
 ```
 
 Demo data for UI work: `uv run python scripts/demo_data.py --home .demo-home`, then
-`JOBSLOP_HOME=.demo-home uv run jobslop`. See [CONTRIBUTING.md](CONTRIBUTING.md).
+`JOBSLOP_HOME=.demo-home uv run jobslop` (demo mode: nothing crawls, applies or notifies). Smoke tests against
+real sites (read‑only): `JOBSLOP_NETWORK=1 uv run pytest tests/test_real_sites.py`. See
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
