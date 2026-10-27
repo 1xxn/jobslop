@@ -64,6 +64,18 @@ class JobContext:
     description: str
     language: str
 
+    @classmethod
+    def from_job(cls, job: Any) -> JobContext:
+        return cls(
+            id=job.id,
+            company=job.company,
+            title=job.title,
+            location=job.location,
+            url=job.target_url,
+            description=job.description or job.notes,
+            language=job.language,
+        )
+
 
 @dataclass
 class PlanInput:
@@ -292,26 +304,35 @@ def is_final_submit(button: dict[str, Any], *, form_filled: bool) -> bool:
     return form_filled and bool(button.get("form")) and bool(_APPLY_RX.search(text))
 
 
-def guard_submit_clicks(state: PageState, plan: PagePlan, *, filled_before: bool) -> list[str]:
+def confirmation_excerpt(text: str) -> str:
+    """Der Satz der Bestätigungsseite („Thank you for applying …“) als Nachweis."""
+    m = _CONFIRM_RX.search(text)
+    if not m:
+        return text[:300]
+    return re.sub(r"\s+", " ", text[m.start() : m.end() + 200]).strip()
+
+
+def guard_submit_clicks(state: PageState, plan: PagePlan, filled: list[dict[str, Any]]) -> list[str]:
     """Abgesendet wird nur über den eigenen Absende-Schritt (Freigabe, Testlauf, Doppel-Schutz).
 
     Planer (vor allem Claude) legen den Absende-Button gelegentlich als ``click``-Aktion oder als ``click_next``
-    an. Ersteres wird übersprungen, Letzteres zu ``click_submit`` umgeleitet. Rückgabe: Notizen für den Verlauf.
+    an. Ersteres wird übersprungen, Letzteres zu ``click_submit`` umgeleitet. ``filled`` sind die bisher
+    ausgefüllten Felder dieser Bewerbung. Rückgabe: Notizen für den Verlauf.
     """
-    filled = (
-        filled_before
+    filled_form = (
+        any(r.get("ok") and r.get("action") != "click" for r in filled)
         or any(a.action in ("fill", "select", "check", "upload") for a in plan.actions)
         or sum(1 for f in state.form_fields if f.get("value")) >= 2
     )
     notes = []
     for a in plan.actions:
         button = state.button(a.field_id) if a.action == "click" else None
-        if button and is_final_submit(button, form_filled=filled):
+        if button and is_final_submit(button, form_filled=filled_form):
             a.action = "skip"
             notes.append(f"Klick auf '{button['text']}' ignoriert – Absenden nur über click_submit")
     if plan.next_step in ("click_apply", "click_next"):
         target = state.button(plan.next_target_id)
-        if target and is_final_submit(target, form_filled=filled):
+        if target and is_final_submit(target, form_filled=filled_form):
             plan.next_step = "click_submit"
     return notes
 

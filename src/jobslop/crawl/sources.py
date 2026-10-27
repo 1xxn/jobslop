@@ -805,6 +805,17 @@ class PortalSource:
 
 AGGREGATOR_SOURCES = ("arbeitnow", "himalayas", "arbeitsagentur", "portal")
 
+# Firmen-Boards: Name in search.toml (sources.<art>) → Quelle. Auch die Board-Suche fragt über diese Klassen ab.
+BOARD_SOURCES: dict[str, Any] = {
+    "greenhouse": GreenhouseSource,
+    "ashby": AshbySource,
+    "lever": LeverSource,
+    "smartrecruiters": SmartRecruitersSource,
+    "personio": PersonioSource,
+    "recruitee": RecruiteeSource,
+    "workable": WorkableSource,
+}
+
 
 # --------------------------------------------------------------------------- generische Karriereseiten (Browser + Claude)
 
@@ -894,13 +905,8 @@ def build_sources(
 ) -> list[Any]:
     s = config.sources
     sources: list[Any] = []
-    sources += [GreenhouseSource(b) for b in s.greenhouse]
-    sources += [AshbySource(b) for b in s.ashby]
-    sources += [LeverSource(b) for b in s.lever]
-    sources += [SmartRecruitersSource(c) for c in s.smartrecruiters]
-    sources += [PersonioSource(c) for c in s.personio]
-    sources += [RecruiteeSource(c) for c in s.recruitee]
-    sources += [WorkableSource(c) for c in s.workable]
+    for kind, cls in BOARD_SOURCES.items():
+        sources += [cls(entry) for entry in getattr(s, kind)]
     sources += [WorkdaySource(w) for w in s.workday]
     if s.amazon_queries:
         sources.append(AmazonSource(s.amazon_queries, s.amazon_country))

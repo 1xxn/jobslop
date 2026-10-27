@@ -2,15 +2,10 @@
 
 from __future__ import annotations
 
-import socket
-import threading
-import time
-
 import pytest
-import uvicorn
 from sqlalchemy import select
 
-from conftest import add_job
+from conftest import add_job, serve
 from jobslop import assist
 from jobslop.db import Answer, Application, session_scope
 from jobslop.runtime import Runtime
@@ -24,20 +19,9 @@ def server(settings, config, profile, monkeypatch):
     monkeypatch.setattr(
         Runtime, "llm", lambda self: None
     )  # Regel-Planer statt echtem Claude (kein Abo-Verbrauch)
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-    settings.dashboard_port = port
-    app = create_app(Runtime(settings=settings, config=config, profile=profile))
-    srv = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
-    thread = threading.Thread(target=srv.run, daemon=True)
-    thread.start()
-    deadline = time.monotonic() + 10
-    while not srv.started and time.monotonic() < deadline:
-        time.sleep(0.05)
-    yield settings
-    srv.should_exit = True
-    thread.join(5)
+    with serve(create_app(Runtime(settings=settings, config=config, profile=profile))) as url:
+        settings.dashboard_port = int(url.rsplit(":", 1)[1])  # die Erweiterung spricht mit diesem Server
+        yield settings
 
 
 async def _browser(pw, ext, tmp_path):

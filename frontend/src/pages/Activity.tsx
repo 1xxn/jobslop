@@ -9,12 +9,16 @@ import { api } from "@/lib/api";
 import { codeOf, useBackendText } from "@/lib/backendText";
 import { useStatus } from "@/lib/hooks";
 import { useI18n } from "@/lib/i18n";
-import { type MessageKey, messages } from "@/lib/messages";
+import { hasMessage } from "@/lib/messages";
 import { formatDateTime, formatRelative } from "@/lib/utils";
 
 export function ActivityPage() {
   const { t, lang } = useI18n();
   const backendText = useBackendText();
+  const kindLabel = (kind: string) => {
+    const key = `kind.${kind}`;
+    return hasMessage(key) ? t(key) : kind;
+  };
   const qc = useQueryClient();
   const { data: status } = useStatus();
   const crawls = useQuery({ queryKey: ["crawls"], queryFn: api.crawls, refetchInterval: status?.crawl.running ? 3000 : 30_000 });
@@ -106,7 +110,7 @@ export function ActivityPage() {
             {activity.data?.map((item) => (
               <li key={item.id} className="flex gap-3">
                 <Badge tone="outline" className="mt-0.5 shrink-0">
-                  {`kind.${item.kind}` in messages.de ? t(`kind.${item.kind}` as MessageKey) : item.kind}
+                  {kindLabel(item.kind)}
                 </Badge>
                 <div className="min-w-0">
                   <div className="text-footnote leading-snug break-words">{backendText(...codeOf(item.data), item.message)}</div>

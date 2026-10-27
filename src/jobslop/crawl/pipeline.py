@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..classify import classify, content_hash, fingerprint, match_key, score, title_allowed, where_of
+from ..classify import classify, content_hash, fingerprint, job_score, match_key, title_allowed, where_of
 from ..config import SearchConfig, Settings, ensure_not_demo
 from ..db import CrawlRun, Job, JobSnapshot, session_scope, utcnow
 from ..guard import company_key
@@ -28,8 +28,6 @@ from .sources import AGGREGATOR_SOURCES, build_sources, gather_limited
 log = logging.getLogger(__name__)
 
 STALE_DAYS = 21  # Börsen-Stellen gelten als geschlossen, wenn sie so lange nicht mehr auftauchen
-# Stellen, die nur im eigenen Browser bewerbbar sind (Bot-Abfrage der Jobbörse), rutschen in der Liste nach unten
-BROWSER_ONLY_PENALTY = 4.0
 
 
 def _is_aggregator(source: str) -> bool:
@@ -53,8 +51,15 @@ class CrawlReport:
     discovered: list[str] = field(default_factory=list)  # neu gefundene Firmen-Boards
 
 
-def _rank(job: Job, value: float) -> float:
-    return round(value - BROWSER_ONLY_PENALTY, 2) if is_browser_only(job.target_url) else value
+def _stored_descriptions(settings: Settings, fingerprints: list[str]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    with session_scope(settings.db_path) as s:
+        for i in range(0, len(fingerprints), 500):  # SQLite begrenzt die Parameter pro Abfrage
+            rows = s.execute(
+                select(Job.fingerprint, Job.description).where(Job.fingerprint.in_(fingerprints[i : i + 500]))
+            )
+            out |= {fp: desc for fp, desc in rows if desc}
+    return out
 
 
 def _workplace(p: RawPosting, where: str) -> str:
@@ -141,19 +146,14 @@ async def run_crawl(
                 # Zuerst Firmen, deren Stellen sonst nur im eigenen Browser bewerbbar wären (Himalayas & Co.)
                 candidates.sort(key=lambda p: not is_browser_only(p.url))
                 names = {src.name for src in sources}
-                found = [
-                    src
-                    for src in await discover(
-                        client, settings.db_path, candidates, limit=config.sources.discover_max_per_crawl
-                    )
-                    if src.name not in names
-                ]
-                if found:
-                    report.discovered = [src.name for src in found]
-                    sources += found
-                    found_results = await gather_limited([src.fetch(client) for src in found], limit=8)
-                    for src, result in zip(found, found_results, strict=True):
-                        take(src, result)
+                found = await discover(
+                    client, settings.db_path, candidates, limit=config.sources.discover_max_per_crawl
+                )
+                for src, postings in found:  # beim Suchen schon abgefragt
+                    if src.name not in names:
+                        report.discovered.append(src.name)
+                        sources.append(src)
+                        take(src, postings)
             # Boards schreiben oft nur „Remote“ ohne Land. Hat eine Jobbörse dieselbe Stelle schon als passend
             # eingeordnet (z. B. Himalayas: „offen für Deutschland“), übernimmt der Board-Eintrag deren Ort.
             board_where = {
@@ -166,8 +166,13 @@ async def run_crawl(
             # Firmen-Boards vor Jobbörsen: bei derselben Stelle gewinnt der Board-Eintrag (direkte URL)
             kept.sort(key=lambda item: _is_aggregator(item[1].source))
 
-            # Details (Beschreibung) nur für die gefilterten Treffer nachladen
-            detail_jobs = [(src, p) for src, p, _ in kept if not p.description and hasattr(src, "details")]
+            # Details (Beschreibung) nur für die gefilterten Treffer nachladen – und nur, was noch nicht gespeichert
+            # ist: Arbeitsagentur und LinkedIn liefern Beschreibungen nur über eine Detailseite pro Stelle.
+            need = [(src, p) for src, p, _ in kept if not p.description and hasattr(src, "details")]
+            stored = _stored_descriptions(settings, [fingerprint(p.source, p.external_id) for _, p in need])
+            for _src, p in need:
+                p.description = stored.get(fingerprint(p.source, p.external_id), "")
+            detail_jobs = [(src, p) for src, p in need if not p.description]
             detail_results = await gather_limited([src.details(client, p) for src, p in detail_jobs], limit=6)
             for (_src, p), res in zip(detail_jobs, detail_results, strict=True):
                 if isinstance(res, BaseException):
@@ -347,30 +352,13 @@ def _upsert(
     job.last_seen = utcnow()
     job.status = "open"
     job.closed_at = None
+    job.category = str(meta["category"])
     if not job.enrichment:  # LLM-Bewertung hat Vorrang vor Regeln
-        job.category = str(meta["category"])
         job.level = str(meta["level"])
         job.fit = int(meta["fit"])  # type: ignore[arg-type]
-        job.score = _rank(job, float(meta["score"]))  # type: ignore[arg-type]
-    else:
-        job.category = str(meta["category"])
     job.segment = str(meta["segment"])
     job.language = str(meta["language"])
-    if (
-        job.enrichment
-    ):  # URL kann sich geändert haben (Board ersetzt Börse) – Rang mit der Bewertung neu rechnen
-        job.score = _rank(
-            job,
-            score(
-                job.category,
-                job.fit,
-                job.segment,
-                job.level,
-                bool(job.near and "km" in job.near),
-                job.where,
-                config.role_names,
-            ),
-        )
+    job.score = job_score(job, config.role_names)
     s.flush()
 
     if change != "unchanged" or not job.snapshots:
@@ -489,17 +477,6 @@ async def enrich_jobs(
             if a.workplace != "unklar":
                 job.workplace = a.workplace
             job.enrichment = a.model_dump()
-            job.score = _rank(
-                job,
-                score(
-                    job.category,
-                    job.fit,
-                    job.segment,
-                    job.level,
-                    bool(job.near and "km" in job.near),
-                    job.where,
-                    config.role_names,
-                ),
-            )
+            job.score = job_score(job, config.role_names)
             count += 1
     return count

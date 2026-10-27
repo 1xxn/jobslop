@@ -97,6 +97,7 @@ export interface JobSummary {
   queued: boolean;
   starred: boolean;
   source: string;
+  board: boolean;
   url: string;
   posted: string;
   first_seen: string | null;
@@ -125,7 +126,6 @@ export interface JobDetail extends JobSummary {
   last_seen: string | null;
   verdict: { ok: boolean; reason: string; code?: string; params?: Record<string, unknown> };
   score_parts: { key: string; points: number }[];
-  score_max: number;
   history: { seen_at: string; change: string; diff: Record<string, unknown> }[];
   applications: ApplicationSummary[];
 }
@@ -264,7 +264,8 @@ export interface SearchConfig {
   skills: string[];
 }
 
-export type Portal = "linkedin" | "indeed" | "glassdoor";
+export const PORTALS = ["linkedin", "indeed", "glassdoor"] as const;
+export type Portal = (typeof PORTALS)[number];
 
 export interface Preset {
   id: string;

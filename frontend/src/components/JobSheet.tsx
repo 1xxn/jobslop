@@ -25,7 +25,7 @@ import type { MessageKey } from "@/lib/messages";
 import type { JobDetail } from "@/lib/types";
 import { cn, formatDate, formatRelative, hostOf, sourceName } from "@/lib/utils";
 import { ApplyDialog } from "./actions";
-import { CompanyAvatar, FitDots, RoleBadge, ScoreRing, StatusBadge, WhereLabel } from "./domain";
+import { CompanyAvatar, FitDots, RoleBadge, SCORE_MAX, ScoreRing, StatusBadge, WhereLabel } from "./domain";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Sheet } from "./ui/overlays";
 import { Badge, Button, Skeleton, Textarea } from "./ui/primitives";
 
@@ -44,7 +44,7 @@ function ScoreBreakdown({ job }: { job: JobDetail }) {
       >
         {t("score.title")}
         <span className="flex items-center gap-2 font-normal text-fg-muted">
-          {t("score.total", { score: Math.round(job.score * 10) / 10, max: job.score_max })}
+          {t("score.total", { score: Math.round(job.score * 10) / 10, max: SCORE_MAX })}
           <ChevronDown className={cn("size-4 transition-transform", open && "rotate-180")} />
         </span>
       </button>
@@ -160,8 +160,8 @@ export function JobSheet({ jobId, onClose }: { jobId: number | null; onClose: ()
               {job.status === "closed" && <Badge tone="danger">{t("job.closed")}</Badge>}
               <StatusBadge status={job.app_status} />
               <Badge tone="outline">
-                {sourceName(job.source)}
-                {hostOf(job.url) && !hostOf(job.url).includes(sourceName(job.source).toLowerCase()) ? ` · ${hostOf(job.url)}` : ""}
+                {sourceName(job.source, t)}
+                {!job.board && hostOf(job.url) ? ` · ${hostOf(job.url)}` : ""}
               </Badge>
             </div>
 

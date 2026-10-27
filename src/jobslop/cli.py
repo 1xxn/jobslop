@@ -1014,7 +1014,6 @@ def autopilot(
         code="autopilot.done",
         new=summary["new"],
         queued=len(summary["queued"]),
-        started=0,
     )
 
 

@@ -4,7 +4,8 @@
 importScripts("config.js");
 
 const CFG = self.JOBSLOP_CONFIG;
-const CAPTCHA_RX = /recaptcha|hcaptcha|challenges\.cloudflare|turnstile|captcha/i;
+// Dieselbe Liste wie die Engine (extract.CAPTCHA_HOST_HINTS) – jobslop schreibt sie in config.js
+const isCaptcha = (url) => CFG.captchaHosts.some((host) => (url || "").toLowerCase().includes(host));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const running = new Set(); // Tabs, für die gerade ein Schritt läuft
 
@@ -73,12 +74,11 @@ async function show(tabId, s, view) {
 
 async function readPage(tabId) {
   const probes = await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func: () => location.href });
-  const frames = [];
-  for (const probe of probes) {
-    if (probe.frameId !== 0 && CAPTCHA_RX.test(probe.result || "")) {
+  // Jeder Frame braucht seine eigene Nummer – also einzeln, aber parallel auslesen
+  const extract = async (probe) => {
+    if (probe.frameId !== 0 && isCaptcha(probe.result)) {
       // CAPTCHA-Frames nie auslesen oder bedienen – jobslop meldet nur, dass eine da ist
-      frames.push({ index: probe.frameId, data: { url: probe.result, title: "", fields: [], buttons: [], errors: [], captcha: [], headings: [], text: "" } });
-      continue;
+      return { index: probe.frameId, data: { url: probe.result, title: "", fields: [], buttons: [], errors: [], captcha: [], headings: [], text: "" } };
     }
     try {
       const [result] = await chrome.scripting.executeScript({
@@ -86,26 +86,24 @@ async function readPage(tabId) {
         func: (index) => (self.jobslopExtract ? self.jobslopExtract(index) : null),
         args: [probe.frameId],
       });
-      if (result && result.result) frames.push({ index: probe.frameId, data: result.result });
+      return result && result.result ? { index: probe.frameId, data: result.result } : null;
     } catch {
-      // Frame während des Ladens weg – beim nächsten Schritt wieder dabei
+      return null; // Frame während des Ladens weg – beim nächsten Schritt wieder dabei
     }
-  }
-  let ld = [];
-  try {
-    const [result] = await chrome.scripting.executeScript({
+  };
+  const jsonLd = chrome.scripting
+    .executeScript({
       target: { tabId, frameIds: [0] },
       func: () =>
         Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
           .map((el) => el.textContent || "")
           .filter((text) => /JobPosting/.test(text))
           .slice(0, 3),
-    });
-    ld = (result && result.result) || [];
-  } catch {
-    // ohne JSON-LD: jobslop nimmt Seitentitel und Überschrift
-  }
-  return { frames, ld };
+    })
+    .then(([result]) => (result && result.result) || [])
+    .catch(() => []); // ohne JSON-LD: jobslop nimmt Seitentitel und Überschrift
+  const [frames, ld] = await Promise.all([Promise.all(probes.map(extract)), jsonLd]);
+  return { frames: frames.filter(Boolean), ld };
 }
 
 const frameOf = (id) => parseInt(String(id).split("-")[0], 10) || 0;

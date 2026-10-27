@@ -43,6 +43,26 @@ class Files:
     cover_letter_text: str = ""
     certificates: list[Path] = field(default_factory=list)
 
+    @classmethod
+    def from_profile(cls, profile: Any, base: Path) -> Files:
+        """Dateien aus dem Profil (Engine und Browser-Erweiterung). Eine eigene Anschreiben-PDF gilt sofort."""
+        docs = profile.documents
+        custom = docs.resolve(docs.cover_letter, base) if docs.cover_letter not in ("auto", "none") else None
+        return cls(
+            cv=profile.cv_path(base),
+            cv_en=docs.resolve(docs.cv_en, base),
+            certificates=[p for c in docs.certificates if (p := docs.resolve(c, base))],
+            cover_letter_pdf=custom if custom and custom.exists() else None,
+        )
+
+    def fill_value(self, action: str, value: str) -> str:
+        """Platzhalter @cover_letter wird zum Anschreiben-Text."""
+        if action == "fill" and value.strip().lower() == "@cover_letter":
+            if not self.cover_letter_text:
+                raise RuntimeError("Kein Anschreiben-Text verfügbar")
+            return self.cover_letter_text
+        return value
+
     def resolve_upload(self, token: str) -> list[Path]:
         token = token.strip().lower()
         if token in ("@cv", "cv"):
@@ -85,6 +105,42 @@ def to_iso_date(value: str) -> str:
     return value
 
 
+# --------------------------------------------------------------------------- Werte auflösen (ohne Browser)
+# Engine und Browser-Erweiterung entscheiden mit denselben Regeln, was in ein Feld kommt.
+
+
+def text_value(f: dict[str, Any], value: str) -> str:
+    """Text-/Datumsfeld: Datum als JJJJ-MM-TT, auf die erlaubte Länge gekürzt."""
+    if f.get("input_type") == "date" or f["kind"] == "date":
+        value = to_iso_date(value)
+    if f.get("max_length") and len(value) > f["max_length"]:
+        value = value[: f["max_length"]]
+    return value
+
+
+def select_index(f: dict[str, Any], value: str) -> int:
+    """Option eines nativen Auswahlfelds – erst über die Beschriftung, dann streng über den Wert."""
+    options = f.get("options", [])
+    idx, score = best_option([o["label"] for o in options], value)
+    if idx < 0 or score < 0.55:
+        idx, score = best_option([o.get("value", "") for o in options], value)
+        if idx < 0 or score < 0.8:
+            raise RuntimeError(f"Option '{value}' nicht gefunden")
+    return idx
+
+
+def chosen_options(f: dict[str, Any], value: str) -> list[dict[str, Any]]:
+    """Optionen einer Radio-/Checkbox-Gruppe; mehrere Werte durch ; oder Zeilenumbruch getrennt."""
+    options = f.get("options", [])
+    chosen = []
+    for wanted in [v.strip() for v in re.split(r";|\n", value) if v.strip()] or [value]:
+        idx, score = best_option([o["label"] for o in options], wanted)
+        if idx < 0 or score < 0.5:
+            raise RuntimeError(f"Option '{wanted}' nicht gefunden")
+        chosen.append(options[idx])
+    return chosen
+
+
 class Executor:
     def __init__(self, page: Any, files: Files) -> None:
         self.page = page
@@ -115,11 +171,7 @@ class Executor:
 
     async def _run_one(self, state: PageState, a: FieldAction, f: dict[str, Any] | None) -> str:
         kind = (f or {}).get("kind", "")
-        value = a.value
-        if a.action == "fill" and value.strip().lower() == "@cover_letter":
-            value = self.files.cover_letter_text
-            if not value:
-                raise RuntimeError("Kein Anschreiben-Text verfügbar")
+        value = self.files.fill_value(a.action, a.value)
 
         if a.action == "click":
             loc = self._loc(state, a.field_id)
@@ -154,10 +206,7 @@ class Executor:
     # ------------------------------------------------------------------ text
     async def _fill_text(self, state: PageState, f: dict[str, Any], value: str) -> str:
         loc = self._loc(state, f["id"])
-        if f.get("input_type") == "date" or f["kind"] == "date":
-            value = to_iso_date(value)
-        if f.get("max_length") and len(value) > f["max_length"]:
-            value = value[: f["max_length"]]
+        value = text_value(f, value)
         await loc.scroll_into_view_if_needed(timeout=5000)
         await loc.fill(value, timeout=8000)
         current = await loc.input_value()
@@ -174,30 +223,16 @@ class Executor:
     # ------------------------------------------------------------------ select
     async def _select_native(self, state: PageState, f: dict[str, Any], value: str) -> str:
         loc = self._loc(state, f["id"])
-        labels = [o["label"] for o in f.get("options", [])]
-        idx, score = best_option(labels, value)
-        if idx < 0 or score < 0.55:
-            values = [o.get("value", "") for o in f.get("options", [])]
-            vidx, vscore = best_option(values, value)
-            if vidx < 0 or vscore < 0.8:
-                raise RuntimeError(f"Option '{value}' nicht gefunden")
-            idx = vidx
+        idx = select_index(f, value)
         await loc.select_option(index=idx, timeout=8000)
-        return f"gewählt: {labels[idx]}"
+        return f"gewählt: {f['options'][idx]['label']}"
 
     # ------------------------------------------------------------------ radio/checkbox groups
     async def _choose_options(self, state: PageState, f: dict[str, Any], value: str, action: str) -> str:
-        options = f.get("options", [])
-        wanted = [v.strip() for v in re.split(r";|\n", value) if v.strip()] or [value]
-        chosen = []
-        for w in wanted:
-            idx, score = best_option([o["label"] for o in options], w)
-            if idx < 0 or score < 0.5:
-                raise RuntimeError(f"Option '{w}' nicht gefunden")
-            opt = options[idx]
+        chosen = chosen_options(f, value)
+        for opt in chosen:
             await self._set_checked(state, opt["id"], action != "uncheck")
-            chosen.append(opt["label"])
-        return "gewählt: " + ", ".join(chosen)
+        return "gewählt: " + ", ".join(o["label"] for o in chosen)
 
     async def _set_checked(self, state: PageState, element_id: str, checked: bool) -> str:
         loc = self._loc(state, element_id)

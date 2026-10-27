@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -40,6 +43,19 @@ class SourceError(RuntimeError):
     pass
 
 
+_ATTEMPTS = contextvars.ContextVar("jobslop_http_attempts", default=3)
+
+
+@contextlib.contextmanager
+def single_attempt() -> Iterator[None]:
+    """Für geratene Adressen (Board-Suche): keine Wiederholungen – ein Fehlschlag heißt einfach „nicht da“."""
+    token = _ATTEMPTS.set(1)
+    try:
+        yield
+    finally:
+        _ATTEMPTS.reset(token)
+
+
 def make_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(
         timeout=httpx.Timeout(30.0, connect=10.0),
@@ -51,7 +67,7 @@ def make_client() -> httpx.AsyncClient:
 
 async def get_json(client: httpx.AsyncClient, url: str, **kwargs: Any) -> Any:
     async for attempt in AsyncRetrying(
-        stop=stop_after_attempt(3),
+        stop=stop_after_attempt(_ATTEMPTS.get()),
         wait=wait_exponential(multiplier=1, min=1, max=8),
         retry=retry_if_exception_type((httpx.TransportError, httpx.HTTPStatusError)),
         reraise=True,
@@ -69,7 +85,7 @@ async def get_json(client: httpx.AsyncClient, url: str, **kwargs: Any) -> Any:
 
 async def post_json(client: httpx.AsyncClient, url: str, payload: dict[str, Any]) -> Any:
     async for attempt in AsyncRetrying(
-        stop=stop_after_attempt(3),
+        stop=stop_after_attempt(_ATTEMPTS.get()),
         wait=wait_exponential(multiplier=1, min=1, max=8),
         retry=retry_if_exception_type((httpx.TransportError, httpx.HTTPStatusError)),
         reraise=True,

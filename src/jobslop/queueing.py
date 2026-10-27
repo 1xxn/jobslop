@@ -9,7 +9,7 @@ from sqlalchemy import select
 from .config import SearchConfig
 from .db import Job, session_scope
 from .guard import check_job
-from .hosts import is_handoff
+from .hosts import is_browser_only, is_handoff
 
 
 def queue_jobs(db_path: Path, config: SearchConfig, job_ids: list[int]) -> tuple[list[int], list[str]]:
@@ -51,8 +51,8 @@ def pick_top(
         for job in s.execute(q.order_by(Job.starred.desc(), Job.score.desc())).scalars():
             if len(picked) >= count:
                 break
-            if is_handoff(job.target_url):
-                continue  # LinkedIn/Indeed brauchen dich (oder die Browser-Erweiterung) – nicht automatisch einreihen
+            if is_handoff(job.target_url) or is_browser_only(job.target_url):
+                continue  # brauchen dich bzw. deinen Browser (Erweiterung) – nie automatisch einreihen
             if not job.queued and check_job(s, job, config.limits).ok:
                 picked.append(job.id)
     return picked
