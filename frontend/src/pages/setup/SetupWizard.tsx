@@ -67,23 +67,23 @@ export function SetupWizard() {
   };
 
   return (
-    <div className="min-h-dvh bg-bg">
+    <div className="min-h-dvh bg-paper">
       <div className="mx-auto grid min-h-dvh max-w-6xl lg:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="hidden border-r border-border px-8 py-10 lg:block">
+        <aside className="hidden border-r border-line px-8 py-10 lg:block">
           <Logo />
           <ol className="mt-12 space-y-1">
             {STEPS.map((s, i) => (
               <li
                 key={s.id}
                 className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-[0.875rem] font-medium",
-                  i === step ? "bg-primary-soft text-primary" : i < step ? "text-fg" : "text-fg-subtle",
+                  "flex items-center gap-3 rounded-md px-3 py-2 text-body font-medium",
+                  i === step ? "bg-accent-soft text-accent" : i < step ? "text-ink" : "text-ink-3",
                 )}
               >
                 <span
                   className={cn(
-                    "grid size-6 shrink-0 place-items-center rounded-full text-caption [&_svg]:size-3.5",
-                    i < step ? "bg-success text-white" : i === step ? "bg-primary text-primary-fg" : "bg-surface-3 text-fg-subtle",
+                    "grid size-6 shrink-0 place-items-center rounded-full text-small [&_svg]:size-3.5",
+                    i < step ? "bg-sunken text-ink-2" : i === step ? "bg-accent text-on-accent" : "bg-sunken text-ink-3",
                   )}
                 >
                   {i < step ? <Check strokeWidth={3} /> : i + 1}
@@ -92,7 +92,7 @@ export function SetupWizard() {
               </li>
             ))}
           </ol>
-          <p className="mt-10 text-caption leading-relaxed text-fg-subtle">{t("setup.privacy")}</p>
+          <p className="mt-10 text-small leading-relaxed text-ink-3">{t("setup.privacy")}</p>
         </aside>
 
         <main className="flex min-w-0 flex-col px-5 py-8 sm:px-10 lg:py-14">
@@ -109,8 +109,8 @@ export function SetupWizard() {
             {current.id === "finish" && <FinishStep />}
           </div>
           {current.id !== "finish" && (
-            <div className="sticky bottom-0 -mx-5 mt-10 flex items-center justify-between gap-3 border-t border-border bg-bg/90 px-5 py-4 backdrop-blur-xl sm:-mx-10 sm:px-10">
-              <Button variant="ghost" onClick={() => setStep(step - 1)} disabled={step === 0}>
+            <div className="sticky bottom-0 -mx-5 mt-10 flex items-center justify-between gap-3 border-t border-line bg-paper px-5 py-4 backdrop-blur-xl sm:-mx-10 sm:px-10">
+              <Button variant="quiet" onClick={() => setStep(step - 1)} disabled={step === 0}>
                 <ArrowLeft />
                 {t("common.back")}
               </Button>
@@ -129,8 +129,8 @@ export function SetupWizard() {
 function StepTitle({ title, text }: { title: ReactNode; text?: ReactNode }) {
   return (
     <div className="mb-8">
-      <h1 className="text-title1 font-bold tracking-[-0.025em] text-balance sm:text-large">{title}</h1>
-      {text && <p className="mt-3 max-w-2xl text-headline font-normal leading-relaxed text-fg-muted">{text}</p>}
+      <h1 className="text-title font-bold tracking-[-0.025em] text-balance sm:text-display">{title}</h1>
+      {text && <p className="mt-3 max-w-2xl text-heading font-normal leading-relaxed text-ink-2">{text}</p>}
     </div>
   );
 }
@@ -158,13 +158,13 @@ function Welcome() {
       <div className="grid gap-3 md:grid-cols-3">
         {features.map((f) => (
           <Card key={f.title} className="p-5">
-            <span className="grid size-10 place-items-center rounded-lg bg-primary-soft text-primary [&_svg]:size-5">{f.icon}</span>
-            <h3 className="mt-4 text-headline font-semibold">{t(f.title)}</h3>
-            <p className="mt-1 text-footnote leading-relaxed text-fg-muted">{t(f.text)}</p>
+            <span className="grid size-10 place-items-center rounded-lg bg-accent-soft text-accent [&_svg]:size-5">{f.icon}</span>
+            <h3 className="mt-4 text-heading font-semibold">{t(f.title)}</h3>
+            <p className="mt-1 text-meta leading-relaxed text-ink-2">{t(f.text)}</p>
           </Card>
         ))}
       </div>
-      <p className="mt-6 text-footnote text-fg-muted">{t("setup.welcome_time")}</p>
+      <p className="mt-6 text-meta text-ink-2">{t("setup.welcome_time")}</p>
     </>
   );
 }
@@ -184,23 +184,23 @@ function ClaudeStep() {
       <Card>
         <CardBody className="pt-5">
           {!c ? (
-            <p className="text-footnote text-fg-muted">{t("setup.checking")}</p>
+            <p className="text-meta text-ink-2">{t("setup.checking")}</p>
           ) : c.ok ? (
             <div className="flex items-center gap-4">
-              <span className="grid size-12 place-items-center rounded-full bg-success-soft text-success">
+              <span className="grid size-12 place-items-center rounded-full bg-sunken text-positive">
                 <CircleCheck className="size-6" />
               </span>
               <div>
-                <div className="text-headline font-semibold">{t("setup.claude_ok")}</div>
-                <div className="text-footnote text-fg-muted">
-                  {c.account} {c.plan && <Badge tone="primary">{c.plan}</Badge>} · Claude Code {c.version}
+                <div className="text-heading font-semibold">{t("setup.claude_ok")}</div>
+                <div className="text-meta text-ink-2">
+                  {c.account} {c.plan && <Badge tone="accent">{c.plan}</Badge>} · Claude Code {c.version}
                 </div>
               </div>
             </div>
           ) : !c.installed ? (
             <div className="space-y-4">
               <StatusLine ok={false} title={t("setup.claude_not_installed")} text={t("setup.claude_install_text")} />
-              <pre className="overflow-x-auto rounded-md bg-surface-2 px-4 py-3 font-mono text-footnote">
+              <pre className="overflow-x-auto rounded-md bg-sunken px-4 py-3 font-mono text-meta">
                 {navigator.platform.toLowerCase().includes("win")
                   ? "irm https://claude.ai/install.ps1 | iex"
                   : "curl -fsSL https://claude.ai/install.sh | bash"}
@@ -213,7 +213,7 @@ function ClaudeStep() {
           ) : (
             <div className="space-y-4">
               <StatusLine ok={false} title={t("setup.claude_login_needed")} text={c.message} />
-              <ol className="ml-5 list-decimal space-y-1.5 text-[0.875rem] text-fg-muted">
+              <ol className="ml-5 list-decimal space-y-1.5 text-body text-ink-2">
                 <li>{t("setup.claude_login_1")}</li>
                 <li>{t("setup.claude_login_2")}</li>
                 <li>
@@ -228,7 +228,7 @@ function ClaudeStep() {
           )}
         </CardBody>
       </Card>
-      <p className="mt-4 flex items-start gap-2 text-footnote text-fg-muted">
+      <p className="mt-4 flex items-start gap-2 text-meta text-ink-2">
         <CircleAlert className="mt-0.5 size-4 shrink-0" />
         {t("setup.claude_note")}
       </p>
@@ -245,7 +245,7 @@ function CvStep() {
       <StepTitle title={t("setup.cv_title")} text={t("setup.cv_text")} />
       <DocumentsCard importOnUpload />
       {name && (
-        <p className="mt-4 flex items-center gap-2 text-[0.875rem] text-success">
+        <p className="mt-4 flex items-center gap-2 text-body text-positive">
           <CircleCheck className="size-4" />
           {t("setup.cv_imported", { name })}
         </p>
@@ -294,14 +294,14 @@ function SearchStep({ draft, onDraft }: { draft: SearchConfig | null; onDraft: (
               aria-pressed={on}
               className={cn(
                 "rounded-lg border p-4 text-left transition-all",
-                on ? "border-primary bg-primary-soft ring-1 ring-primary" : "border-border bg-surface hover:bg-surface-2",
+                on ? "border-accent bg-accent-soft ring-1 ring-accent" : "border-line bg-raised hover:bg-sunken",
               )}
             >
               <div className="flex items-center justify-between">
-                <span className="text-[0.9375rem] font-semibold">{p.label[lang]}</span>
-                {on && <CircleCheck className="size-5 text-primary" />}
+                <span className="text-body font-semibold">{p.label[lang]}</span>
+                {on && <CircleCheck className="size-5 text-accent" />}
               </div>
-              <div className="mt-1 line-clamp-2 text-footnote text-fg-muted">{p.roles.map((r) => r.name).join(" · ")}</div>
+              <div className="mt-1 line-clamp-2 text-meta text-ink-2">{p.roles.map((r) => r.name).join(" · ")}</div>
             </button>
           );
         })}
@@ -309,13 +309,13 @@ function SearchStep({ draft, onDraft }: { draft: SearchConfig | null; onDraft: (
       <Card className="mt-6">
         <CardBody className="space-y-4 pt-5">
           <div>
-            <div className="mb-1.5 flex items-center gap-2 text-footnote font-medium">
-              <MapPin className="size-4 text-fg-muted" />
+            <div className="mb-1.5 flex items-center gap-2 text-meta font-medium">
+              <MapPin className="size-4 text-ink-2" />
               {t("setup.cities")}
             </div>
             <ChipsInput value={cities} onChange={setCities} placeholder="Berlin, Hamburg, …" />
           </div>
-          <div className="divide-y divide-border">
+          <div className="divide-y divide-line">
             <SwitchRow title={t("search.remote")} description={t("search.remote_hint")} checked={remote} onCheckedChange={setRemote} />
             <SwitchRow title={t("setup.no_leadership")} description={t("setup.no_leadership_hint")} checked={leadership} onCheckedChange={setLeadership} />
           </div>
@@ -354,7 +354,7 @@ function FinishStep() {
     <>
       <StepTitle title={t("setup.finish_title")} text={t("setup.finish_text")} />
       <Card>
-        <CardBody className="divide-y divide-border pt-2">
+        <CardBody className="divide-y divide-line pt-2">
           <StatusLine
             ok={!!s?.claude.ok}
             title="Claude Code"
@@ -386,7 +386,7 @@ function FinishStep() {
           {t("setup.finish_btn")}
         </Button>
       </div>
-      <p className="mt-3 text-footnote text-fg-muted">{t("setup.finish_hint")}</p>
+      <p className="mt-3 text-meta text-ink-2">{t("setup.finish_hint")}</p>
     </>
   );
 }

@@ -16,9 +16,9 @@ export function SaveBar({
   const { t } = useI18n();
   if (!dirty) return null;
   return (
-    <div className="glass fixed inset-x-4 bottom-20 z-30 mx-auto flex max-w-xl items-center gap-3 rounded-xl border border-border px-4 py-3 shadow-lg animate-slide-up lg:bottom-6 lg:left-[248px]">
-      <span className="mr-auto text-[0.875rem] font-medium">{t("common.unsaved")}</span>
-      <Button variant="ghost" size="sm" onClick={onReset}>
+    <div className="fixed inset-x-4 bottom-20 z-30 mx-auto flex max-w-xl items-center gap-3 rounded-lg border border-line bg-raised px-4 py-2.5 shadow-overlay animate-slide-up lg:bottom-6 lg:left-[208px]">
+      <span className="mr-auto text-body font-medium">{t("common.unsaved")}</span>
+      <Button variant="quiet" size="sm" onClick={onReset}>
         {t("common.discard")}
       </Button>
       <Button variant="primary" size="sm" onClick={onSave} loading={saving}>

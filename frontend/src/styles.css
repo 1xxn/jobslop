@@ -1,153 +1,135 @@
 @import "tailwindcss";
-@import "@fontsource-variable/inter";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
  * Design-Tokens
- * Farbrollen nach Material 3 (surface, container, on-surface, outline), Typografie, Abstände und Tiefe nach Apple HIG:
- * eine Akzentfarbe, ruhige Flächen, Inhalt vor Dekoration, klare Hierarchie über Schriftgrößen statt Farben.
+ * Inhalt liegt auf Papier, gegliedert durch Überschrift, Linie und Abstand – Karten nur für das eine Objekt, an dem du
+ * gerade handelst, und für Overlays. Eine Akzentfarbe (Petrol) heißt „du bist dran“: Hauptaktion, Fokus, Links und alles,
+ * was auf dich wartet. Sonst warme Graustufen. Alle Text-Kontraste ≥ 4,5 : 1, Feldränder ≥ 3 : 1 (WCAG AA).
  */
 :root {
-  --bg: #f6f6f8;
-  --surface: #ffffff;
-  --surface-2: #f2f2f5;
-  --surface-3: #e8e8ed;
-  --overlay: rgb(250 250 252 / 0.72);
-  --border: rgb(15 15 30 / 0.08);
-  --border-strong: rgb(15 15 30 / 0.15);
-  --fg: #111116;
-  --fg-muted: #5b5c6b;
-  --fg-subtle: #8b8c99;
-  --primary: oklch(0.54 0.215 270);
-  --primary-hover: oklch(0.49 0.22 270);
-  --primary-fg: #ffffff;
-  --primary-soft: oklch(0.54 0.215 270 / 0.1);
-  --success: oklch(0.6 0.15 155);
-  --success-soft: oklch(0.6 0.15 155 / 0.12);
-  --warning: oklch(0.68 0.16 70);
-  --warning-soft: oklch(0.75 0.16 75 / 0.16);
-  --danger: oklch(0.58 0.21 25);
-  --danger-soft: oklch(0.58 0.21 25 / 0.1);
-  --info: oklch(0.6 0.13 230);
-  --info-soft: oklch(0.6 0.13 230 / 0.12);
-  --ring: oklch(0.54 0.215 270 / 0.45);
-  --shadow-sm: 0 1px 2px rgb(16 16 32 / 0.05);
-  --shadow-md: 0 1px 2px rgb(16 16 32 / 0.04), 0 8px 24px -8px rgb(16 16 32 / 0.12);
-  --shadow-lg: 0 2px 6px rgb(16 16 32 / 0.06), 0 24px 64px -16px rgb(16 16 32 / 0.28);
+  --paper: #fafaf8;
+  --raised: #ffffff;
+  --sunken: #f1f0ec;
+  --line: #e4e2dd;
+  --line-input: #8c8881;
+  --ink: #1a1917;
+  --ink-2: #54514b;
+  --ink-3: #696560;
+  --accent: #006871;
+  --accent-hover: #00565e;
+  --on-accent: #ffffff;
+  --accent-soft: #dce8e8;
+  --danger: #b42318;
+  --positive: #2b7a4b;
+  --amber: #8a5300;
+  --scrim: rgb(26 25 23 / 0.28);
+  --shadow-overlay: 0 1px 2px rgb(26 25 23 / 0.06), 0 16px 40px -16px rgb(26 25 23 / 0.32);
 }
 
 .dark {
-  --bg: #0b0b0f;
-  --surface: #141419;
-  --surface-2: #1b1b22;
-  --surface-3: #25252e;
-  --overlay: rgb(20 20 26 / 0.72);
-  --border: rgb(255 255 255 / 0.07);
-  --border-strong: rgb(255 255 255 / 0.14);
-  --fg: #f3f3f6;
-  --fg-muted: #a3a3b2;
-  --fg-subtle: #6e6f7e;
-  --primary: oklch(0.7 0.16 272);
-  --primary-hover: oklch(0.75 0.15 272);
-  --primary-fg: #0b0b12;
-  --primary-soft: oklch(0.7 0.16 272 / 0.14);
-  --success: oklch(0.75 0.15 158);
-  --success-soft: oklch(0.75 0.15 158 / 0.14);
-  --warning: oklch(0.8 0.15 80);
-  --warning-soft: oklch(0.8 0.15 80 / 0.14);
-  --danger: oklch(0.7 0.18 25);
-  --danger-soft: oklch(0.7 0.18 25 / 0.14);
-  --info: oklch(0.75 0.12 230);
-  --info-soft: oklch(0.75 0.12 230 / 0.14);
-  --ring: oklch(0.7 0.16 272 / 0.5);
-  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
-  --shadow-md: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -8px rgb(0 0 0 / 0.6);
-  --shadow-lg: 0 2px 6px rgb(0 0 0 / 0.4), 0 24px 64px -16px rgb(0 0 0 / 0.8);
+  --paper: #141413;
+  --raised: #1c1c1a;
+  --sunken: #232321;
+  --line: #2e2d2a;
+  --line-input: #7a766f;
+  --ink: #eceae6;
+  --ink-2: #b4b0a9;
+  --ink-3: #9c988f;
+  --accent: #78c9cd;
+  --accent-hover: #93d6d9;
+  --on-accent: #0b1416;
+  --accent-soft: #1f2b2a;
+  --danger: #f2867b;
+  --positive: #7dc89b;
+  --amber: #e2b45c;
+  --scrim: rgb(0 0 0 / 0.5);
+  --shadow-overlay: 0 1px 2px rgb(0 0 0 / 0.4), 0 16px 40px -16px rgb(0 0 0 / 0.8);
 }
 
 @theme inline {
-  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+  /* Systemschrift: Segoe UI auf Windows, SF auf dem Mac – lädt nichts nach und fühlt sich an wie ein lokales Werkzeug */
+  --font-sans: system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 
-  --color-bg: var(--bg);
-  --color-surface: var(--surface);
-  --color-surface-2: var(--surface-2);
-  --color-surface-3: var(--surface-3);
-  --color-overlay: var(--overlay);
-  --color-border: var(--border);
-  --color-border-strong: var(--border-strong);
-  --color-fg: var(--fg);
-  --color-fg-muted: var(--fg-muted);
-  --color-fg-subtle: var(--fg-subtle);
-  --color-primary: var(--primary);
-  --color-primary-hover: var(--primary-hover);
-  --color-primary-fg: var(--primary-fg);
-  --color-primary-soft: var(--primary-soft);
-  --color-success: var(--success);
-  --color-success-soft: var(--success-soft);
-  --color-warning: var(--warning);
-  --color-warning-soft: var(--warning-soft);
+  --color-paper: var(--paper);
+  --color-raised: var(--raised);
+  --color-sunken: var(--sunken);
+  --color-line: var(--line);
+  --color-line-input: var(--line-input);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-on-accent: var(--on-accent);
+  --color-accent-soft: var(--accent-soft);
   --color-danger: var(--danger);
-  --color-danger-soft: var(--danger-soft);
-  --color-info: var(--info);
-  --color-info-soft: var(--info-soft);
-  --color-ring: var(--ring);
+  --color-danger-soft: color-mix(in oklab, var(--danger) 10%, transparent);
+  --color-positive: var(--positive);
+  --color-amber: var(--amber);
+  --color-scrim: var(--scrim);
 
-  --shadow-sm: var(--shadow-sm);
-  --shadow-md: var(--shadow-md);
-  --shadow-lg: var(--shadow-lg);
+  /* Schatten nur für Overlays – Elemente im Fluss haben keinen */
+  --shadow-sm: 0 0 #0000;
+  --shadow-md: 0 0 #0000;
+  --shadow-lg: var(--shadow-overlay);
+  --shadow-overlay: var(--shadow-overlay);
 
-  /* Typografie-Stufen (angelehnt an die HIG-Textstile) */
-  --text-caption: 0.75rem;
-  --text-caption--line-height: 1rem;
-  --text-footnote: 0.8125rem;
-  --text-footnote--line-height: 1.125rem;
-  --text-body: 0.9375rem;
-  --text-body--line-height: 1.375rem;
-  --text-headline: 1.0625rem;
-  --text-headline--line-height: 1.5rem;
-  --text-title3: 1.25rem;
-  --text-title3--line-height: 1.625rem;
-  --text-title2: 1.5rem;
-  --text-title2--line-height: 1.875rem;
-  --text-title1: 1.875rem;
-  --text-title1--line-height: 2.25rem;
-  --text-large: 2.5rem;
-  --text-large--line-height: 2.875rem;
+  /* Typo-Skala: drei Gewichte (400/500/600), Zahlen tabellarisch */
+  --text-small: 0.75rem;
+  --text-small--line-height: 1rem;
+  --text-meta: 0.8125rem;
+  --text-meta--line-height: 1.125rem;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.25rem;
+  --text-read: 0.9375rem;
+  --text-read--line-height: 1.5rem;
+  --text-heading: 0.9375rem;
+  --text-heading--line-height: 1.375rem;
+  --text-title: 1.25rem;
+  --text-title--line-height: 1.75rem;
+  --text-display: 1.75rem;
+  --text-display--line-height: 2.125rem;
 
-  --radius-sm: 8px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
+  /* 4 px Kürzel und Zähler · 6 px Bedienelemente · 10 px Karte und Overlays – nichts darüber */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 10px;
 
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
-  --ease-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
-  --animate-fade-in: fade-in 180ms var(--ease-standard);
-  --animate-slide-up: slide-up 260ms var(--ease-emphasized);
-  --animate-scale-in: scale-in 200ms var(--ease-emphasized);
-  --animate-sheet-in: sheet-in 300ms var(--ease-emphasized);
+  --animate-fade-in: fade-in 160ms var(--ease-out);
+  --animate-slide-up: slide-up 160ms var(--ease-out);
+  --animate-scale-in: scale-in 160ms var(--ease-out);
+  --animate-sheet-in: sheet-in 220ms var(--ease-out);
+  --animate-pulse-slow: pulse-slow 2s ease-in-out infinite;
 
   @keyframes fade-in {
     from { opacity: 0; }
     to { opacity: 1; }
   }
   @keyframes slide-up {
-    from { opacity: 0; transform: translateY(8px); }
+    from { opacity: 0; transform: translateY(4px); }
     to { opacity: 1; transform: none; }
   }
   @keyframes scale-in {
-    from { opacity: 0; transform: translate(-50%, -48%) scale(0.97); }
-    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    from { opacity: 0; transform: translate(-50%, calc(-50% + 4px)); }
+    to { opacity: 1; transform: translate(-50%, -50%); }
   }
   @keyframes sheet-in {
-    from { transform: translateX(24px); opacity: 0; }
+    from { transform: translateX(16px); opacity: 0; }
     to { transform: none; opacity: 1; }
+  }
+  @keyframes pulse-slow {
+    50% { opacity: 0.35; }
   }
 }
 
-/* Farben für Zielrollen (Index = Priorität) */
+/* Farben für Zielrollen (Index = Priorität) – nur noch für die Filter-Punkte */
 .role-0 { --role: oklch(0.62 0.19 30); }
 .role-1 { --role: oklch(0.58 0.19 268); }
 .role-2 { --role: oklch(0.62 0.15 160); }
@@ -157,25 +139,23 @@
 .role-6 { --role: oklch(0.6 0.12 190); }
 .role-7 { --role: oklch(0.55 0.02 270); }
 
-.avatar { background: oklch(0.94 0.035 var(--h)); color: oklch(0.42 0.1 var(--h)); }
-.dark .avatar { background: oklch(0.3 0.05 var(--h)); color: oklch(0.88 0.07 var(--h)); }
+.avatar { background: var(--sunken); color: var(--ink-2); }
 
 @layer base {
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
-    font-feature-settings: "cv11", "ss01", "ss03";
   }
   body {
-    @apply bg-bg text-fg font-sans text-body;
+    @apply bg-paper text-ink font-sans text-body;
     min-height: 100dvh;
   }
   ::selection {
-    background: var(--primary-soft);
+    background: var(--accent-soft);
   }
   :focus-visible {
-    outline: 2px solid var(--ring);
+    outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
   button,
@@ -187,18 +167,13 @@
   }
   * {
     scrollbar-width: thin;
-    scrollbar-color: var(--border-strong) transparent;
+    scrollbar-color: var(--line-input) transparent;
   }
 }
 
 @layer utilities {
   .tabular {
     font-variant-numeric: tabular-nums;
-  }
-  .glass {
-    background: var(--overlay);
-    backdrop-filter: saturate(180%) blur(20px);
-    -webkit-backdrop-filter: saturate(180%) blur(20px);
   }
   .text-balance {
     text-wrap: balance;
@@ -213,6 +188,7 @@
   *::before,
   *::after {
     animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 1ms !important;
   }
 }
