@@ -96,20 +96,35 @@ def stack_fit(text: str, skills: list[str]) -> int:
     return 1
 
 
+SEGMENT_POINTS = {"big": 3, "tech": 2, "corp": 1, "cons": 0.5, "agency": 0}
+LEVEL_POINTS = {"J": 1, "M": 1, "O": 0.5, "S": -4}
+SCORE_MAX = 10 + 3 * 2 + 3 + 1 + 1  # erste Zielrolle, Stack ●●●, große Firma, passendes Level, in der Nähe
+
+
+def score_parts(
+    category: str, fit: int, segment: str, level: str, near: bool, where: str, roles: list[str]
+) -> list[tuple[str, float]]:
+    """Woraus sich der Score zusammensetzt – (Teil, Punkte); das Dashboard erklärt damit jede Zahl."""
+    n = max(len(roles), 1)
+    idx = roles.index(category) if category in roles else n
+    parts = [
+        ("role", round(10 * (1 - idx / n), 2)),
+        ("stack", float(fit * 2)),
+        ("company", float(SEGMENT_POINTS.get(segment, 1))),
+        ("level", float(LEVEL_POINTS.get(level, 0))),
+    ]
+    if near:
+        parts.append(("near", 1.0))
+    if where == "R":
+        parts.append(("remote", -0.5))
+    return parts
+
+
 def score(
     category: str, fit: int, segment: str, level: str, near: bool, where: str, roles: list[str]
 ) -> float:
     """Priorität: Zielrolle (bis 10 Punkte, erste Rolle am meisten) + Stack-Match + Firma + Level + Ort."""
-    n = max(len(roles), 1)
-    idx = roles.index(category) if category in roles else n
-    s = 10 * (1 - idx / n) + fit * 2
-    s += {"big": 3, "tech": 2, "corp": 1, "cons": 0.5, "agency": 0}.get(segment, 1)
-    s += {"J": 1, "M": 1, "O": 0.5, "S": -4}.get(level, 0)
-    if near:
-        s += 1
-    if where == "R":
-        s -= 0.5
-    return round(s, 2)
+    return round(sum(p for _, p in score_parts(category, fit, segment, level, near, where, roles)), 2)
 
 
 def detect_language(text: str) -> str:

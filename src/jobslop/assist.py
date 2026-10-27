@@ -228,8 +228,8 @@ def _open_application(
                 job = _new_job(state, body.ld_json)
                 s.add(job)
                 s.flush()
-            if reason := already_applied(s, job):
-                return 0, _context(job), Path(), reason
+            if done := already_applied(s, job):
+                return 0, _context(job), Path(), done.reason
             app = next(
                 (a for a in job.applications if a.origin == "extension" and a.status == "running"), None
             ) or Application(job=job, origin="extension", mode="review", status="running")

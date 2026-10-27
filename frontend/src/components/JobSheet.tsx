@@ -18,17 +18,56 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { useBackendText } from "@/lib/backendText";
 import { useRoleNames } from "@/lib/hooks";
 import { useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
-import { cn, formatDate, formatRelative, hostOf } from "@/lib/utils";
+import type { JobDetail } from "@/lib/types";
+import { cn, formatDate, formatRelative, hostOf, sourceName } from "@/lib/utils";
 import { ApplyDialog } from "./actions";
 import { CompanyAvatar, FitDots, RoleBadge, ScoreRing, StatusBadge, WhereLabel } from "./domain";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Sheet } from "./ui/overlays";
 import { Badge, Button, Skeleton, Textarea } from "./ui/primitives";
 
+function ScoreBreakdown({ job }: { job: JobDetail }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const label = (key: string) =>
+    key === "role" ? t("score.role", { role: job.category }) : t(`score.${key}` as MessageKey);
+  return (
+    <section className="mx-6 mt-6">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between text-[0.875rem] font-semibold"
+        aria-expanded={open}
+      >
+        {t("score.title")}
+        <span className="flex items-center gap-2 font-normal text-fg-muted">
+          {t("score.total", { score: Math.round(job.score * 10) / 10, max: job.score_max })}
+          <ChevronDown className={cn("size-4 transition-transform", open && "rotate-180")} />
+        </span>
+      </button>
+      {open && (
+        <ul className="mt-2 divide-y divide-border rounded-lg border border-border text-footnote">
+          {job.score_parts.map((p) => (
+            <li key={p.key} className="flex items-center justify-between gap-3 px-3 py-2">
+              <span className="text-fg-muted">{label(p.key)}</span>
+              <span className={cn("tabular font-medium", p.points < 0 ? "text-danger" : p.points > 0 ? "text-fg" : "text-fg-subtle")}>
+                {p.points > 0 ? "+" : ""}
+                {Math.round(p.points * 10) / 10}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 export function JobSheet({ jobId, onClose }: { jobId: number | null; onClose: () => void }) {
   const { t, lang } = useI18n();
+  const backendText = useBackendText();
   const qc = useQueryClient();
   const roles = useRoleNames();
   const { data: job, isLoading } = useQuery({
@@ -120,7 +159,10 @@ export function JobSheet({ jobId, onClose }: { jobId: number | null; onClose: ()
               </Badge>
               {job.status === "closed" && <Badge tone="danger">{t("job.closed")}</Badge>}
               <StatusBadge status={job.app_status} />
-              <Badge tone="outline">{hostOf(job.url) || job.source}</Badge>
+              <Badge tone="outline">
+                {sourceName(job.source)}
+                {hostOf(job.url) && !hostOf(job.url).includes(sourceName(job.source).toLowerCase()) ? ` · ${hostOf(job.url)}` : ""}
+              </Badge>
             </div>
 
             <div className="mt-5 flex flex-wrap gap-2">
@@ -169,10 +211,12 @@ export function JobSheet({ jobId, onClose }: { jobId: number | null; onClose: ()
             {!job.verdict.ok && (
               <p className="mt-3 flex items-start gap-2 rounded-md bg-surface-2 px-3 py-2 text-footnote text-fg-muted">
                 <CircleAlert className="mt-0.5 size-4 shrink-0" />
-                {job.verdict.reason}
+                {backendText(job.verdict.code, job.verdict.params, job.verdict.reason)}
               </p>
             )}
           </div>
+
+          <ScoreBreakdown job={job} />
 
           {job.enriched && (
             <section className="mx-6 mt-6 rounded-lg border border-border bg-surface-2/50 p-4">

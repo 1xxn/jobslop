@@ -109,5 +109,23 @@ approvals, handoffs) are rows in the database that both sides poll. The autopilo
 dashboard; `jobslop autopilot` provides the same for OS schedulers.
 
 Frontend stack: React 19, TypeScript, Vite, Tailwind CSS 4, Radix UI primitives, TanStack Query, React Router,
-lucide icons. Design tokens follow Material 3 colour roles and Apple HIG typography/spacing; light and dark themes,
+lucide icons. Every page is its own chunk (`React.lazy`); libraries are split into `react` and `vendor` chunks so an
+update only reloads the app code.
+
+### Texts and languages
+
+The UI is German and English (`frontend/src/lib/messages.ts`, the type checker enforces both). Texts that originate
+in the backend are stored as German plain text **plus a code with parameters** – e.g. an activity entry
+`{"code": "crawl.done", "params": {"run": 6, "new": 18, "queued": 5}}` or a guard verdict
+`{"code": "guard.company_limit", "params": {…}}`. The dashboard translates them via `be.<code>` keys
+(`lib/backendText.ts`, which also translates `status`, `mode` and `counts` parameters) and falls back to the plain
+text for entries without a code (older data, free-form errors). New backend messages that reach the UI should
+follow this pattern: `record(…, code="…", **params)` for activity, `Verdict.code/params` for guard results.
+The CLI, logs and application events are still German only.
+
+### Score
+
+`classify.score_parts` lists the parts of a job's score (target role up to 10, stack fit up to 6, kind of company up
+to 3, level −4…+1, close by +1, remote −0.5; jobs that can only be applied to in your own browser −4). The maximum
+is `SCORE_MAX` = 21. The job detail API returns the parts, the dashboard explains every score with them. Design tokens follow Material 3 colour roles and Apple HIG typography/spacing; light and dark themes,
 German and English.

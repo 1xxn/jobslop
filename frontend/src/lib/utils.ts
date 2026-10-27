@@ -69,3 +69,30 @@ export function hostOf(url: string): string {
     return "";
   }
 }
+
+const SOURCE_NAMES: Record<string, string> = {
+  arbeitsagentur: "Arbeitsagentur",
+  arbeitnow: "Arbeitnow",
+  himalayas: "Himalayas",
+  greenhouse: "Greenhouse",
+  ashby: "Ashby",
+  lever: "Lever",
+  smartrecruiters: "SmartRecruiters",
+  personio: "Personio",
+  recruitee: "Recruitee",
+  workable: "Workable",
+  workday: "Workday",
+  amazon: "amazon.jobs",
+  generic: "Karriereseite",
+  extension: "Browser",
+  linkedin: "LinkedIn",
+  indeed: "Indeed",
+  glassdoor: "Glassdoor",
+};
+
+/** Lesbarer Name der Quelle: „portal:linkedin“ → LinkedIn, „greenhouse:gitlab“ → Greenhouse. */
+export function sourceName(source: string): string {
+  const [kind, rest] = source.split(":", 2);
+  const key = kind === "portal" ? rest : kind;
+  return SOURCE_NAMES[key ?? ""] ?? (source.startsWith("seed") ? "Import" : source);
+}

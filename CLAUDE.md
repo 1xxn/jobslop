@@ -99,7 +99,9 @@ on every mutating request (CSRF). Apply runs are separate processes managed by `
 
 **Frontend** (`frontend/src`): React 19 + TS + Vite + Tailwind 4 + Radix + TanStack Query + React Router.
 API client and types in `lib/api.ts` / `lib/types.ts`; all UI strings live in `lib/messages.ts` in German and
-English and the type checker enforces both languages exist.
+English and the type checker enforces both languages exist. Backend texts that reach the UI carry a code + params
+(`record(..., code=..., **params)`, `guard.Verdict.code/params`) translated via `be.<code>` keys in
+`lib/backendText.ts`; plain German text is only the fallback. Pages are lazy-loaded in `App.tsx`.
 
 ## Conventions
 
