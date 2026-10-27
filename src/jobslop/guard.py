@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from .classify import match_key
 from .config import LimitConfig
 from .db import Application, Exclusion, Job, utcnow
+from .hosts import is_browser_only
 
 DONE_STATES = {"submitted", "manual", "interview", "rejected", "offer"}
 ACTIVE_STATES = {"running", "needs_input", "needs_review", "ready"}
@@ -63,6 +64,11 @@ def check_job(session: Session, job: Job, limits: LimitConfig, *, force: bool = 
         return Verdict(False, reason)
     if reason := already_applied(session, job):
         return Verdict(False, reason)
+    if is_browser_only(job.target_url):
+        # Im automatisierten Browser hängt die Bot-Abfrage endlos – auch „trotzdem bewerben“ hilft da nicht
+        return Verdict(
+            False, "Nur in deinem eigenen Browser bewerbbar (Bot-Abfrage der Jobbörse) – Link öffnen"
+        )
     if not force:
         for app in job.applications:
             if app.status in ACTIVE_STATES:

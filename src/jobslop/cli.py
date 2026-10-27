@@ -299,6 +299,11 @@ def crawl(
         f"[yellow]↺{len(report.reopened)} wieder offen[/yellow]  [red]−{len(report.closed)} geschlossen[/red]  "
         f"⇄{len(report.merged_seeds)} Startlisten-Einträge auf Firmen-URL umgestellt"
     )
+    if report.discovered:
+        console.print(
+            f"  [green]{len(report.discovered)} Firmen-Boards entdeckt[/green] "
+            f"[dim]({', '.join(report.discovered[:8])}{' …' if len(report.discovered) > 8 else ''})[/dim]"
+        )
     if report.rejected.get("Dublette"):
         console.print(f"  [dim]{report.rejected['Dublette']} Dubletten aus Jobbörsen übersprungen[/dim]")
     if report.enrich_skipped:

@@ -431,3 +431,22 @@ async def test_usage_limit_pauses_and_requeues(settings, site, profile, config):
 
     with session_scope(settings.db_path) as s:
         assert check_job(s, s.get(Job, first), config.limits).ok
+
+
+@pytest.mark.parametrize(
+    ("fixture", "expected"),
+    [
+        # Recruitee: Absende-Button heißt nur „Send“, daneben „Apply with Indeed“ (wird nie benutzt)
+        ("recruitee_like.html", {"name": "Max Mustermann", "cv": "Max_Mustermann_CV.pdf", "indeed": False}),
+        # Ashby: kein <form>, Upload über Button + versteckten Datei-Input, Absenden per Klick-Handler
+        ("ashby_like.html", {"name": "Max Mustermann", "resume": "Max_Mustermann_CV.pdf"}),
+    ],
+)
+async def test_real_world_form_quirks(settings, site, profile, config, fixture, expected):
+    job_id = add_job(settings, f"{site.base_url}/{fixture}", "Quirk GmbH", "Platform Engineer")
+    before = len(site.submissions)
+    async with BrowserSession(settings, headless=True) as browser:
+        outcome = await _engine(settings, config, profile, browser).apply(job_id)
+    assert outcome.status == "submitted", outcome.message
+    sub = site.submissions[before]
+    assert {k: sub.get(k) for k in expected} == expected
