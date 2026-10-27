@@ -380,4 +380,28 @@ def test_backend_texts_carry_codes_for_translation(settings, config, profile):
     assert not verdict["ok"] and verdict["code"].startswith("guard.") and verdict["params"]
     detail = client.get(f"/api/jobs/{job['id']}").json()
     assert sum(p["points"] for p in detail["score_parts"]) == pytest.approx(detail["score"], abs=0.11)
-    assert detail["score_max"] == 21
+
+
+def test_frontend_score_max_matches_backend():
+    """Der Score-Kreis im Dashboard misst gegen dieselbe Obergrenze wie classify."""
+    from jobslop.classify import SCORE_MAX
+
+    domain = (Path(__file__).resolve().parents[1] / "frontend/src/components/domain.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert f"export const SCORE_MAX = {SCORE_MAX:g};" in domain
+
+
+def test_every_backend_code_has_a_translation():
+    """Jeder Code, den das Backend ausgibt (record/activity/_no), braucht einen be.*-Text in beiden Sprachen.
+    Abgeleitet aus dem Quelltext – ein neuer Code ohne Übersetzung fällt hier auf."""
+    import re
+
+    root = Path(__file__).resolve().parents[1]
+    source = "\n".join(p.read_text(encoding="utf-8") for p in (root / "src" / "jobslop").rglob("*.py"))
+    codes = set(re.findall(r'code="([a-z_]+\.[a-z_.]+)"', source))
+    codes |= {f"guard.{c}" for c in re.findall(r'_no\(\s*(?:f?"[^"]*"|\w+),\s*"([a-z_]+)"', source, re.S)}
+    assert {"crawl.done", "status.changed", "guard.closed", "guard.company_limit"} <= codes
+    messages = (root / "frontend" / "src" / "lib" / "messages.ts").read_text(encoding="utf-8")
+    missing = [c for c in sorted(codes) if messages.count(f'"be.{c}":') != 2]  # Deutsch und Englisch
+    assert missing == []

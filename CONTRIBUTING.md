@@ -26,7 +26,7 @@ cd frontend && npm run dev                       # hot reload on :5173, proxies 
 ```bash
 uv run ruff check . && uv run ruff format --check .
 uv run pytest -m "not live"                      # includes real-Chromium tests against tests/fixtures/site
-cd frontend && npm run typecheck && npm run build
+cd frontend && npm run typecheck && npm test && npm run build
 ```
 
 `npm run build` writes into `src/jobslop/web/dist`. **Commit the build output** together with frontend changes –
@@ -44,3 +44,25 @@ Tests marked `live` call the real Claude Code and use your subscription; they on
 - UI text lives in `frontend/src/lib/messages.ts` – German and English, the type checker enforces both.
 - No personal data in commits, fixtures or screenshots. Use `scripts/demo_data.py`.
 - Code comments are mostly German; English is welcome too.
+
+## Tests at a glance
+
+| What | Where | Runs |
+|---|---|---|
+| Rules, crawl, API, LLM wrapper | `tests/test_*.py` | `uv run pytest -m "not live"` (CI) |
+| Real Chromium against local form fixtures | `tests/test_browser.py` | CI |
+| Dashboard end to end (demo data, built UI) | `tests/test_dashboard_e2e.py` | CI |
+| Browser extension end to end | `tests/test_extension.py` | CI |
+| UI units and components | `frontend/src/**/*.test.ts(x)` (Vitest) | `npm test` (CI) |
+| Real job sites, read-only | `tests/test_real_sites.py` | `JOBSLOP_NETWORK=1` only |
+| Real Claude Code | `tests/test_claude_code.py::test_live_*` | `JOBSLOP_LIVE=1` only |
+
+## Releasing
+
+1. Move the `## Unreleased` section in `CHANGELOG.md` to `## X.Y.Z – <short title>`.
+2. Set the version in `pyproject.toml` and `frontend/package.json` (`jobslop.__version__` reads it from the
+   package metadata), run `uv lock` and `npm run build` in `frontend/`, commit.
+3. Tag and push: `git tag vX.Y.Z && git push origin main vX.Y.Z`.
+
+`.github/workflows/release.yml` re-runs all CI checks, verifies that tag, `pyproject.toml` and
+`frontend/package.json` agree, builds wheel and sdist and publishes a GitHub release with the changelog section.

@@ -14,6 +14,8 @@
   asks for missing answers in an in-page panel and only submits after your click. LinkedIn/Indeed Easy Apply
   can be enabled explicitly, with a daily limit.
 - Read-only smoke tests against real sites (`JOBSLOP_NETWORK=1`).
+- Frontend tests (Vitest), an end-to-end test of the dashboard on demo data and a release workflow: tagging
+  `vX.Y.Z` re-runs CI, checks the version and publishes wheel, sdist and release notes.
 - Every score is explained in the job details (target role, stack, company, level, location – out of 21 points).
 - Activity and guard messages are translated in the English UI (backend stores a code with parameters).
 

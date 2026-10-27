@@ -1,0 +1,92 @@
+"""Dashboard Ende-zu-Ende: echter Server mit Demodaten (Demo-Modus), echter Chromium, gebaute Oberfläche aus web/dist."""
+
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+import pytest
+
+from conftest import serve
+from jobslop.config import SearchConfig, get_settings
+from jobslop.runtime import Runtime
+from jobslop.web.app import create_app
+
+pytestmark = pytest.mark.browser
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _demo_builder():
+    spec = importlib.util.spec_from_file_location("demo_data", ROOT / "scripts" / "demo_data.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.build
+
+
+@pytest.fixture
+def dashboard(tmp_path, monkeypatch):
+    home = tmp_path / "demo-home"
+    _demo_builder()(home)
+    monkeypatch.setenv("JOBSLOP_HOME", str(home))
+    monkeypatch.setattr(Runtime, "llm", lambda self: None)  # nie das echte Claude
+    get_settings.cache_clear()
+    rt = Runtime.load(get_settings())
+    assert rt.settings.demo  # Demodaten sind immer im Demo-Modus
+    with serve(create_app(rt)) as url:
+        yield url, home
+    get_settings.cache_clear()
+
+
+async def test_dashboard_end_to_end(dashboard):
+    from playwright.async_api import async_playwright
+
+    base, home = dashboard
+    errors: list[str] = []
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        ctx = await browser.new_context(locale="de-DE", viewport={"width": 1440, "height": 1000})
+        page = await ctx.new_page()
+        page.on("pageerror", lambda exc: errors.append(str(exc)))
+        page.on("console", lambda msg: msg.type == "error" and errors.append(msg.text))
+        try:
+            # Übersicht: Demo-Hinweis, Rückfragen, beste Treffer, „Als Nächstes“ – ohne den alten Ballast
+            await page.goto(base)
+            await page.get_by_text("Demo-Modus").first.wait_for()
+            for text in ("Braucht dich", "Beste Treffer", "Als Nächstes"):
+                await page.get_by_text(text, exact=True).first.wait_for()
+            assert await page.get_by_text("Bewerbungen pro Woche").count() == 0
+
+            # Demo-Modus: Suchen ist gesperrt und sagt das auch
+            await page.get_by_role("button", name="Neue Stellen suchen").click()
+            await page.get_by_text("Demo-Modus: Crawlen ist gesperrt").wait_for()
+
+            # Stellen: Detail mit Score-Erklärung (Seite wird nachgeladen – Code-Splitting)
+            await page.goto(f"{base}/jobs")
+            await page.locator("[tabindex='0']").filter(has_text="Engineer").first.click()
+            await page.get_by_role("button", name="Warum dieser Score?").click()
+            await page.get_by_text("von 21 Punkten").wait_for()
+            await page.get_by_text("Zielrolle").first.wait_for()
+            await page.keyboard.press("Escape")
+
+            # Einstellungen speichern: LinkedIn abschalten bleibt nach dem Neuladen aus
+            await page.goto(f"{base}/settings/search")
+            linkedin = page.get_by_role("switch", name="LinkedIn")
+            await linkedin.wait_for()
+            assert await linkedin.get_attribute("aria-checked") == "true"
+            await linkedin.click()
+            await page.get_by_role("button", name="Speichern").click()
+            await page.get_by_text("Suche gespeichert").wait_for()
+            config = SearchConfig.load(home / "search.toml")
+            assert "linkedin" not in config.sources.portals and "indeed" in config.sources.portals
+
+            # Sprache wechseln: Oberfläche und Backend-Meldungen auf Englisch
+            await page.goto(f"{base}/activity")
+            await page.get_by_role("radio", name="English").click()
+            await page.get_by_text("Search #6: 18 new jobs, 5 queued").wait_for()
+            await page.get_by_text("Application run finished: 3× Sent, 1× Question").wait_for()
+        finally:
+            await browser.close()
+    # 409 vom gesperrten Crawl ist erwartet; sonst darf die Konsole sauber bleiben
+    assert [e for e in errors if "409" not in e] == []

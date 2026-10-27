@@ -341,7 +341,7 @@ function JobRow({
           {job.first_seen && (
             <span className="hidden text-fg-subtle sm:inline">· {formatRelative(job.first_seen, lang)}</span>
           )}
-          <span className="hidden text-fg-subtle lg:inline">· {sourceName(job.source)}</span>
+          <span className="hidden text-fg-subtle lg:inline">· {sourceName(job.source, t)}</span>
         </div>
       </div>
       <div className="hidden w-36 md:block">

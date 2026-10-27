@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import html
+from collections.abc import AsyncIterator
 from datetime import date
 from pathlib import Path
 from typing import Any, Literal
@@ -116,3 +118,16 @@ async def render_pdf(context: Any, html_doc: str, out: Path) -> Path:
     finally:
         await page.close()
     return out
+
+
+@contextlib.asynccontextmanager
+async def headless_pdf_context() -> AsyncIterator[Any]:
+    """Eigener Headless-Chromium nur fürs PDF (Browser-Erweiterung – dort läuft kein Playwright-Browser)."""
+    from playwright.async_api import async_playwright
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        try:
+            yield await browser.new_context()
+        finally:
+            await browser.close()

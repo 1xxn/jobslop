@@ -1,5 +1,6 @@
 import { type ClassValue, clsx } from "clsx";
 import { extendTailwindMerge } from "tailwind-merge";
+import { hasMessage, type MessageKey } from "./messages";
 
 // Eigene Schriftstufen (styles.css → --text-*) bekannt machen: sonst hält tailwind-merge z. B. `text-body`
 // für eine Textfarbe und verwirft dafür `text-primary-fg`.
@@ -70,7 +71,8 @@ export function hostOf(url: string): string {
   }
 }
 
-const SOURCE_NAMES: Record<string, string> = {
+// Markennamen sind in allen Sprachen gleich; alles andere steht übersetzt in messages.ts (source.*)
+const SOURCE_BRANDS: Record<string, string> = {
   arbeitsagentur: "Arbeitsagentur",
   arbeitnow: "Arbeitnow",
   himalayas: "Himalayas",
@@ -83,16 +85,16 @@ const SOURCE_NAMES: Record<string, string> = {
   workable: "Workable",
   workday: "Workday",
   amazon: "amazon.jobs",
-  generic: "Karriereseite",
-  extension: "Browser",
   linkedin: "LinkedIn",
   indeed: "Indeed",
   glassdoor: "Glassdoor",
 };
 
 /** Lesbarer Name der Quelle: „portal:linkedin“ → LinkedIn, „greenhouse:gitlab“ → Greenhouse. */
-export function sourceName(source: string): string {
+export function sourceName(source: string, t: (key: MessageKey) => string): string {
   const [kind, rest] = source.split(":", 2);
-  const key = kind === "portal" ? rest : kind;
-  return SOURCE_NAMES[key ?? ""] ?? (source.startsWith("seed") ? "Import" : source);
+  const key = kind === "portal" ? rest : kind === "seed" ? "import" : kind;
+  if (key && SOURCE_BRANDS[key]) return SOURCE_BRANDS[key];
+  const label = `source.${key}`;
+  return hasMessage(label) ? t(label) : source;
 }

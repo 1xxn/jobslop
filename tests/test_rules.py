@@ -280,3 +280,15 @@ def test_runner_stop_kills_the_whole_process_tree():
     while _alive(grandchild) and time.monotonic() < deadline:
         time.sleep(0.1)
     assert not _alive(grandchild)
+
+
+def test_versions_agree():
+    """Der Release-Workflow prüft dasselbe gegen den Tag – hier fällt es schon vorher auf."""
+    import tomllib
+
+    import jobslop
+
+    root = Path(__file__).resolve().parents[1]
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    package_json = json.loads((root / "frontend" / "package.json").read_text(encoding="utf-8"))["version"]
+    assert jobslop.__version__ == pyproject == package_json

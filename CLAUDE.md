@@ -18,12 +18,13 @@ uv run pytest -m "not browser and not live"                    # fast subset wit
 
 cd frontend && npm ci
 npm run typecheck
+npm test                                  # Vitest (src/**/*.test.ts[x])
 npm run build                             # tsc + vite → writes ../src/jobslop/web/dist (committed!)
 npm run dev                               # :5173, proxies /api and /artifacts to :8765
 ```
 
 Before finishing any change, run all of: `ruff check`, `ruff format --check`, `pytest -m "not live"`,
-`npm run typecheck`, `npm run build`. CI (`.github/workflows/ci.yml`, Ubuntu 3.12/3.13 + Windows 3.12) fails if
+`npm run typecheck`, `npm test`, `npm run build`. CI (`.github/workflows/ci.yml`, Ubuntu 3.12/3.13 + Windows 3.12) fails if
 `src/jobslop/web/dist` differs from a fresh build – always commit the build output with frontend changes.
 
 `live` tests call the real Claude Code and spend the user's quota; they only run with `JOBSLOP_LIVE=1`.
@@ -110,5 +111,7 @@ English and the type checker enforces both languages exist. Backend texts that r
   the `site` fixture in `conftest.py`, which also records POSTed submissions).
 - Guard rails are product requirements: never invent applicant data (only profile/CV/answer bank), never submit
   twice, review mode asks before submitting. Every click on a final submit button must go through
-  `ApplyEngine._submit` (`planner.is_final_submit` + `_guard_submit_clicks`).
+  `ApplyEngine._submit` or the extension's approval (`planner.is_final_submit` + `planner.guard_submit_clicks`). Engine and
+  extension share field resolution (`executor.text_value/select_index/chosen_options`, `Files.from_profile`) and
+  cover-letter handling (`engine.ensure_cover_letter`) – change them once, not per caller.
 - Ruff: line length 110, rules `E F W I UP B SIM ASYNC RUF`.

@@ -188,15 +188,17 @@ def test_slug_candidates():
 async def test_find_board_needs_the_same_job():
     with respx.mock(assert_all_called=False) as router:
         router.get("https://boards-api.greenhouse.io/v1/boards/acmecloud/jobs").respond(
-            json={"jobs": [{"title": "Account Executive"}]}  # gleicher Name, aber andere Firma/Stelle
+            json={
+                "jobs": [{"id": 1, "title": "Account Executive"}]
+            }  # gleicher Name, aber andere Firma/Stelle
         )
         router.get("https://api.ashbyhq.com/posting-api/job-board/acmecloud").respond(
-            json={"jobs": [{"title": "Site Reliability Engineer (m/w/d)"}]}
+            json={"jobs": [{"id": "a1", "title": "Site Reliability Engineer (m/w/d)", "location": "Berlin"}]}
         )
         router.route().respond(status_code=404)
         async with make_client() as client:
             hit = await find_board(client, "Acme Cloud", ["Site Reliability Engineer"])
-    assert hit == ("ashby", "acmecloud", 1)
+    assert hit is not None and hit[:2] == ("ashby", "acmecloud") and len(hit[2]) == 1
 
 
 HIMALAYAS_JOB = {
@@ -301,3 +303,32 @@ async def test_board_job_with_vague_location_still_replaces_job_board_entry(sett
     with session_scope(settings.db_path) as db:
         job = db.execute(select(Job)).scalars().one()
         assert job.source == "greenhouse:acmecloud" and job.where == "R"  # Ort aus der Jobbörse übernommen
+
+
+async def test_stored_descriptions_are_not_fetched_again(settings, config):
+    """Arbeitsagentur/LinkedIn brauchen eine Detailseite pro Stelle – gespeicherte Beschreibungen nicht neu laden."""
+    config = _only(config)
+    s = config.sources
+    s.arbeitsagentur, s.queries = True, ["Site Reliability"]
+    config.filters.allow_remote = False
+    item = {
+        "referenznummer": "10001-9-S",
+        "stellenangebotsTitel": "Site Reliability Engineer (m/w/d)",
+        "firma": "Spree Cloud GmbH",
+        "stellenlokationen": [{"adresse": {"ort": "Berlin"}}],
+    }
+    ref = base64.b64encode(b"10001-9-S").decode()
+
+    async def crawl():
+        with respx.mock(assert_all_called=False) as router:
+            router.get(f"{BA}/pc/v6/jobs").respond(json={"ergebnisliste": [item]})
+            details = router.get(f"{BA}/pc/v4/jobdetails/{ref}").respond(
+                json={"stellenangebotsBeschreibung": "Kubernetes, Terraform und Bereitschaft"}
+            )
+            report = await run_crawl(settings, config, enrich=False, use_browser=False)
+        return report, details.call_count
+
+    first, first_calls = await crawl()
+    report, second_calls = await crawl()
+    assert first.new and first_calls == 1 and second_calls == 0
+    assert report.updated == []  # gleiche Beschreibung → keine „Änderung“

@@ -6,8 +6,8 @@ import { ChipsInput, SwitchRow } from "@/components/ui/controls";
 import { Button, Card, CardBody, CardHeader, Field, Input, Skeleton } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
-import type { Portal, SearchConfig } from "@/lib/types";
-import { roleClass } from "@/lib/utils";
+import { type Portal, PORTALS, type SearchConfig } from "@/lib/types";
+import { roleClass, sourceName } from "@/lib/utils";
 import { SaveBar } from "./SaveBar";
 
 export function SearchForm() {
@@ -95,7 +95,7 @@ export function SearchForm() {
             checked={c.sources.arbeitsagentur}
             onCheckedChange={(v) => update({ ...c, sources: { ...c.sources, arbeitsagentur: v } })}
           />
-          {(["linkedin", "indeed", "glassdoor"] as const).map((portal) => (
+          {PORTALS.map((portal) => (
             <SwitchRow
               key={portal}
               title={t(`search.portal_${portal}`)}
@@ -116,7 +116,7 @@ export function SearchForm() {
             onCheckedChange={(v) => update({ ...c, sources: { ...c.sources, himalayas: v } })}
           />
           <SwitchRow
-            title="Arbeitnow"
+            title={sourceName("arbeitnow", t)}
             description={t("search.arbeitnow_hint")}
             checked={c.sources.arbeitnow}
             onCheckedChange={(v) => update({ ...c, sources: { ...c.sources, arbeitnow: v } })}
@@ -130,7 +130,7 @@ export function SearchForm() {
           <p className="text-footnote text-fg-muted">{t("search.portals_terms")}</p>
           <div className="grid gap-4 md:grid-cols-2">
             {(["greenhouse", "ashby", "lever", "smartrecruiters", "personio", "recruitee", "workable"] as const).map((key) => (
-              <Field key={key} label={key[0].toUpperCase() + key.slice(1)} hint={t(`search.board_${key}`)}>
+              <Field key={key} label={sourceName(key, t)} hint={t(`search.board_${key}`)}>
                 <ChipsInput value={c.sources[key]} onChange={(v) => update({ ...c, sources: { ...c.sources, [key]: v } })} />
               </Field>
             ))}
