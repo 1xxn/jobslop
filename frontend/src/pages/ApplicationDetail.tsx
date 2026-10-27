@@ -107,7 +107,7 @@ export function ApplicationDetailPage() {
       {a.prompts.length > 0 && (
         <div className="mb-6 space-y-4">
           {a.prompts.map((p) => (
-            <PromptCard key={p.id} prompt={p} />
+            <PromptCard key={p.id} prompt={p} showLink={false} />
           ))}
         </div>
       )}

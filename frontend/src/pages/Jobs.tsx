@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { AddJobDialog, ApplyDialog } from "@/components/actions";
 import { CompanyAvatar, FitDots, PageHeader, Score, StatusLabel } from "@/components/domain";
 import { JobSheet } from "@/components/JobSheet";
+import { QueueBar } from "@/components/QueueBar";
 import { Checkbox, Segmented, Switch } from "@/components/ui/controls";
 import { Tooltip } from "@/components/ui/overlays";
 import { Button, Card, EmptyState, Input, Select, Skeleton } from "@/components/ui/primitives";
@@ -18,7 +19,7 @@ import { cn, formatRelative, roleClass, sourceName } from "@/lib/utils";
 type View = "todo" | "starred" | "queued" | "applied" | "all";
 
 export function JobsPage() {
-  const { t, lang } = useI18n();
+  const { t, tp, lang } = useI18n();
   const qc = useQueryClient();
   const roles = useRoleNames();
   const { data: status } = useStatus();
@@ -77,6 +78,14 @@ export function JobsPage() {
       refresh();
     },
   });
+  const queueTop = useMutation({
+    mutationFn: () => api.queueTop(10),
+    onSuccess: (r) => {
+      toast.success(tp("queue.added", r.changed.length));
+      refresh();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
   const crawl = useMutation({
     mutationFn: api.crawl,
     onSuccess: (r) => toast(r.started ? t("crawl.started") : t("crawl.running")),
@@ -103,6 +112,9 @@ export function JobsPage() {
         description={jobs.data ? t("jobs.count", { n: jobs.data.total }) : " "}
         actions={
           <>
+            <Button variant="quiet" onClick={() => queueTop.mutate()} loading={queueTop.isPending}>
+              {t("queue.top10")}
+            </Button>
             <Button variant="secondary" onClick={() => setAddOpen(true)}>
               <Link2 />
               {t("addjob.short")}
@@ -291,6 +303,7 @@ export function JobsPage() {
       </Card>
 
       <JobSheet jobId={openJob} onClose={() => setOpenJob(null)} />
+      {selected.size === 0 && <QueueBar />}
       <AddJobDialog open={addOpen} onOpenChange={setAddOpen} />
       <ApplyDialog open={applyIds !== null} onOpenChange={(v) => !v && setApplyIds(null)} jobIds={applyIds ?? []} />
     </>

@@ -22,6 +22,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
+from sqlalchemy.orm import load_only
 
 from .. import __version__, assist
 from ..autopilot import Scheduler, activity, crawl_and_queue, next_run, record
@@ -49,7 +50,7 @@ from ..db import (
     session_scope,
     utcnow,
 )
-from ..guard import ACTIVE_STATES, DONE_STATES, check_job
+from ..guard import ACTIVE_STATES, DONE_STATES, check_job, excluded_job_ids
 from ..notify import notify
 from ..presets import presets_for_ui
 from ..profile import TODO, Profile, Work, normalize_question
@@ -89,7 +90,7 @@ def status_activity(job: Job, status: str) -> Activity:
     )
 
 
-def job_summary(j: Job) -> dict[str, Any]:
+def job_summary(j: Job, *, excluded: bool = False) -> dict[str, Any]:
     last = j.applications[-1] if j.applications else None
     return {
         "id": j.id,
@@ -115,6 +116,7 @@ def job_summary(j: Job) -> dict[str, Any]:
         "summary": (j.enrichment or {}).get("summary", ""),
         "app_status": last.status if last else ("queued" if j.queued else ""),
         "app_id": last.id if last else None,
+        "excluded": excluded,
     }
 
 
@@ -450,6 +452,28 @@ def create_app(runtime: Runtime) -> FastAPI:
                 )
                 or 0
             )
+            # Zähler für die Navigation: Stellen zu sichten (wie die Standardansicht, ohne Stretch-Level) …
+            undecided = list(
+                db.execute(
+                    select(Job)
+                    .options(load_only(Job.id, Job.company, Job.title, Job.url))
+                    .where(Job.status == "open", ~Job.queued, ~Job.starred, Job.level != "S")
+                    .where(~Job.applications.any())
+                ).scalars()
+            )
+            to_review = len(undecided) - len(excluded_job_ids(db, undecided))
+            # … und fällige Nachfass-Termine (letzte Bewerbung je Stelle, wie in der Pipeline)
+            latest = select(func.max(Application.id)).group_by(Application.job_id)
+            follow_ups_due = (
+                db.scalar(
+                    select(func.count(Application.id)).where(
+                        Application.id.in_(latest),
+                        Application.follow_up_at <= utcnow(),
+                        Application.status.in_(["submitted", "manual", "interview"]),
+                    )
+                )
+                or 0
+            )
         runner = ctx.runner.state(lines=0)
         runner.pop("log", None)
         nxt = next_run(s)
@@ -465,7 +489,13 @@ def create_app(runtime: Runtime) -> FastAPI:
                 "running": ctx.autopilot_running,
                 "next_run": nxt.isoformat() if nxt else None,
             },
-            "counts": {"open_jobs": open_jobs, "queued": queued, "attention": attention},
+            "counts": {
+                "open_jobs": open_jobs,
+                "queued": queued,
+                "attention": attention,
+                "to_review": to_review,
+                "follow_ups_due": follow_ups_due,
+            },
             "notify_desktop": s.notify_desktop,
         }
 
@@ -740,13 +770,21 @@ def create_app(runtime: Runtime) -> FastAPI:
                 "company": (Job.company, Job.score.desc()),
             }.get(sort, (Job.starred.desc(), Job.score.desc(), Job.company))
             rows = list(s.execute(stmt.order_by(*order)).scalars())
+            excluded = excluded_job_ids(s, rows)
             if view == "todo":
                 rows = [j for j in rows if not j.applications or j.applications[-1].status not in DONE_STATES]
             elif view == "applied":
                 rows = [j for j in rows if j.applications and j.applications[-1].status in DONE_STATES]
+            elif view == "triage":
+                # zu sichten: noch nicht entschieden – weder gemerkt, eingereiht, beworben noch aussortiert
+                rows = [j for j in rows if not (j.applications or j.queued or j.starred)]
+            elif view == "dismissed":
+                rows = [j for j in rows if j.id in excluded]
+            if view in ("todo", "triage", "starred", "queued"):
+                rows = [j for j in rows if j.id not in excluded]  # aussortiert heißt: aus den Listen raus
             facets = Counter(j.category for j in rows)
             total = len(rows)
-            items = [job_summary(j) for j in rows[offset : offset + limit]]
+            items = [job_summary(j, excluded=j.id in excluded) for j in rows[offset : offset + limit]]
         return {"items": items, "total": total, "facets": {"category": dict(facets)}}
 
     @app.post("/api/jobs")
@@ -773,7 +811,7 @@ def create_app(runtime: Runtime) -> FastAPI:
             parts = job_score_parts(j, config.role_names)
             if abs(rest := round(j.score - sum(p for _, p in parts), 2)) >= 0.1:
                 parts.append(("other", rest))  # z. B. Import mit eigener Einordnung
-            return job_summary(j) | {
+            return job_summary(j, excluded=bool(excluded_job_ids(s, [j]))) | {
                 "description": j.description,
                 "apply_url": j.apply_url,
                 "alt_urls": j.alt_urls,
@@ -855,6 +893,7 @@ def create_app(runtime: Runtime) -> FastAPI:
             added, skipped = queue_jobs(ctx.db, config, body.ids)
             return {"changed": added, "skipped": skipped}
         changed = []
+        exclusions: list[Exclusion] = []
         with session_scope(ctx.db) as s:
             for jid in body.ids:
                 j = s.get(Job, jid)
@@ -865,12 +904,16 @@ def create_app(runtime: Runtime) -> FastAPI:
                 elif body.action in ("star", "unstar"):
                     j.starred = body.action == "star"
                 elif body.action == "exclude":
-                    s.add(Exclusion(kind="job", value=str(jid), reason="im Dashboard ausgeschlossen"))
+                    ex = Exclusion(kind="job", value=str(jid), reason="im Dashboard ausgeschlossen")
+                    s.add(ex)
+                    exclusions.append(ex)
                     j.queued = False
                 else:
                     raise HTTPException(400, "Unbekannte Aktion")
                 changed.append(jid)
-        return {"changed": changed, "skipped": []}
+            s.flush()
+            # IDs der neuen Ausschlüsse, damit die Oberfläche „Rückgängig“ anbieten kann
+            return {"changed": changed, "skipped": [], "exclusions": [ex.id for ex in exclusions]}
 
     @app.post("/api/queue/top")
     def queue_top(count: int = 10) -> dict[str, Any]:

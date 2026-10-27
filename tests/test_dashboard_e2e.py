@@ -51,16 +51,22 @@ async def test_dashboard_end_to_end(dashboard):
         page.on("pageerror", lambda exc: errors.append(str(exc)))
         page.on("console", lambda msg: msg.type == "error" and errors.append(msg.text))
         try:
-            # Übersicht: Demo-Hinweis, Rückfragen, beste Treffer, „Als Nächstes“ – ohne den alten Ballast
+            # Heute: oben das eine, was dich braucht (die Freigabe), darunter die Warteliste und neue Stellen
             await page.goto(base)
             await page.get_by_text("Demo · erfundene Daten").first.wait_for()
-            for text in ("Braucht dich", "Beste Treffer", "Als Nächstes"):
-                await page.get_by_text(text, exact=True).first.wait_for()
+            await page.get_by_role("heading", name="Vor dem Absenden prüfen").wait_for()
+            for text in ("Danach", "Neue Stellen", "Bewerbungen"):
+                await page.get_by_role("heading", name=text, exact=True).wait_for()
             assert await page.get_by_text("Bewerbungen pro Woche").count() == 0
+            # ein Klick in „Danach“ holt die Rückfrage nach oben
+            await page.get_by_role("button", name="Rückfrage").first.click()
+            await page.get_by_text("Wie viele Jahre Erfahrung hast du mit Terraform?").wait_for()
 
-            # Demo-Modus: Suchen ist gesperrt und sagt das auch
+            # Demo-Modus: Suchen ist gesperrt und sagt das auch (Suche sitzt in der Lauf-Seitenleiste)
+            await page.get_by_role("button", name="Lauf und Suche anzeigen").click()
             await page.get_by_role("button", name="Neue Stellen suchen").click()
             await page.get_by_text("Demo-Modus: Crawlen ist gesperrt").wait_for()
+            await page.keyboard.press("Escape")
 
             # Stellen: Detail mit Score-Erklärung (Seite wird nachgeladen – Code-Splitting)
             await page.goto(f"{base}/jobs")
@@ -86,7 +92,7 @@ async def test_dashboard_end_to_end(dashboard):
             await page.wait_for_url("**/applications?view=board")
             await page.get_by_role("heading", name="Interview").wait_for()
 
-            # Laufender Lauf, Suche und Autopilot öffnen sich als Seitenleiste von überall
+            # Die Lauf-Seitenleiste öffnet sich auch auf anderen Seiten
             await page.get_by_role("button", name="Lauf und Suche anzeigen").click()
             await page.get_by_role("dialog", name="Was gerade läuft").wait_for()
             await page.keyboard.press("Escape")
