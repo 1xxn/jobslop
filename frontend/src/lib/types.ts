@@ -131,10 +131,13 @@ export interface JobDetail extends JobSummary {
   applications: ApplicationSummary[];
 }
 
+export type JobView = "triage" | "starred" | "queued" | "all" | "dismissed";
+
 export interface JobList {
   items: JobSummary[];
   total: number;
   facets: { category: Record<string, number> };
+  counts: Record<JobView, number>;
 }
 
 export interface ApplicationSummary {

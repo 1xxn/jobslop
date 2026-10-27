@@ -120,6 +120,29 @@ def job_summary(j: Job, *, excluded: bool = False) -> dict[str, Any]:
     }
 
 
+JOB_VIEWS = ("triage", "starred", "queued", "all", "dismissed")
+
+
+def _in_view(view: str, j: Job, excluded: set[int]) -> bool:
+    """Gehört die Stelle in diese Ansicht? Aussortiertes verlässt alle Arbeitslisten."""
+    last = j.applications[-1] if j.applications else None
+    if view == "all":
+        return True
+    if view == "dismissed":
+        return j.id in excluded
+    if view == "applied":
+        return last is not None and last.status in DONE_STATES
+    if j.id in excluded:
+        return False
+    if view == "triage":  # zu sichten: weder gemerkt, vorgemerkt noch beworben
+        return not (j.applications or j.queued or j.starred)
+    if view == "starred":
+        return j.starred
+    if view == "queued":
+        return j.queued
+    return last is None or last.status not in DONE_STATES  # todo: offen, ohne abgeschlossene Bewerbung
+
+
 def app_summary(a: Application) -> dict[str, Any]:
     return {
         "id": a.id,
@@ -741,10 +764,6 @@ def create_app(runtime: Runtime) -> FastAPI:
     ) -> dict[str, Any]:
         with session_scope(ctx.db) as s:
             stmt = select(Job)
-            if status != "all":
-                stmt = stmt.where(Job.status == status)
-            if category:
-                stmt = stmt.where(Job.category.in_(category.split(",")))
             if where in ("B", "R"):
                 stmt = stmt.where(Job.where.in_([where, "BR"]))
             if level == "noS":
@@ -753,10 +772,6 @@ def create_app(runtime: Runtime) -> FastAPI:
                 stmt = stmt.where(Job.level.in_(level.split(",")))
             if min_fit:
                 stmt = stmt.where(Job.fit >= min_fit)
-            if view == "queued":
-                stmt = stmt.where(Job.queued)
-            elif view == "starred":
-                stmt = stmt.where(Job.starred)
             if q:
                 like = f"%{q}%"
                 stmt = stmt.where(
@@ -771,21 +786,27 @@ def create_app(runtime: Runtime) -> FastAPI:
             }.get(sort, (Job.starred.desc(), Job.score.desc(), Job.company))
             rows = list(s.execute(stmt.order_by(*order)).scalars())
             excluded = excluded_job_ids(s, rows)
-            if view == "todo":
-                rows = [j for j in rows if not j.applications or j.applications[-1].status not in DONE_STATES]
-            elif view == "applied":
-                rows = [j for j in rows if j.applications and j.applications[-1].status in DONE_STATES]
-            elif view == "triage":
-                # zu sichten: noch nicht entschieden – weder gemerkt, eingereiht, beworben noch aussortiert
-                rows = [j for j in rows if not (j.applications or j.queued or j.starred)]
-            elif view == "dismissed":
-                rows = [j for j in rows if j.id in excluded]
-            if view in ("todo", "triage", "starred", "queued"):
-                rows = [j for j in rows if j.id not in excluded]  # aussortiert heißt: aus den Listen raus
-            facets = Counter(j.category for j in rows)
+            cats = set(category.split(",")) if category else set()
+            # Zähler für die Reiter: offene Stellen, bei „Alle“ und „Aussortiert“ auch geschlossene
+            counts = {
+                v: sum(
+                    1
+                    for j in rows
+                    if (not cats or j.category in cats)
+                    and (v in ("all", "dismissed") or j.status == "open")
+                    and _in_view(v, j, excluded)
+                )
+                for v in JOB_VIEWS
+            }
+            rows = [
+                j for j in rows if (status == "all" or j.status == status) and _in_view(view, j, excluded)
+            ]
+            facets = Counter(j.category for j in rows)  # vor dem Rollenfilter: das Menü zeigt alle Rollen
+            if cats:
+                rows = [j for j in rows if j.category in cats]
             total = len(rows)
             items = [job_summary(j, excluded=j.id in excluded) for j in rows[offset : offset + limit]]
-        return {"items": items, "total": total, "facets": {"category": dict(facets)}}
+        return {"items": items, "total": total, "facets": {"category": dict(facets)}, "counts": counts}
 
     @app.post("/api/jobs")
     async def add_job(body: UrlIn) -> dict[str, Any]:

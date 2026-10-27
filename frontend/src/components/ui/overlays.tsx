@@ -74,6 +74,7 @@ export function Sheet({
   children,
   actions,
   className,
+  hotkeys,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -81,6 +82,8 @@ export function Sheet({
   children: ReactNode;
   actions?: ReactNode;
   className?: string;
+  /** Tastenkürzel der Seite bleiben aktiv, solange die Seitenleiste offen ist (z. B. A/S/X in einer Stelle). */
+  hotkeys?: boolean;
 }) {
   return (
     <D.Root open={open} onOpenChange={onOpenChange}>
@@ -93,6 +96,7 @@ export function Sheet({
             (e.currentTarget as HTMLElement).focus();
           }}
           tabIndex={-1}
+          data-hotkeys={hotkeys ? "" : undefined}
           className={cn(
             "fixed inset-y-0 right-0 z-50 flex w-full max-w-[720px] flex-col border-l border-line bg-raised shadow-overlay focus:outline-none data-[state=open]:animate-sheet-in",
             className,
@@ -187,12 +191,23 @@ export function MenuItem({
 
 export function MenuRadioItem({ className, children, ...props }: ComponentProps<typeof DM.RadioItem>) {
   return (
-    <DM.RadioItem className={cn(itemBase, "pl-7 relative", className)} {...props}>
+    <DM.RadioItem className={cn(itemBase, "relative pl-7", className)} {...props}>
       <DM.ItemIndicator className="absolute left-2 [&_svg]:text-ink">
         <Check />
       </DM.ItemIndicator>
       {children}
     </DM.RadioItem>
+  );
+}
+
+export function MenuCheckboxItem({ className, children, ...props }: ComponentProps<typeof DM.CheckboxItem>) {
+  return (
+    <DM.CheckboxItem className={cn(itemBase, "relative pl-7", className)} {...props}>
+      <DM.ItemIndicator className="absolute left-2 [&_svg]:text-ink">
+        <Check />
+      </DM.ItemIndicator>
+      {children}
+    </DM.CheckboxItem>
   );
 }
 

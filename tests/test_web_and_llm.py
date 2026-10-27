@@ -115,6 +115,10 @@ def test_triage_dismissed_and_counts(settings, config, profile):
     assert [j["title"] for j in triage["items"]] == ["Cloud Engineer (m/w/d)"]
     counts = client.get("/api/status").json()["counts"]
     assert counts["to_review"] == 1
+    assert triage["counts"] == {"triage": 1, "starred": 1, "queued": 0, "all": 3, "dismissed": 0}
+    # der Rollenfilter wirkt auf Liste und Zähler, das Rollenmenü (facets) zeigt weiter alle Rollen
+    sre = client.get("/api/jobs", params={"view": "all", "status": "all", "category": "SRE"}).json()
+    assert sre["total"] == 1 and sre["counts"]["all"] == 1 and len(sre["facets"]["category"]) == 3
     cloud = triage["items"][0]
     assert cloud["excluded"] is False
 

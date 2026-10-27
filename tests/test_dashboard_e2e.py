@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 from pathlib import Path
 
 import pytest
@@ -68,13 +69,22 @@ async def test_dashboard_end_to_end(dashboard):
             await page.get_by_text("Demo-Modus: Crawlen ist gesperrt").wait_for()
             await page.keyboard.press("Escape")
 
-            # Stellen: Detail mit Score-Erklärung (Seite wird nachgeladen – Code-Splitting)
+            # Stellen: Liste und Stelle nebeneinander, die Score-Erklärung steht offen in der Stelle
             await page.goto(f"{base}/jobs")
-            await page.locator("[tabindex='0']").filter(has_text="Engineer").first.click()
-            await page.get_by_role("button", name="Warum dieser Score?").click()
-            await page.get_by_text("von 21 Punkten").wait_for()
+            await page.get_by_role("option").first.wait_for()
+            await page.get_by_role("heading", name=re.compile(r"Warum [\d,.]+ von 21")).wait_for()
             await page.get_by_text("Zielrolle").first.wait_for()
-            await page.keyboard.press("Escape")
+            # Aussortieren mit X springt zur nächsten Stelle, Z macht es rückgängig
+            first = await page.get_by_role("option").first.get_attribute("id")
+            await page.keyboard.press("x")
+            await page.get_by_text("Aussortiert: ").first.wait_for()
+            await page.wait_for_function(
+                "id => document.querySelector('[role=option]')?.id !== id && !document.getElementById(id)",
+                arg=first,
+            )
+            await page.keyboard.press("z")
+            await page.get_by_text("Rückgängig gemacht").wait_for()
+            await page.wait_for_selector(f"#{first}")
 
             # Einstellungen speichern: LinkedIn abschalten bleibt nach dem Neuladen aus
             await page.goto(f"{base}/settings/search")

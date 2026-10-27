@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { api } from "./api";
 import type { Status } from "./types";
 
@@ -75,4 +75,17 @@ export function useDebounced<T>(value: T, ms = 250): T {
     return () => clearTimeout(id);
   }, [value, ms]);
   return v;
+}
+
+/** Trifft die Media Query gerade zu? (z. B. breit genug für Liste und Stelle nebeneinander) */
+export function useMediaQuery(query: string): boolean {
+  return useSyncExternalStore(
+    (notify) => {
+      const m = matchMedia(query);
+      m.addEventListener("change", notify);
+      return () => m.removeEventListener("change", notify);
+    },
+    () => matchMedia(query).matches,
+    () => false,
+  );
 }
