@@ -24,8 +24,13 @@ und fragt, bevor es etwas absendet.
 Bewerben ist zu 10 % Entscheiden und zu 90 % Copy‑Paste derselben Antworten in leicht unterschiedliche Formulare.
 jobslop übernimmt das Copy‑Paste. Das Entscheiden bleibt bei dir.
 
-- **Findet Stellen** auf Jobbörsen (Arbeitnow, Himalayas), Firmen‑Boards (Greenhouse, Ashby, Lever,
-  SmartRecruiters, Personio, Workday, amazon.jobs) und beliebigen Karriereseiten – ohne Dubletten, mit Verlauf.
+- **Findet Stellen überall**: Bundesagentur für Arbeit (alle Branchen), LinkedIn, Indeed und Glassdoor
+  (öffentliche Suche, ohne Login), Arbeitnow, Himalayas, Firmen‑Boards (Greenhouse, Ashby, Lever, SmartRecruiters,
+  Personio, Recruitee, Workable, Workday, amazon.jobs) und beliebige Karriereseiten – ohne Dubletten, mit Verlauf.
+  Firmen aus Jobbörsen sucht jobslop automatisch auf ihren eigenen Boards, damit du direkt beim Arbeitgeber landest.
+- **Browser‑Erweiterung**: füllt Formulare in deinem eigenen Chrome aus, wo ein automatischer Browser an
+  Bot‑Abfragen oder Logins scheitert – auf Wunsch auch LinkedIn/Indeed „Einfach bewerben“. Abgeschickt wird erst
+  nach deinem Klick.
 - **Bewertet ehrlich.** Claude liest die Anforderungen und sagt dir, was passt, was nicht und worauf du achten
   solltest (Rufbereitschaft, Deutsch C2, „Senior“ im Mid‑Gewand …).
 - **Bewirbt sich im echten Browser.** Iframes, Shadow DOM, eigene Dropdowns, mehrseitige Formulare,
@@ -102,9 +107,12 @@ Mehr dazu: [docs/architecture.md](docs/architecture.md) · Einstellungen: [docs/
   `127.0.0.1` und weist Anfragen fremder Webseiten ab.
 - **Deine Daten verlassen den Rechner** nur in Richtung Claude (über dein Abo) und in die Formulare der
   Bewerbungen, die du startest.
-- **Du bist verantwortlich für das, was in deinem Namen verschickt wird.** Starte mit *Testlauf* oder *Mit Freigabe*
-  und beachte die Nutzungsbedingungen der Seiten. LinkedIn und Indeed werden bewusst nicht automatisiert,
-  CAPTCHAs nicht gelöst, Logins übergibt jobslop dir.
+- **Du bist verantwortlich für das, was in deinem Namen verschickt wird.** Starte mit *Testlauf* oder *Mit Freigabe*.
+- **LinkedIn, Indeed und Glassdoor** untersagen automatisierte Abfragen in ihren Nutzungsbedingungen. jobslop fragt
+  nur deren öffentliche Suche ab, gedrosselt und ohne Anmeldung. Beworben wird dort nur in deinem eigenen Chrome über
+  die Erweiterung, nur wenn du es einschaltest, mit Tageslimit und deiner Freigabe für jedes Absenden – dein Konto,
+  dein Risiko.
+- **CAPTCHAs und Logins bleiben bei dir.** jobslop löst oder umgeht keine Sicherheitsabfragen; es hält an und du klickst.
 
 ## FAQ
 

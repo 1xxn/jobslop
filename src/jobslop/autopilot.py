@@ -48,6 +48,7 @@ async def crawl_and_queue(runtime: Runtime, *, queue_count: int) -> dict[str, An
         "kept": report.kept,
         "queued": added,
         "errors": len(report.errors),
+        "discovered": len(report.discovered),
     }
     record(
         runtime.settings,

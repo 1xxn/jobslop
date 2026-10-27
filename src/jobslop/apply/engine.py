@@ -13,13 +13,13 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from sqlalchemy import select
 
 from ..config import ApplyMode, SearchConfig, Settings, ensure_not_demo
 from ..db import Answer, Application, ApplicationEvent, Job, session_scope, utcnow
 from ..guard import check_job
+from ..hosts import host_of, is_handoff
 from ..llm import LLM, LLMLimitReached
 from ..profile import Profile, normalize_question
 from .coverletter import cover_letter_html, cover_letter_text, render_pdf, write_cover_letter
@@ -27,12 +27,18 @@ from .executor import Executor, Files, click_element
 from .extract import PageState, extract_state
 from .interact import Interactor
 from .marks import annotated_screenshots, save_screenshot
-from .planner import _CONFIRM_RX, JobContext, LLMPlanner, PagePlan, PlanInput, Planner, is_final_submit
+from .planner import (
+    _CONFIRM_RX,
+    JobContext,
+    LLMPlanner,
+    PagePlan,
+    PlanInput,
+    Planner,
+    guard_submit_clicks,
+)
 from .prepare import dismiss_cookie_banners, reveal_lazy_content, try_autofill
 
 log = logging.getLogger(__name__)
-
-HANDOFF_HOSTS = ("linkedin.com", "indeed.com", "indeed.de")
 
 
 class Park(Exception):
@@ -74,10 +80,6 @@ class _Run:
 
 def slugify(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40] or "job"
-
-
-def host_of(url: str) -> str:
-    return (urlparse(url).hostname or "").lower()
 
 
 async def settle(page: Any) -> None:
@@ -256,7 +258,7 @@ class ApplyEngine:
             await settle(page)
             # Auch mitten im Ablauf: führt ein Klick (Weiterleitung, „Mit LinkedIn bewerben“) auf LinkedIn/Indeed,
             # wird dort nichts automatisch bedient.
-            if any(h in host_of(page.url) for h in HANDOFF_HOSTS):
+            if is_handoff(page.url):
                 page = await self._aggregator_handoff(run, page, title)
                 await settle(page)
             state = await self._prepare(run, page)
@@ -519,12 +521,7 @@ class ApplyEngine:
                 if q.field_id not in answers:
                     continue
                 label = (state.field(q.field_id) or {}).get("label") or q.question
-                key = normalize_question(label)
-                existing = s.execute(select(Answer).where(Answer.question_key == key)).scalars().first()
-                if existing:
-                    existing.answer, existing.updated_at = answers[q.field_id], utcnow()
-                else:
-                    s.add(Answer(question_key=key, question=label, answer=answers[q.field_id]))
+                remember_answer(s, label, answers[q.field_id])
                 self.planner.remember(label, answers[q.field_id])
         run.history.append(f"{len(answers)} Rückfrage(n) beantwortet und gespeichert")
         self._event(run.app_id, "answers", f"{len(answers)} Antworten gespeichert")
@@ -583,11 +580,7 @@ class ApplyEngine:
 
         def employer_page() -> Any:
             for p in reversed(context.pages):
-                if (
-                    not p.is_closed()
-                    and p.url.startswith("http")
-                    and not any(h in host_of(p.url) for h in HANDOFF_HOSTS)
-                ):
+                if not p.is_closed() and p.url.startswith("http") and not is_handoff(p.url):
                     return p
             return None
 
@@ -611,25 +604,9 @@ class ApplyEngine:
 
     @staticmethod
     def _guard_submit_clicks(run: _Run, state: PageState, plan: PagePlan) -> None:
-        """Abgesendet wird nur über ``_submit`` (Freigabe, Testlauf, Doppel-Schutz) – nie als Nebenbei-Klick.
-
-        Planer (vor allem Claude) legen den Absende-Button gelegentlich als ``click``-Aktion oder als
-        ``click_next`` an. Ersteres wird übersprungen, Letzteres zu ``click_submit`` umgeleitet.
-        """
-        filled = (
-            any(r["ok"] and r["action"] != "click" for r in run.filled)
-            or any(a.action in ("fill", "select", "check", "upload") for a in plan.actions)
-            or sum(1 for f in state.form_fields if f.get("value")) >= 2
-        )
-        for a in plan.actions:
-            button = state.button(a.field_id) if a.action == "click" else None
-            if button and is_final_submit(button, form_filled=filled):
-                a.action = "skip"
-                run.history.append(f"Klick auf '{button['text']}' ignoriert – Absenden nur über click_submit")
-        if plan.next_step in ("click_apply", "click_next"):
-            target = state.button(plan.next_target_id)
-            if target and is_final_submit(target, form_filled=filled):
-                plan.next_step = "click_submit"
+        """Abgesendet wird nur über ``_submit`` (Freigabe, Testlauf, Doppel-Schutz) – nie als Nebenbei-Klick."""
+        filled_before = any(r["ok"] and r["action"] != "click" for r in run.filled)
+        run.history += guard_submit_clicks(state, plan, filled_before=filled_before)
 
     def _loop_guard(self, run: _Run, state: PageState) -> None:
         sig = (
@@ -706,6 +683,16 @@ async def run_batch(
             if attempted < max_count and job_id != job_ids[-1]:
                 await asyncio.sleep(random.uniform(min_delay, min_delay * 1.6))
     return outcomes
+
+
+def remember_answer(session: Any, question: str, answer: str) -> None:
+    """Antwort in die Antwortbank – künftige Formulare mit derselben Frage füllt jobslop dann selbst."""
+    key = normalize_question(question)
+    existing = session.execute(select(Answer).where(Answer.question_key == key)).scalars().first()
+    if existing:
+        existing.answer, existing.updated_at = answer, utcnow()
+    else:
+        session.add(Answer(question_key=key, question=question, answer=answer))
 
 
 def load_answers(db_path: Path) -> list[tuple[str, str]]:

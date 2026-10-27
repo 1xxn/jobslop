@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import tomli_w
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .presets import COMMON_EXCLUDES, LEADERSHIP_EXCLUDES, preset
@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     notify_webhook_url: str = ""  # Discord-/Slack-kompatibel (JSON mit "content" und "text")
     follow_up_days: int = 10  # Nachfassen-Erinnerung nach dem Absenden
     setup_completed: bool = False
+    # Browser-Erweiterung: LinkedIn/Indeed in deinem eigenen Chrome ausfüllen (Nutzungsbedingungen der Portale!)
+    extension_portals: bool = False
+    extension_portal_daily_limit: int = 15
     # Demo-Ordner (scripts/demo_data.py): nichts darf echt crawlen, bewerben oder Nachrichten verschicken
     demo: bool = False
 
@@ -132,6 +135,8 @@ EDITABLE_SETTINGS = {
     "notify_webhook_url",
     "follow_up_days",
     "setup_completed",
+    "extension_portals",
+    "extension_portal_daily_limit",
 }
 
 
@@ -283,20 +288,52 @@ class GenericPage(BaseModel):
     url: str
 
 
+Portal = Literal["linkedin", "indeed", "glassdoor"]
+
+
 class SourceConfig(BaseModel):
+    # Firmen-Boards (Bewerbungssysteme mit öffentlicher API)
     greenhouse: list[str] = Field(default_factory=list)
     ashby: list[str] = Field(default_factory=list)
     lever: list[str] = Field(default_factory=list)
     smartrecruiters: list[str] = Field(default_factory=list)
     personio: list[str] = Field(default_factory=list)
+    recruitee: list[str] = Field(default_factory=list)  # <name>.recruitee.com
+    workable: list[str] = Field(default_factory=list)  # apply.workable.com/<name>
     workday: list[WorkdaySite] = Field(default_factory=list)
     amazon_queries: list[str] = Field(default_factory=list)
     amazon_country: str = "DEU"
+    # Jobbörsen mit Stichwortsuche: gemeinsame Suchbegriffe; Orte kommen aus filters.onsite_locations
+    queries: list[str] = Field(default_factory=list)
     arbeitnow: bool = False
     arbeitnow_max_pages: int = 25
-    himalayas_queries: list[str] = Field(default_factory=list)
+    himalayas: bool = True
     himalayas_country: str = "Germany"
+    # Bundesagentur für Arbeit: offizielle Jobsuche, ganz Deutschland, alle Branchen
+    arbeitsagentur: bool = True
+    arbeitsagentur_radius_km: int = 30
+    arbeitsagentur_skip_agencies: bool = True  # Zeitarbeit und private Arbeitsvermittlung auslassen
+    # Große Portale über JobSpy (öffentliche Suche ohne Login; Nutzungsbedingungen der Portale beachten)
+    portals: list[Portal] = Field(default_factory=lambda: ["linkedin", "indeed"])
+    portal_country: str = "germany"
+    portal_results: int = 25  # pro Suchbegriff, Ort und Portal
+    portal_hours_old: int = 336  # nur Anzeigen der letzten zwei Wochen
+    # Firmen aus Jobbörsen auf eigene Boards (Greenhouse, Ashby, Lever …) prüfen und diese direkt abfragen
+    discover_boards: bool = True
+    discover_max_per_crawl: int = 40
     generic: list[GenericPage] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_queries(cls, data: Any) -> Any:
+        """Bis 1.0 hießen die Suchbegriffe ``himalayas_queries`` und galten nur für Himalayas."""
+        if isinstance(data, dict) and "himalayas_queries" in data:
+            data = dict(data)
+            legacy = data.pop("himalayas_queries") or []
+            if not data.get("queries"):
+                data["queries"] = legacy
+            data.setdefault("himalayas", bool(legacy))
+        return data
 
 
 def _default_roles() -> list[RoleConfig]:
@@ -474,7 +511,7 @@ DEFAULT_SOURCES = SourceConfig(
     personio=["ottonova", "tado", "gridx"],
     amazon_queries=["engineer", "devops", "site reliability", "systems engineer"],
     arbeitnow=True,
-    himalayas_queries=list(preset("cloud")["search_queries"]),
+    queries=list(preset("cloud")["search_queries"]),
     generic=[GenericPage(company="Zalando", url="https://jobs.zalando.com/en/jobs?search=engineer")],
 )
 
@@ -502,7 +539,7 @@ def search_config_from_preset(
     for name in names:  # Ausschlüsse einer Vorlage dürfen Zielrollen einer anderen nicht blockieren
         excludes += [e for e in preset(name)["excludes"] if e.strip() not in wanted_terms]
     sources = DEFAULT_SOURCES.model_copy(deep=True)
-    sources.himalayas_queries = list(dict.fromkeys(queries))
+    sources.queries = list(dict.fromkeys(queries))
     remote_regions = ["germany", "deutschland", "europe", "europa", "european union", "eu", "emea", "dach"]
     return SearchConfig(
         roles=roles,

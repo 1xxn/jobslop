@@ -36,7 +36,10 @@ Tests marked `live` call the real Claude Code and use your subscription; they on
 
 ## Guidelines
 
-- Keep the guard rails: nothing may invent applicant data, submit twice, or automate LinkedIn/Indeed.
+- Keep the guard rails: nothing may invent applicant data, submit twice or submit without approval in review
+  mode; LinkedIn/Indeed only through the opt-in extension; never solve or bypass CAPTCHAs or other bot checks.
+- Real-site smoke tests (`JOBSLOP_NETWORK=1 uv run pytest tests/test_real_sites.py`) only read pages – keep it
+  that way: no filling, no submitting against real employers.
 - New form quirks belong in a fixture under `tests/fixtures/site/` plus a browser test.
 - UI text lives in `frontend/src/lib/messages.ts` – German and English, the type checker enforces both.
 - No personal data in commits, fixtures or screenshots. Use `scripts/demo_data.py`.

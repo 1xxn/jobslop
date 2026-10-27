@@ -257,7 +257,7 @@ _COVER_RX = re.compile(r"cover letter|anschreiben|motivationsschreiben", re.I)
 _CONSENT_RX = re.compile(r"datenschutz|privacy|einwillig|consent|zustimm|agree|akzeptier|terms", re.I)
 _TALENT_RX = re.compile(r"talent ?pool|future (opportunities|positions)|weitere stellen|newsletter", re.I)
 _SUBMIT_RX = re.compile(
-    r"submit|absenden|bewerbung (senden|abschicken)|send application|jetzt bewerben$|^bewerben$|^senden$",
+    r"submit|absenden|bewerbung (senden|abschicken)|send application|jetzt bewerben$|^bewerben$|^senden$|^send$",
     re.I,
 )
 _NEXT_RX = re.compile(r"^(weiter|next|continue|fortfahren|review|überprüfen)\b", re.I)
@@ -290,6 +290,30 @@ def is_final_submit(button: dict[str, Any], *, form_filled: bool) -> bool:
     if _FINAL_SUBMIT_RX.search(text):
         return True
     return form_filled and bool(button.get("form")) and bool(_APPLY_RX.search(text))
+
+
+def guard_submit_clicks(state: PageState, plan: PagePlan, *, filled_before: bool) -> list[str]:
+    """Abgesendet wird nur über den eigenen Absende-Schritt (Freigabe, Testlauf, Doppel-Schutz).
+
+    Planer (vor allem Claude) legen den Absende-Button gelegentlich als ``click``-Aktion oder als ``click_next``
+    an. Ersteres wird übersprungen, Letzteres zu ``click_submit`` umgeleitet. Rückgabe: Notizen für den Verlauf.
+    """
+    filled = (
+        filled_before
+        or any(a.action in ("fill", "select", "check", "upload") for a in plan.actions)
+        or sum(1 for f in state.form_fields if f.get("value")) >= 2
+    )
+    notes = []
+    for a in plan.actions:
+        button = state.button(a.field_id) if a.action == "click" else None
+        if button and is_final_submit(button, form_filled=filled):
+            a.action = "skip"
+            notes.append(f"Klick auf '{button['text']}' ignoriert – Absenden nur über click_submit")
+    if plan.next_step in ("click_apply", "click_next"):
+        target = state.button(plan.next_target_id)
+        if target and is_final_submit(target, form_filled=filled):
+            plan.next_step = "click_submit"
+    return notes
 
 
 def _same_value(current: str, expected: str) -> bool:

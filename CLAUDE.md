@@ -27,6 +27,9 @@ Before finishing any change, run all of: `ruff check`, `ruff format --check`, `p
 `src/jobslop/web/dist` differs from a fresh build – always commit the build output with frontend changes.
 
 `live` tests call the real Claude Code and spend the user's quota; they only run with `JOBSLOP_LIVE=1`.
+`network` tests (`tests/test_real_sites.py`) read real job sites and forms – never fill or submit – and only run with
+`JOBSLOP_NETWORK=1`. Any test that builds a `Runtime` must keep Claude out (`monkeypatch.setattr(Runtime, "llm", …)`),
+because `find_claude` also finds the developer's real installation.
 `tests/test_claude_code.py` runs `tests/fake_claude.py` as a stand-in `claude` binary (by patching `find_claude`).
 
 ## Data safety – read before running anything
@@ -55,10 +58,14 @@ dashboard) < `.env` < `JOBSLOP_*` env vars (legacy `JOBPILOT_*` still read). `Se
 startup by `_add_missing_columns`, so schema changes must be additive and nullable/defaulted.
 
 **Crawl** (`crawl/`): each source class in `sources.py` returns `RawPosting`s (API boards: Greenhouse, Ashby,
-Lever, SmartRecruiters, Personio, Workday, amazon.jobs; aggregators Arbeitnow/Himalayas; `GenericPageSource`
-renders a careers page with a shared headless browser from `render.py` and lets Claude extract the list).
-`pipeline.py` filters by roles/locations, dedupes by `fingerprint`/`match_key`, writes `JobSnapshot` history and
-decides closures. Sources with `complete = False` (capped searches) must never cause jobs to be closed.
+Lever, SmartRecruiters, Personio, Recruitee, Workable, Workday, amazon.jobs; aggregators in `AGGREGATOR_SOURCES`:
+Arbeitnow, Himalayas, Arbeitsagentur, `portal:*` = LinkedIn/Indeed/Glassdoor via JobSpy, which is sync and runs
+in a thread; `GenericPageSource` renders a careers page and lets Claude extract the list). `pipeline.py` filters
+by roles/locations, dedupes by `fingerprint`/`match_key` (company boards win over aggregators), writes
+`JobSnapshot` history and decides closures from everything a source *listed*, not only what passed the filter.
+Sources with `complete = False` (capped or nondeterministic) must never cause immediate closures. `boards.py`
+discovers company boards for aggregator companies (stored in the `boards` table). `hosts.py` defines handoff
+hosts (LinkedIn/Indeed) and browser-only hosts (bot checks: Himalayas, Glassdoor) used by guard and queue.
 `classify.py` is the rule-based scorer; Claude enrichment is capped by `limits.max_enrich_per_crawl`.
 
 **Apply engine** (`apply/`), one loop per application in `engine.py`:
@@ -78,6 +85,12 @@ runner process and the web UI poll. Answers go into the answer bank (`Answer`) a
 `claude.exe`), `subscription_env` strips API-key variables so usage always goes to the subscription, structured
 output comes from `--json-schema` (`strict_schema` inlines refs). Usage-limit errors raise `LLMLimitReached` and
 park runs as `paused`; `DYNAMIC_BOUNDARY` splits the cacheable system prompt from the variable part.
+
+**Browser extension** (`assist.py` + `src/jobslop/extension/`, MV3, plain JS): installed by the dashboard into
+`~/.jobslop/extension` with a pairing token; it runs `extract.js` in the user's real Chrome, `/api/assist/step`
+plans server-side (same planner, `guard_submit_clicks`, `compile_action`), the extension fills and only submits
+after the user's click. Never touches CAPTCHA frames; LinkedIn/Indeed only with `extension_portals`.
+`tests/test_extension.py` loads it into Playwright's Chromium (`channel="chromium"`) against a live uvicorn.
 
 **Dashboard** (`web/app.py`): FastAPI JSON API under `/api` plus the prebuilt SPA from `web/dist`. Security model
 for a local server: bind to 127.0.0.1, reject unknown `Host` headers (DNS rebinding), and require `X-Jobslop: 1`

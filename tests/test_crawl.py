@@ -173,7 +173,7 @@ def _config(config):
     )
     s.workday = [WorkdaySite(company="Zeta AG", host="wd.example.com", tenant="ten", site="Careers")]
     s.amazon_queries, s.generic = ["engineer"], []
-    s.arbeitnow, s.himalayas_queries = False, []
+    s.arbeitnow, s.queries, s.portals, s.arbeitsagentur, s.discover_boards = False, [], [], False, False
     return config
 
 
@@ -377,7 +377,7 @@ async def test_job_boards_add_jobs_without_duplicates(settings, config):
         [],
         [],
     )
-    s.arbeitnow, s.himalayas_queries = True, ["sre"]
+    s.arbeitnow, s.queries, s.portals, s.arbeitsagentur, s.discover_boards = True, ["sre"], [], False, False
     with respx.mock(assert_all_called=False) as router:
         _mock(router)
         router.get("https://www.arbeitnow.com/api/job-board-api").respond(json=ARBEITNOW)

@@ -353,3 +353,16 @@ async def test_llm_planner_uses_cv_text(settings, profile):
     call = fake.calls[0]
     assert "Terraform-Module für GCP" in call["system"].split(DYNAMIC_BOUNDARY)[0]
     assert all(block["type"] == "text" for block in call["content"])  # kein Datei-Upload nötig
+
+
+def test_extension_install_uses_the_running_address(settings, config, profile):
+    client = _client(settings, config, profile)
+    info = client.post("/api/extension/install").json()
+    assert info["installed"] and not info["outdated"]
+    cfg = (Path(info["path"]) / "config.js").read_text(encoding="utf-8")
+    assert '"server": "http://testserver"' in cfg  # Adresse, unter der das Dashboard gerade läuft
+    assert (Path(info["path"]) / "extract.js").read_text(encoding="utf-8").startswith("// Aus jobslop")
+    # Assistenz-API nur mit Kopplungs-Token
+    assert client.get("/api/assist/status").status_code == 401
+    token = (settings.home / "extension-token").read_text(encoding="utf-8")
+    assert client.get("/api/assist/status", headers={"X-Jobslop-Token": token}).json()["portals"] is False

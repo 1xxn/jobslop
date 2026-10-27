@@ -159,6 +159,21 @@ class Exclusion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class Board(Base):
+    """Firmen-Board, das jobslop selbst gesucht hat (kind leer = keins gefunden, wird später erneut geprüft)."""
+
+    __tablename__ = "boards"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_key: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    company: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(20), default="")  # greenhouse, ashby, lever, recruitee …
+    slug: Mapped[str] = mapped_column(String(200), default="")
+    jobs: Mapped[int] = mapped_column(Integer, default=0)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    checked_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Answer(Base):
     __tablename__ = "answers"
 

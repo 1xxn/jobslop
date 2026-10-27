@@ -50,6 +50,19 @@ upserts jobs by fingerprint. Every run writes snapshots (`new`, `updated` with a
 - The same job from a job board and a company board is stored once; the company board wins.
 - Claude rates at most `limits.max_enrich_per_crawl` new jobs per run (best rule score first) to protect your quota.
 
+Sources: API boards (`greenhouse`, `ashby`, `lever`, `smartrecruiters`, `personio`, `recruitee`, `workable`,
+`workday`, `amazon`), job boards with keyword search (`arbeitsagentur` – the official German job search API,
+`himalayas`, `arbeitnow`) and the big portals (`portal:linkedin`, `portal:indeed`, `portal:glassdoor`) through
+[JobSpy](https://github.com/speedyapply/JobSpy) – public search only, no login, throttled; LinkedIn searches are
+bundled into one OR query per location and descriptions are loaded only for jobs that pass the filters.
+
+**Board discovery** (`crawl/boards.py`): companies from job-board hits are looked up on Greenhouse, Ashby, Lever,
+Recruitee, Workable and Personio (slug guesses from the company name). A board only counts if the same job is
+listed there; hits and misses are stored in the `boards` table (misses are rechecked after 30 days) and found
+boards are crawled from then on. Their postings replace the job-board entries – which matters for job boards whose
+pages sit behind bot checks (Himalayas, Glassdoor): those are *browser-only* (`hosts.py`), never queued
+automatically and ranked lower, and can still be applied to through the browser extension.
+
 ## The application engine (`apply/`)
 
 One application is a loop of up to `max_steps_per_application` steps:
@@ -70,6 +83,18 @@ One application is a loop of up to `max_steps_per_application` steps:
    step limits park the application for review.
 
 Usage limits of the subscription pause the run (`paused`) without submitting anything half-filled.
+
+## Browser extension (`assist.py`, `extension/`)
+
+An unpacked Chrome extension (Manifest V3) that applies in the user's own browser – where the automated Chromium
+gets stuck in bot checks or needs a login. The dashboard writes it to `~/.jobslop/extension` together with
+`config.js` (server address + pairing token) and `extract.js` (the engine's form reader). Flow per step: the
+extension reads every frame with `extract.js`, posts it to `/api/assist/step` (token in `X-Jobslop-Token`), the
+server builds a `PageState`, plans with the normal planner, applies `guard_submit_clicks` and compiles each action
+into a concrete instruction (option already resolved, files as placeholders that the extension downloads). The
+extension fills, reports results, shows questions in an in-page panel and stops before the final submit until the
+user clicks “Submit”. CAPTCHA frames are never read or touched. LinkedIn/Indeed pages are refused unless
+`extension_portals` is on, with a daily submission limit.
 
 ## Dashboard
 

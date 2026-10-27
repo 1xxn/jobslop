@@ -6,7 +6,7 @@ import { ChipsInput, SwitchRow } from "@/components/ui/controls";
 import { Button, Card, CardBody, CardHeader, Field, Input, Skeleton } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
-import type { SearchConfig } from "@/lib/types";
+import type { Portal, SearchConfig } from "@/lib/types";
 import { roleClass } from "@/lib/utils";
 import { SaveBar } from "./SaveBar";
 
@@ -83,20 +83,53 @@ export function SearchForm() {
       <Card>
         <CardHeader title={t("search.sources")} description={t("search.sources_hint")} />
         <CardBody className="space-y-4">
+          <Field label={t("search.queries")} hint={t("search.queries_hint")}>
+            <ChipsInput
+              value={c.sources.queries}
+              onChange={(v) => update({ ...c, sources: { ...c.sources, queries: v } })}
+            />
+          </Field>
+          <SwitchRow
+            title={t("search.arbeitsagentur")}
+            description={t("search.arbeitsagentur_hint")}
+            checked={c.sources.arbeitsagentur}
+            onCheckedChange={(v) => update({ ...c, sources: { ...c.sources, arbeitsagentur: v } })}
+          />
+          {(["linkedin", "indeed", "glassdoor"] as const).map((portal) => (
+            <SwitchRow
+              key={portal}
+              title={t(`search.portal_${portal}`)}
+              description={t(`search.portal_${portal}_hint`)}
+              checked={c.sources.portals.includes(portal)}
+              onCheckedChange={(v) => {
+                const portals: Portal[] = v
+                  ? [...c.sources.portals, portal]
+                  : c.sources.portals.filter((p) => p !== portal);
+                update({ ...c, sources: { ...c.sources, portals } });
+              }}
+            />
+          ))}
+          <SwitchRow
+            title={t("search.himalayas")}
+            description={t("search.himalayas_hint")}
+            checked={c.sources.himalayas}
+            onCheckedChange={(v) => update({ ...c, sources: { ...c.sources, himalayas: v } })}
+          />
           <SwitchRow
             title="Arbeitnow"
             description={t("search.arbeitnow_hint")}
             checked={c.sources.arbeitnow}
             onCheckedChange={(v) => update({ ...c, sources: { ...c.sources, arbeitnow: v } })}
           />
-          <Field label={t("search.himalayas")} hint={t("search.himalayas_hint")}>
-            <ChipsInput
-              value={c.sources.himalayas_queries}
-              onChange={(v) => update({ ...c, sources: { ...c.sources, himalayas_queries: v } })}
-            />
-          </Field>
+          <SwitchRow
+            title={t("search.discover")}
+            description={t("search.discover_hint")}
+            checked={c.sources.discover_boards}
+            onCheckedChange={(v) => update({ ...c, sources: { ...c.sources, discover_boards: v } })}
+          />
+          <p className="text-footnote text-fg-muted">{t("search.portals_terms")}</p>
           <div className="grid gap-4 md:grid-cols-2">
-            {(["greenhouse", "ashby", "lever", "smartrecruiters", "personio"] as const).map((key) => (
+            {(["greenhouse", "ashby", "lever", "smartrecruiters", "personio", "recruitee", "workable"] as const).map((key) => (
               <Field key={key} label={key[0].toUpperCase() + key.slice(1)} hint={t(`search.board_${key}`)}>
                 <ChipsInput value={c.sources[key]} onChange={(v) => update({ ...c, sources: { ...c.sources, [key]: v } })} />
               </Field>
