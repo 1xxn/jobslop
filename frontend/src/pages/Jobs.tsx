@@ -13,7 +13,7 @@ import { api } from "@/lib/api";
 import { useDebounced, useRoleNames, useStatus } from "@/lib/hooks";
 import { useI18n } from "@/lib/i18n";
 import type { JobSummary } from "@/lib/types";
-import { cn, formatRelative, roleClass } from "@/lib/utils";
+import { cn, formatRelative, roleClass, sourceName } from "@/lib/utils";
 
 type View = "todo" | "starred" | "queued" | "applied" | "all";
 
@@ -341,6 +341,7 @@ function JobRow({
           {job.first_seen && (
             <span className="hidden text-fg-subtle sm:inline">· {formatRelative(job.first_seen, lang)}</span>
           )}
+          <span className="hidden text-fg-subtle lg:inline">· {sourceName(job.source)}</span>
         </div>
       </div>
       <div className="hidden w-36 md:block">

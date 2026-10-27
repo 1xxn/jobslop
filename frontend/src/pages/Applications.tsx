@@ -1,10 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, ListChecks } from "lucide-react";
+import { ChartColumn, ChevronRight, ListChecks } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
-import { CompanyAvatar, PageHeader, StatusBadge } from "@/components/domain";
+import { CompanyAvatar, PageHeader, StatusBadge, WeeklyChart } from "@/components/domain";
 import { Segmented } from "@/components/ui/controls";
-import { Card, EmptyState, Skeleton } from "@/components/ui/primitives";
+import { Card, CardBody, CardHeader, EmptyState, Skeleton } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
@@ -26,9 +26,19 @@ export function ApplicationsPage() {
     queryFn: () => api.applications(FILTERS[filter]),
     refetchInterval: 5000,
   });
+  const stats = useQuery({ queryKey: ["stats"], queryFn: api.stats, refetchInterval: 30_000 });
+  const weeks = stats.data?.applications.per_week ?? [];
   return (
     <>
       <PageHeader title={t("apps.title")} description={t("apps.description")} />
+      {weeks.some((w) => w.sent > 0) && (
+        <Card className="mb-6">
+          <CardHeader title={t("overview.weekly")} description={t("overview.weekly_hint")} icon={<ChartColumn />} />
+          <CardBody>
+            <WeeklyChart weeks={weeks} />
+          </CardBody>
+        </Card>
+      )}
       <Segmented<Filter>
         className="mb-4"
         value={filter}

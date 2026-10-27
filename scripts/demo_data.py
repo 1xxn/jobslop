@@ -350,16 +350,48 @@ def build(home: Path, *, seed: int = 7) -> None:
             ("Hast du eine Arbeitserlaubnis in der EU?", "Ja"),
         ):
             s.add(Answer(question_key=q.lower(), question=q, answer=a))
-        for i, (kind, msg) in enumerate(
+        # Wie im echten Betrieb: Klartext plus Code/Parameter, die das Dashboard übersetzt
+        for i, (kind, msg, code, params) in enumerate(
             (
-                ("crawl", "Crawl #6: 18 neue Stellen, 5 eingereiht"),
-                ("run", "Bewerbungslauf beendet: 3× submitted, 1× needs_input"),
-                ("status", "Spreebyte · Platform Engineer – Kubernetes: interview"),
-                ("autopilot", "Autopilot: 18 neue Stellen, 5 eingereiht – Bewerbungen laufen"),
-                ("setup", "Einrichtung abgeschlossen"),
+                (
+                    "crawl",
+                    "Crawl #6: 18 neue Stellen, 5 eingereiht",
+                    "crawl.done",
+                    {"run": 6, "new": 18, "queued": 5},
+                ),
+                (
+                    "run",
+                    "Bewerbungslauf beendet: 3× submitted, 1× needs_input",
+                    "run.finished",
+                    {"counts": {"submitted": 3, "needs_input": 1}},
+                ),
+                (
+                    "status",
+                    "Spreebyte · Platform Engineer – Kubernetes: interview",
+                    "status.changed",
+                    {
+                        "company": "Spreebyte",
+                        "title": "Platform Engineer – Kubernetes",
+                        "status": "interview",
+                    },
+                ),
+                (
+                    "autopilot",
+                    "Autopilot: 18 neue Stellen, 5 eingereiht",
+                    "autopilot.done",
+                    {"new": 18, "queued": 5},
+                ),
+                ("setup", "Einrichtung abgeschlossen", "setup.done", {}),
             )
         ):
-            s.add(Activity(kind=kind, message=msg, ts=now - timedelta(hours=3 + i * 9)))
+            s.add(
+                Activity(
+                    kind=kind,
+                    message=msg,
+                    data={"code": code, "params": params},
+                    ts=now - timedelta(hours=3 + i * 9),
+                )
+            )
 
 
 def main() -> None:

@@ -1001,7 +1001,7 @@ def autopilot(
     r = rt()
     s = r.settings
     count = count or s.autopilot_apply_max
-    record(s, "autopilot", "Autopilot gestartet (Kommandozeile)")
+    record(s, "autopilot", "Autopilot gestartet (Kommandozeile)", code="autopilot.started")
     summary = asyncio.run(crawl_and_queue(r, queue_count=count if apply_jobs else 0))
     console.print(f"Crawl #{summary['run_id']}: {summary['new']} neu, {len(summary['queued'])} eingereiht")
     if apply_jobs and summary["queued"]:
@@ -1011,6 +1011,10 @@ def autopilot(
         "autopilot",
         f"Autopilot fertig: {summary['new']} neu, {len(summary['queued'])} eingereiht",
         summary,
+        code="autopilot.done",
+        new=summary["new"],
+        queued=len(summary["queued"]),
+        started=0,
     )
 
 
