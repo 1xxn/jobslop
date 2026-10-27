@@ -7,9 +7,10 @@ import html
 import re
 import unicodedata
 from html.parser import HTMLParser
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from .config import FilterConfig, RoleConfig, SearchConfig
+from .hosts import is_browser_only
 
 LEVEL_LABEL = {"J": "Junior", "M": "Mid", "O": "Level offen", "S": "Stretch"}
 OTHER = "Other"
@@ -98,11 +99,22 @@ def stack_fit(text: str, skills: list[str]) -> int:
 
 SEGMENT_POINTS = {"big": 3, "tech": 2, "corp": 1, "cons": 0.5, "agency": 0}
 LEVEL_POINTS = {"J": 1, "M": 1, "O": 0.5, "S": -4}
-SCORE_MAX = 10 + 3 * 2 + 3 + 1 + 1  # erste Zielrolle, Stack ●●●, große Firma, passendes Level, in der Nähe
+# Nur im eigenen Browser bewerbbar (Bot-Abfrage der Jobbörse): rutscht in der Liste nach unten
+BROWSER_ONLY_PENALTY = 4.0
+# Erste Zielrolle, Stack ●●●, beste Firmenart, bestes Level, in der Nähe
+SCORE_MAX = 10 + 3 * 2 + max(SEGMENT_POINTS.values()) + max(LEVEL_POINTS.values()) + 1
 
 
 def score_parts(
-    category: str, fit: int, segment: str, level: str, near: bool, where: str, roles: list[str]
+    category: str,
+    fit: int,
+    segment: str,
+    level: str,
+    near: bool,
+    where: str,
+    roles: list[str],
+    *,
+    browser_only: bool = False,
 ) -> list[tuple[str, float]]:
     """Woraus sich der Score zusammensetzt – (Teil, Punkte); das Dashboard erklärt damit jede Zahl."""
     n = max(len(roles), 1)
@@ -117,6 +129,8 @@ def score_parts(
         parts.append(("near", 1.0))
     if where == "R":
         parts.append(("remote", -0.5))
+    if browser_only:
+        parts.append(("browser_only", -BROWSER_ONLY_PENALTY))
     return parts
 
 
@@ -125,6 +139,24 @@ def score(
 ) -> float:
     """Priorität: Zielrolle (bis 10 Punkte, erste Rolle am meisten) + Stack-Match + Firma + Level + Ort."""
     return round(sum(p for _, p in score_parts(category, fit, segment, level, near, where, roles)), 2)
+
+
+def job_score_parts(job: Any, roles: list[str]) -> list[tuple[str, float]]:
+    """Score-Teile einer gespeicherten Stelle – Pipeline, Bewertung, Import und Dashboard rechnen nur hiermit."""
+    return score_parts(
+        job.category,
+        job.fit,
+        job.segment,
+        job.level,
+        bool(job.near and "km" in job.near),
+        job.where,
+        roles,
+        browser_only=is_browser_only(job.target_url),
+    )
+
+
+def job_score(job: Any, roles: list[str]) -> float:
+    return round(sum(p for _, p in job_score_parts(job, roles)), 2)
 
 
 def detect_language(text: str) -> str:

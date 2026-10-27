@@ -18,7 +18,7 @@ import httpx
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from .classify import classify, content_hash, fingerprint, html_to_text, match_key, where_of
+from .classify import classify, content_hash, fingerprint, html_to_text, job_score, match_key, where_of
 from .config import SearchConfig
 from .db import Job, JobSnapshot, session_scope
 
@@ -154,16 +154,29 @@ async def fetch_job(url: str, *, llm: Any = None, render: Any = None, fast_model
         job.description = job.description or content[:20000]
         job.via = "claude"
     if not job.company:
-        host = urlparse(url).hostname or ""
-        job.company = host.removeprefix("www.").split(".")[0].replace("-", " ").title()
+        job.company = company_from_url(url)
     if not job.title:
         raise ValueError("Auf der Seite wurde keine Stellenanzeige erkannt")
     return job
 
 
-def add_fetched_job(db_path: Any, config: SearchConfig, fetched: FetchedJob) -> tuple[int, bool]:
-    """Legt die Stelle an (oder findet sie wieder). Rückgabe: (Job-ID, neu angelegt)."""
-    fp = fingerprint("manual", fetched.url)
+def company_from_url(url: str) -> str:
+    """Notlösung ohne Firmennamen auf der Seite: „jobs.acme-cloud.de“ → „Jobs“ wäre falsch, also der erste Teil
+    nach typischen Karriere-Präfixen."""
+    parts = (urlparse(url).hostname or "").removeprefix("www.").split(".")
+    while len(parts) > 2 and parts[0] in ("jobs", "careers", "karriere", "career", "apply", "boards"):
+        parts = parts[1:]
+    return parts[0].replace("-", " ").title() if parts and parts[0] else "Unbekannt"
+
+
+def add_fetched_job(
+    db_path: Any, config: SearchConfig, fetched: FetchedJob, *, source: str = "manual"
+) -> tuple[int, bool]:
+    """Legt die Stelle an (oder findet sie wieder). Rückgabe: (Job-ID, neu angelegt).
+
+    ``source`` ist „manual“ (Per Link, gemerkt) oder „extension“ (aus der Browser-Erweiterung).
+    """
+    fp = fingerprint(source, fetched.url)
     with session_scope(db_path) as s:
         existing = (
             s.execute(select(Job).where((Job.fingerprint == fp) | (Job.url == fetched.url))).scalars().first()
@@ -182,7 +195,7 @@ def add_fetched_job(db_path: Any, config: SearchConfig, fetched: FetchedJob) -> 
         job = Job(
             fingerprint=fp,
             match_key=match_key(fetched.company, fetched.title),
-            source="manual",
+            source=source,
             company=fetched.company,
             title=fetched.title,
             location=fetched.location,
@@ -197,10 +210,10 @@ def add_fetched_job(db_path: Any, config: SearchConfig, fetched: FetchedJob) -> 
             level=str(meta["level"]),
             segment=str(meta["segment"]),
             fit=int(meta["fit"]),  # type: ignore[call-overload]
-            score=float(meta["score"]),  # type: ignore[arg-type]
             language=str(meta["language"]),
-            starred=True,
+            starred=source == "manual",
         )
+        job.score = job_score(job, config.role_names)
         s.add(job)
         s.flush()
         s.add(JobSnapshot(job=job, change="new", title=job.title, location=job.location))

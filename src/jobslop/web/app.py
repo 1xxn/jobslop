@@ -24,8 +24,8 @@ from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
 
 from .. import __version__, assist
-from ..autopilot import Scheduler, crawl_and_queue, next_run, record
-from ..classify import SCORE_MAX, score_parts
+from ..autopilot import Scheduler, activity, crawl_and_queue, next_run, record
+from ..classify import job_score_parts
 from ..config import (
     EDITABLE_SETTINGS,
     DemoModeError,
@@ -35,7 +35,7 @@ from ..config import (
     save_settings,
     search_config_from_preset,
 )
-from ..crawl.pipeline import BROWSER_ONLY_PENALTY
+from ..crawl.sources import BOARD_SOURCES
 from ..db import (
     Activity,
     Answer,
@@ -50,7 +50,6 @@ from ..db import (
     utcnow,
 )
 from ..guard import ACTIVE_STATES, DONE_STATES, check_job
-from ..hosts import is_browser_only
 from ..notify import notify
 from ..presets import presets_for_ui
 from ..profile import TODO, Profile, Work, normalize_question
@@ -79,6 +78,17 @@ def _iso(d: datetime | None) -> str | None:
     return d.isoformat() + "Z" if d else None
 
 
+def status_activity(job: Job, status: str) -> Activity:
+    return activity(
+        "status",
+        f"{job.company} · {job.title}: {status}",
+        code="status.changed",
+        company=job.company,
+        title=job.title,
+        status=status,
+    )
+
+
 def job_summary(j: Job) -> dict[str, Any]:
     last = j.applications[-1] if j.applications else None
     return {
@@ -96,6 +106,8 @@ def job_summary(j: Job) -> dict[str, Any]:
         "queued": j.queued,
         "starred": j.starred,
         "source": j.source,
+        # Firmen-Board (Greenhouse, Ashby …): die Adresse ist das Board selbst – sonst zeigt die UI, wohin es geht
+        "board": j.source.split(":", 1)[0] in BOARD_SOURCES,
         "url": j.url,
         "posted": j.posted,
         "first_seen": _iso(j.first_seen),
@@ -228,11 +240,18 @@ class Context:
         self.autopilot_running = False
         self.tasks: set[asyncio.Task[Any]] = set()
         self.crawl_idle = asyncio.Event()
+        self._llm: tuple[Settings, Any] | None = None
         self.crawl_idle.set()
 
     @property
     def db(self) -> Path:
         return self.settings.db_path
+
+    def llm(self) -> Any:
+        """Claude Code einmal pro Einstellungsstand suchen – die Browser-Erweiterung fragt bei jedem Formularschritt."""
+        if self._llm is None or self._llm[0] is not self.settings:
+            self._llm = (self.settings, self.runtime().llm())
+        return self._llm[1]
 
     def runtime(self) -> Runtime:
         """Stand von der Platte; solange Profil/Suche noch nicht gespeichert sind, gilt der Startzustand."""
@@ -319,7 +338,6 @@ class Context:
                 code="autopilot.done",
                 new=summary["new"],
                 queued=len(summary["queued"]),
-                started=int(started),
             )
             await self.notify("jobslop Autopilot", text)
         finally:
@@ -516,7 +534,7 @@ def create_app(runtime: Runtime) -> FastAPI:
     @app.post("/api/assist/step")
     async def assist_step(request: Request, body: assist.StepIn) -> dict[str, Any]:
         paired(request)
-        return await assist.step(ctx.runtime(), body)
+        return await assist.step(ctx.runtime(), body, ctx.llm())
 
     @app.post("/api/assist/result")
     def assist_result(request: Request, body: assist.ResultIn) -> dict[str, Any]:
@@ -752,17 +770,7 @@ def create_app(runtime: Runtime) -> FastAPI:
                 raise HTTPException(404)
             config = ctx.runtime().config
             verdict = check_job(s, j, config.limits)
-            parts = score_parts(
-                j.category,
-                j.fit,
-                j.segment,
-                j.level,
-                bool(j.near and "km" in j.near),
-                j.where,
-                config.role_names,
-            )
-            if is_browser_only(j.target_url):
-                parts.append(("browser_only", -BROWSER_ONLY_PENALTY))
+            parts = job_score_parts(j, config.role_names)
             if abs(rest := round(j.score - sum(p for _, p in parts), 2)) >= 0.1:
                 parts.append(("other", rest))  # z. B. Import mit eigener Einordnung
             return job_summary(j) | {
@@ -781,7 +789,6 @@ def create_app(runtime: Runtime) -> FastAPI:
                     "params": verdict.params,
                 },
                 "score_parts": [{"key": k, "points": p} for k, p in parts],
-                "score_max": SCORE_MAX,
                 "history": [
                     {"seen_at": _iso(sn.seen_at), "change": sn.change, "diff": sn.diff} for sn in j.snapshots
                 ],
@@ -837,20 +844,7 @@ def create_app(runtime: Runtime) -> FastAPI:
                     )
                 )
             j.queued = False
-            s.add(
-                Activity(
-                    kind="status",
-                    message=f"{j.company} · {j.title}: {body.status}",
-                    data={
-                        "code": "status.changed",
-                        "params": {
-                            "company": j.company,
-                            "title": j.title,
-                            "status": MARK.get(body.status, body.status),
-                        },
-                    },
-                )
-            )
+            s.add(status_activity(j, MARK.get(body.status, body.status)))
             s.flush()
             return job_summary(j)
 
@@ -911,7 +905,6 @@ def create_app(runtime: Runtime) -> FastAPI:
             "run",
             f"Bewerbungslauf gestartet ({ctx.runner.label}, {mode})",
             code="run.started",
-            jobs=len(body.job_ids),
             mode=mode,
         )
         return ctx.runner.state()
@@ -1066,16 +1059,7 @@ def create_app(runtime: Runtime) -> FastAPI:
                 a.stage_changed_at = utcnow()
                 if body.status in ("offer", "rejected"):
                     a.follow_up_at = None
-                s.add(
-                    Activity(
-                        kind="status",
-                        message=f"{a.job.company} · {a.job.title}: {body.status}",
-                        data={
-                            "code": "status.changed",
-                            "params": {"company": a.job.company, "title": a.job.title, "status": body.status},
-                        },
-                    )
-                )
+                s.add(status_activity(a.job, body.status))
             if body.notes is not None:
                 a.notes = body.notes
             if body.clear_follow_up:

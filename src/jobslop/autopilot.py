@@ -24,6 +24,17 @@ log = logging.getLogger(__name__)
 Notify = Callable[[str, str], Awaitable[Any]]
 
 
+def activity(
+    kind: str, message: str, data: dict[str, Any] | None = None, *, code: str = "", **params: Any
+) -> Activity:
+    """Eintrag im Aktivitätsprotokoll. ``message`` ist deutscher Klartext (CLI, ältere Einträge); ``code`` und
+    ``params`` übersetzt das Dashboard (Schlüssel ``be.<code>`` in frontend/src/lib/messages.ts)."""
+    payload = dict(data or {})
+    if code:
+        payload |= {"code": code, "params": params}
+    return Activity(kind=kind, message=message, data=payload)
+
+
 def record(
     settings: Settings,
     kind: str,
@@ -33,13 +44,8 @@ def record(
     code: str = "",
     **params: Any,
 ) -> None:
-    """Eintrag im Aktivitätsprotokoll. ``message`` ist deutscher Klartext (CLI, ältere Einträge); ``code`` und
-    ``params`` übersetzt das Dashboard (Schlüssel ``be.<code>`` in frontend/src/lib/messages.ts)."""
-    payload = dict(data or {})
-    if code:
-        payload |= {"code": code, "params": params}
     with session_scope(settings.db_path) as s:
-        s.add(Activity(kind=kind, message=message, data=payload))
+        s.add(activity(kind, message, data, code=code, **params))
 
 
 async def crawl_and_queue(runtime: Runtime, *, queue_count: int) -> dict[str, Any]:

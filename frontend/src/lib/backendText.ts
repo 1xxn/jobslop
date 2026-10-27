@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { useI18n } from "./i18n";
-import { type MessageKey, messages } from "./messages";
+import { hasMessage, type MessageKey } from "./messages";
 
 /**
  * Meldungen aus dem Backend in der gewählten Sprache.
@@ -13,8 +13,8 @@ export function useBackendText() {
   const { t } = useI18n();
   return useCallback(
     (code: string | undefined, params: Record<string, unknown> | undefined, fallback: string): string => {
-      const key = `be.${code}` as MessageKey;
-      if (!code || !(key in messages.de)) return fallback;
+      const key = `be.${code}`;
+      if (!code || !hasMessage(key)) return fallback;
       const vars: Record<string, string | number> = {};
       for (const [name, value] of Object.entries(params ?? {})) {
         if (name === "status" && typeof value === "string") vars[name] = t(`status.${value}` as MessageKey);

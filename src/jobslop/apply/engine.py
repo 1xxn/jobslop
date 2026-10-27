@@ -9,7 +9,8 @@ import logging
 import random
 import re
 import traceback
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,7 @@ from .planner import (
     PagePlan,
     PlanInput,
     Planner,
+    confirmation_excerpt,
     guard_submit_clicks,
 )
 from .prepare import dismiss_cookie_banners, reveal_lazy_content, try_autofill
@@ -157,14 +159,7 @@ class ApplyEngine:
         self.mode = mode
         self.on_event = on_event or (lambda _m: None)
         self._kept_page: Any = None  # zuletzt im Testlauf ausgefüllte Seite (bleibt zum Nachsehen offen)
-        base = settings.profile_path.parent
-        self.files = Files(
-            cv=profile.cv_path(base),
-            cv_en=profile.documents.resolve(profile.documents.cv_en, base),
-            certificates=[
-                p for c in profile.documents.certificates if (p := profile.documents.resolve(c, base))
-            ],
-        )
+        self.files = Files.from_profile(profile, settings.profile_path.parent)
 
     # ------------------------------------------------------------------ public
     async def apply(self, job_id: int, *, force: bool = False) -> Outcome:
@@ -183,18 +178,9 @@ class ApplyEngine:
             app = Application(job=job, mode=self.mode, status="running")
             s.add(app)
             s.flush()
-            artdir = self.settings.artifacts_dir / f"{app.id:04d}-{slugify(job.company)}-{slugify(job.title)}"
-            artdir.mkdir(parents=True, exist_ok=True)
+            artdir = artifacts_dir(self.settings, app.id, job)
             app.artifacts_dir = str(artdir)
-            ctx = JobContext(
-                id=job.id,
-                company=job.company,
-                title=job.title,
-                location=job.location,
-                url=job.target_url,
-                description=job.description or job.notes,
-                language=job.language,
-            )
+            ctx = JobContext.from_job(job)
             app_id = app.id
             job.queued = False
 
@@ -265,7 +251,7 @@ class ApplyEngine:
 
             if run.submit_clicked and _CONFIRM_RX.search(state.text):
                 await save_screenshot(page, run.artdir / "confirmation.jpg")
-                return "submitted", self._confirmation_excerpt(state.text), page
+                return "submitted", confirmation_excerpt(state.text), page
 
             if state.captcha_visible and state.url not in run.captcha_ack:
                 run.captcha_ack.add(state.url)
@@ -329,7 +315,7 @@ class ApplyEngine:
 
             if plan.page_kind == "confirmation":
                 if run.submit_clicked:
-                    return "submitted", self._confirmation_excerpt(state.text), page
+                    return "submitted", confirmation_excerpt(state.text), page
                 raise Park(
                     "needs_review",
                     "Bestätigungsseite ohne eigenes Absenden – bitte prüfen, ob schon beworben",
@@ -348,15 +334,7 @@ class ApplyEngine:
                 failures = []
                 continue
 
-            wants_letter = [
-                a
-                for a in plan.actions
-                if a.action != "skip" and a.value.strip().lower() in ("@cover_letter", "@cover_letter_pdf")
-            ]
-            if wants_letter and self.profile.documents.cover_letter == "none":
-                for a in wants_letter:  # Anschreiben abgeschaltet: diese Felder auslassen
-                    a.action = "skip"
-            elif wants_letter:
+            if wants_cover_letter(plan, self.profile):
                 await self._ensure_cover_letter(run)
 
             self._guard_submit_clicks(run, state, plan)
@@ -527,44 +505,30 @@ class ApplyEngine:
         self._event(run.app_id, "answers", f"{len(answers)} Antworten gespeichert")
 
     async def _ensure_cover_letter(self, run: _Run) -> None:
-        if self.files.cover_letter_text or self.profile.documents.cover_letter == "none":
-            return
-        custom = self.profile.documents.resolve(
-            self.profile.documents.cover_letter, self.settings.profile_path.parent
-        )
-        if custom and custom.exists():
-            self.files.cover_letter_pdf = custom
-            return
-        if self.llm is None:
-            raise Park(
-                "needs_input",
-                "Anschreiben verlangt, aber Claude Code ist nicht verfügbar (offline) – documents.cover_letter "
-                "auf eine PDF setzen oder mit Claude Code starten",
-            )
-        letter = await write_cover_letter(
+        @contextlib.asynccontextmanager
+        async def pdf_context() -> AsyncIterator[Any]:
+            ctx = await self.browser.pdf_context()
+            try:
+                yield ctx
+            finally:
+                await ctx.close()
+
+        created, problem = await ensure_cover_letter(
             self.llm,
             self.profile,
             run.job,
-            self.profile.preferences.cover_letter_language,
+            run.artdir,
+            self.files,
+            pdf_context,
             cv_text=getattr(self.planner, "cv_text", ""),
-            cv_file=getattr(self.planner, "cv_file", None) or self.files.cv,
+            cv_file=getattr(self.planner, "cv_file", None),
         )
-        text = cover_letter_text(letter, self.profile)
-        (run.artdir / "anschreiben.txt").write_text(text, encoding="utf-8")
-        pdf_path = (
-            run.artdir
-            / f"Anschreiben_{slugify(self.profile.personal.full_name)}_{slugify(run.job.company)}.pdf"
-        )
-        ctx = await self.browser.pdf_context()
-        try:
-            await render_pdf(ctx, cover_letter_html(letter, self.profile, run.job), pdf_path)
-        finally:
-            await ctx.close()
-        self.files.cover_letter_text = text
-        self.files.cover_letter_pdf = pdf_path
-        self._event(
-            run.app_id, "cover_letter", f"Anschreiben erstellt ({letter.language})", {"pdf": str(pdf_path)}
-        )
+        if problem:
+            raise Park("needs_input", problem)
+        if created:
+            self._event(
+                run.app_id, "cover_letter", "Anschreiben erstellt", {"pdf": str(self.files.cover_letter_pdf)}
+            )
 
     async def _handoff(self, run: _Run, page: Any, title: str, message: str) -> Any:
         self._event(run.app_id, "handoff", message)
@@ -605,8 +569,7 @@ class ApplyEngine:
     @staticmethod
     def _guard_submit_clicks(run: _Run, state: PageState, plan: PagePlan) -> None:
         """Abgesendet wird nur über ``_submit`` (Freigabe, Testlauf, Doppel-Schutz) – nie als Nebenbei-Klick."""
-        filled_before = any(r["ok"] and r["action"] != "click" for r in run.filled)
-        run.history += guard_submit_clicks(state, plan, filled_before=filled_before)
+        run.history += guard_submit_clicks(state, plan, run.filled)
 
     def _loop_guard(self, run: _Run, state: PageState) -> None:
         sig = (
@@ -630,14 +593,6 @@ class ApplyEngine:
             return "Bitte löse das CAPTCHA im Browser."
         return f"Bitte im Browser übernehmen: {plan.summary}"
 
-    @staticmethod
-    def _confirmation_excerpt(text: str) -> str:
-        m = _CONFIRM_RX.search(text)
-        if not m:
-            return text[:300]
-        start = m.start()
-        return re.sub(r"\s+", " ", text[start : m.end() + 200]).strip()
-
     def _usage_delta(self, before: dict[str, Any]) -> dict[str, Any]:
         if not self.llm:
             return {}
@@ -651,9 +606,7 @@ class ApplyEngine:
         }
 
     def _event(self, app_id: int, kind: str, message: str, data: dict[str, Any] | None = None) -> None:
-        log.info("[app %s] %s: %s", app_id, kind, message)
-        with session_scope(self.settings.db_path) as s:
-            s.add(ApplicationEvent(application_id=app_id, kind=kind, message=message[:2000], data=data or {}))
+        log_event(self.settings.db_path, app_id, kind, message, data)
 
 
 # --------------------------------------------------------------------------- Batch
@@ -683,6 +636,74 @@ async def run_batch(
             if attempted < max_count and job_id != job_ids[-1]:
                 await asyncio.sleep(random.uniform(min_delay, min_delay * 1.6))
     return outcomes
+
+
+def log_event(
+    db_path: Path, app_id: int, kind: str, message: str, data: dict[str, Any] | None = None
+) -> None:
+    """Eintrag im Verlauf einer Bewerbung (Engine und Browser-Erweiterung)."""
+    log.info("[app %s] %s: %s", app_id, kind, message)
+    with session_scope(db_path) as s:
+        s.add(ApplicationEvent(application_id=app_id, kind=kind, message=message[:2000], data=data or {}))
+
+
+def artifacts_dir(settings: Settings, app_id: int, job: Job) -> Path:
+    """Ordner für Screenshots, Pläne und Anschreiben einer Bewerbung."""
+    path = settings.artifacts_dir / f"{app_id:04d}-{slugify(job.company)}-{slugify(job.title)}"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+_LETTER_TOKENS = ("@cover_letter", "@cover_letter_pdf")
+
+
+def wants_cover_letter(plan: PagePlan, profile: Profile) -> bool:
+    """Verlangt das Formular ein Anschreiben? Ist es abgeschaltet, werden diese Felder ausgelassen."""
+    letter = [a for a in plan.actions if a.action != "skip" and a.value.strip().lower() in _LETTER_TOKENS]
+    if letter and profile.documents.cover_letter == "none":
+        for a in letter:
+            a.action = "skip"
+        return False
+    return bool(letter)
+
+
+async def ensure_cover_letter(
+    llm: LLM | None,
+    profile: Profile,
+    job: JobContext,
+    artdir: Path,
+    files: Files,
+    pdf_context: Callable[[], AbstractAsyncContextManager[Any]],
+    *,
+    cv_text: str = "",
+    cv_file: Path | None = None,
+) -> tuple[bool, str]:
+    """Anschreiben schreiben (Claude) und als PDF ablegen, falls noch keins da ist.
+
+    Rückgabe: (neu erstellt, Hinderungsgrund). Eine vorhandene eigene PDF im Profil gilt als Anschreiben.
+    """
+    if files.cover_letter_text or files.cover_letter_pdf or profile.documents.cover_letter == "none":
+        return False, ""
+    if llm is None:
+        return False, (
+            "Anschreiben verlangt, aber Claude Code ist nicht verfügbar (offline) – documents.cover_letter "
+            "auf eine PDF setzen oder mit Claude Code starten"
+        )
+    letter = await write_cover_letter(
+        llm,
+        profile,
+        job,
+        profile.preferences.cover_letter_language,
+        cv_text=cv_text,
+        cv_file=cv_file or files.cv,
+    )
+    files.cover_letter_text = cover_letter_text(letter, profile)
+    (artdir / "anschreiben.txt").write_text(files.cover_letter_text, encoding="utf-8")
+    pdf = artdir / f"Anschreiben_{slugify(profile.personal.full_name)}_{slugify(job.company)}.pdf"
+    async with pdf_context() as ctx:
+        await render_pdf(ctx, cover_letter_html(letter, profile, job), pdf)
+    files.cover_letter_pdf = pdf
+    return True, ""
 
 
 def remember_answer(session: Any, question: str, answer: str) -> None:

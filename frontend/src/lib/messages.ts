@@ -162,7 +162,6 @@ const de = {
   "autopilot.off_hint": "Aus – jobslop arbeitet nur auf Knopfdruck",
   "autopilot.run_now": "Jetzt ausführen",
   "autopilot.started": "Autopilot gestartet",
-  "autopilot.configure": "Zeitplan",
   "autopilot.enable": "Autopilot aktiv",
   "autopilot.enable_hint": "Läuft an den gewählten Tagen zur gewählten Uhrzeit.",
   "autopilot.days": "Tage",
@@ -226,6 +225,10 @@ const de = {
   "score.remote": "Remote (leichter Abzug)",
   "score.browser_only": "Nur im eigenen Browser bewerbbar",
   "score.other": "Sonstige Anpassung",
+  "source.generic": "Karriereseite",
+  "source.extension": "Browser-Erweiterung",
+  "source.import": "Import",
+  "source.manual": "Per Link",
   "kind.crawl": "Suche",
   "kind.run": "Bewerben",
   "kind.autopilot": "Autopilot",
@@ -780,7 +783,6 @@ const en: Record<MessageKey, string> = {
   "autopilot.off_hint": "Off – jobslop only works when you tell it to",
   "autopilot.run_now": "Run now",
   "autopilot.started": "Autopilot started",
-  "autopilot.configure": "Schedule",
   "autopilot.enable": "Autopilot enabled",
   "autopilot.enable_hint": "Runs on the selected days at the selected time.",
   "autopilot.days": "Days",
@@ -844,6 +846,10 @@ const en: Record<MessageKey, string> = {
   "score.remote": "Remote (small deduction)",
   "score.browser_only": "Only in your own browser",
   "score.other": "Other adjustment",
+  "source.generic": "Careers page",
+  "source.extension": "Browser extension",
+  "source.import": "Import",
+  "source.manual": "Added by link",
   "kind.crawl": "Search",
   "kind.run": "Applying",
   "kind.autopilot": "Autopilot",
@@ -1234,3 +1240,8 @@ const en: Record<MessageKey, string> = {
 };
 
 export const messages: Record<"de" | "en", Record<MessageKey, string>> = { de, en };
+
+/** Gibt es diesen Text? Für Schlüssel, die erst zur Laufzeit entstehen (Backend-Codes, Aktivitätsarten). */
+export function hasMessage(key: string): key is MessageKey {
+  return key in de;
+}

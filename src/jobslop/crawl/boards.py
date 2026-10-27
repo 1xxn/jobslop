@@ -9,6 +9,7 @@ Name womöglich einer anderen Firma).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import unicodedata
@@ -21,27 +22,13 @@ from sqlalchemy import select
 from ..classify import match_key
 from ..db import Board, session_scope, utcnow
 from ..guard import company_key
-from .base import RawPosting
-from .sources import (
-    AshbySource,
-    GreenhouseSource,
-    LeverSource,
-    PersonioSource,
-    RecruiteeSource,
-    WorkableSource,
-    gather_limited,
-)
+from .base import RawPosting, single_attempt
+from .sources import BOARD_SOURCES, gather_limited
 
 log = logging.getLogger(__name__)
 
-SOURCE_TYPES: dict[str, Any] = {
-    "greenhouse": GreenhouseSource,
-    "ashby": AshbySource,
-    "lever": LeverSource,
-    "recruitee": RecruiteeSource,
-    "workable": WorkableSource,
-    "personio": PersonioSource,
-}
+# In dieser Reihenfolge geraten (SmartRecruiters-IDs lassen sich nicht sinnvoll aus dem Namen ableiten)
+DISCOVERABLE = ("greenhouse", "ashby", "lever", "recruitee", "workable", "personio")
 RECHECK_DAYS = 30  # Firmen ohne Board erst nach so vielen Tagen erneut prüfen
 
 _LEGAL_RX = re.compile(
@@ -60,54 +47,32 @@ def slug_candidates(company: str) -> list[str]:
     return list(dict.fromkeys(s for s in ("".join(words), "-".join(words)) if len(s) >= 2))
 
 
-async def _board_titles(client: httpx.AsyncClient, kind: str, slug: str) -> list[str] | None:
-    """Stellentitel eines Boards – oder None, wenn es das Board nicht gibt. Ohne Wiederholungen: es wird geraten."""
-    urls = {
-        "greenhouse": [f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"],
-        "ashby": [f"https://api.ashbyhq.com/posting-api/job-board/{slug}"],
-        "lever": [
-            f"https://api.lever.co/v0/postings/{slug}?mode=json",
-            f"https://api.eu.lever.co/v0/postings/{slug}?mode=json",
-        ],
-        "recruitee": [f"https://{slug}.recruitee.com/api/offers/"],
-        "workable": [f"https://apply.workable.com/api/v1/widget/accounts/{slug}"],
-        "personio": [f"https://{slug}.jobs.personio.de/xml"],
-    }[kind]
-    for url in urls:
+async def _probe(client: httpx.AsyncClient, kind: str, slug: str, company: str) -> list[RawPosting] | None:
+    """Fragt ein geratenes Board über seine Quelle ab – ohne Wiederholungen. None = gibt es nicht."""
+    with single_attempt():
         try:
-            resp = await client.get(url, timeout=10)
-        except httpx.HTTPError:
-            continue
-        if resp.status_code != 200:
-            continue
-        if kind == "personio":
-            return re.findall(r"<name>([^<]+)</name>", resp.text) if "<workzag-jobs" in resp.text else None
-        try:
-            data = resp.json()
-        except ValueError:
-            continue
-        items = data if isinstance(data, list) else data.get({"recruitee": "offers"}.get(kind, "jobs"), [])
-        if isinstance(items, list):
-            return [str(i.get("title") or i.get("text") or "") for i in items if isinstance(i, dict)]
-    return None
+            return await board_source(kind, slug, company).fetch(client)
+        except Exception:  # 404, Zeitüberschreitung, kein XML …: kein Board unter diesem Namen
+            return None
 
 
 async def find_board(
     client: httpx.AsyncClient, company: str, titles: list[str]
-) -> tuple[str, str, int] | None:
-    """Sucht ein Board, auf dem mindestens eine der Stellen steht. Rückgabe: (Art, Name, Anzahl Stellen)."""
+) -> tuple[str, str, list[RawPosting]] | None:
+    """Sucht ein Board, auf dem mindestens eine der Stellen steht. Alle Kandidaten parallel, Vorrang nach
+    Reihenfolge. Rückgabe: (Art, Name, Stellen des Boards) – die Stellen werden gleich weiterverwendet."""
+    candidates = [(slug, kind) for slug in slug_candidates(company) for kind in DISCOVERABLE]
+    results = await asyncio.gather(*(_probe(client, kind, slug, company) for slug, kind in candidates))
     wanted = {match_key(company, t) for t in titles}
-    for slug in slug_candidates(company):
-        for kind in SOURCE_TYPES:
-            found = await _board_titles(client, kind, slug)
-            if found and wanted & {match_key(company, t) for t in found}:
-                return kind, slug, len(found)
+    for (slug, kind), postings in zip(candidates, results, strict=True):
+        if postings and wanted & {match_key(company, p.title) for p in postings}:
+            return kind, slug, postings
     return None
 
 
 def board_source(kind: str, slug: str, company: str) -> Any:
     # Der Firmenname aus der Jobbörse sorgt dafür, dass beide Einträge dieselbe Stelle ergeben (match_key)
-    return SOURCE_TYPES[kind](f"{slug}:{company}")
+    return BOARD_SOURCES[kind](f"{slug}:{company}")
 
 
 def known_board_sources(db_path: Any, skip: set[str]) -> list[Any]:
@@ -120,8 +85,11 @@ def known_board_sources(db_path: Any, skip: set[str]) -> list[Any]:
 
 async def discover(
     client: httpx.AsyncClient, db_path: Any, postings: list[RawPosting], *, limit: int
-) -> list[Any]:
-    """Prüft bis zu ``limit`` noch unbekannte Firmen aus Jobbörsen-Treffern und gibt Quellen für neue Boards zurück."""
+) -> list[tuple[Any, list[RawPosting]]]:
+    """Prüft bis zu ``limit`` noch unbekannte Firmen aus Jobbörsen-Treffern.
+
+    Rückgabe: (Quelle, ihre Stellen) für neu gefundene Boards – schon abgefragt, nicht noch einmal laden.
+    """
     by_company: dict[str, tuple[str, list[str]]] = {}
     for p in postings:
         key = company_key(p.company)
@@ -135,18 +103,17 @@ async def discover(
     todo = [(key, name, titles) for key, (name, titles) in by_company.items() if key not in checked][:limit]
     if not todo:
         return []
-    results = await gather_limited([find_board(client, name, titles) for _, name, titles in todo], limit=6)
+    results = await gather_limited([find_board(client, name, titles) for _, name, titles in todo], limit=4)
     found = []
     with session_scope(db_path) as s:
+        rows = {b.company_key: b for b in s.execute(select(Board)).scalars()}
         for (key, name, _titles), res in zip(todo, results, strict=True):
             hit = None if isinstance(res, BaseException) else res
-            row = s.execute(select(Board).where(Board.company_key == key)).scalars().first()
-            if row is None:
-                row = Board(company_key=key, company=name)
-                s.add(row)
+            row = rows.get(key) or Board(company_key=key, company=name)
+            s.add(row)
             row.company, row.checked_at = name, utcnow()
-            row.kind, row.slug, row.jobs = hit or ("", "", 0)
+            row.kind, row.slug, row.jobs = (hit[0], hit[1], len(hit[2])) if hit else ("", "", 0)
             if hit:
-                found.append(board_source(row.kind, row.slug, name))
+                found.append((board_source(row.kind, row.slug, name), hit[2]))
                 log.info("Board gefunden: %s → %s:%s (%s Stellen)", name, row.kind, row.slug, row.jobs)
     return found
