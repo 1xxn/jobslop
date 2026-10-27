@@ -19,6 +19,9 @@ async def notify(
     settings: Settings, title: str, message: str, *, url: str = "", priority: str = "default"
 ) -> int:
     """Sendet an alle konfigurierten Kanäle. Gibt die Anzahl erfolgreicher Zustellungen zurück."""
+    if settings.demo:
+        log.info("Demo-Modus – Benachrichtigung nicht gesendet: %s", title)
+        return 0
     sent = 0
     async with httpx.AsyncClient(timeout=10) as client:
         if settings.notify_ntfy_url:

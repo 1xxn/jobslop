@@ -6,13 +6,17 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
+import pytest
 import respx
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from jobslop.apply.engine import ApplyEngine
 from jobslop.apply.extract import PageState
 from jobslop.apply.planner import JobContext, LLMPlanner, PagePlan, PlanInput
 from jobslop.autopilot import next_run, record
+from jobslop.config import DemoModeError
+from jobslop.crawl.pipeline import run_crawl
 from jobslop.db import Answer, Application, Job, Prompt, session_scope
 from jobslop.importer import import_jobs
 from jobslop.jobpage import parse_html
@@ -35,6 +39,34 @@ def test_api_rejects_foreign_sites(settings, config, profile):
     assert client.post("/api/crawl", headers={"X-Jobslop": ""}).status_code == 403  # CSRF
     assert client.get("/api/status", headers={"Host": "evil.example"}).status_code == 403  # DNS-Rebinding
     assert client.get("/api/status").status_code == 200
+
+
+async def test_demo_mode_blocks_real_actions(settings, config, profile):
+    """Ein Demo-Ordner darf nie echt crawlen, bewerben oder Nachrichten verschicken."""
+    settings.demo = True
+    settings.autopilot_enabled = True
+    settings.notify_webhook_url = "https://hooks.example/abc"
+    client = _client(settings, config, profile)
+    assert client.get("/api/status").json()["demo"] is True
+    for path, body in (
+        ("/api/crawl", None),
+        ("/api/apply", {"job_ids": [1], "mode": "dry-run"}),
+        ("/api/autopilot/run", None),
+        ("/api/jobs", {"url": "https://example.com/jobs/1"}),
+    ):
+        r = client.post(path, json=body)
+        assert r.status_code == 409 and "Demo-Modus" in r.json()["detail"], (path, r.text)
+    assert next_run(settings) is None
+    with respx.mock(assert_all_called=False) as router:
+        hook = router.post("https://hooks.example/abc").respond(204)
+        assert await notify(settings, "t", "m") == 0
+        assert not hook.called
+    with pytest.raises(DemoModeError):
+        await run_crawl(settings, config)
+    engine = ApplyEngine.__new__(ApplyEngine)
+    engine.settings = settings
+    with pytest.raises(DemoModeError):
+        await engine.apply(1)
 
 
 def test_jobs_pipeline_and_stats(settings, config, profile):

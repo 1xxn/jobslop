@@ -25,7 +25,15 @@ from sqlalchemy import func, select
 
 from .. import __version__
 from ..autopilot import Scheduler, crawl_and_queue, next_run, record
-from ..config import EDITABLE_SETTINGS, SearchConfig, Settings, save_settings, search_config_from_preset
+from ..config import (
+    EDITABLE_SETTINGS,
+    DemoModeError,
+    SearchConfig,
+    Settings,
+    ensure_not_demo,
+    save_settings,
+    search_config_from_preset,
+)
 from ..db import (
     Activity,
     Answer,
@@ -241,6 +249,7 @@ class Context:
     async def start_crawl(self, *, queue_count: int = 0) -> bool:
         if self.crawl["running"]:
             return False
+        ensure_not_demo(self.settings, "Crawlen")
         self.crawl.update(running=True, started_at=_iso(utcnow()))
         self.crawl_idle.clear()
 
@@ -360,6 +369,10 @@ def create_app(runtime: Runtime) -> FastAPI:
     app = FastAPI(title="jobslop", version=__version__, docs_url=None, redoc_url=None, lifespan=lifespan)
     app.state.ctx = ctx
 
+    @app.exception_handler(DemoModeError)
+    async def demo_mode(_request: Request, exc: DemoModeError) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=409)
+
     @app.middleware("http")
     async def local_only(request: Request, call_next):
         host = (request.headers.get("host") or "").rsplit(":", 1)[0].lower()
@@ -400,6 +413,7 @@ def create_app(runtime: Runtime) -> FastAPI:
         return {
             "version": __version__,
             "setup_completed": s.setup_completed,
+            "demo": s.demo,
             "prompts": prompts,
             "runner": runner,
             "crawl": ctx.crawl,
@@ -564,7 +578,7 @@ def create_app(runtime: Runtime) -> FastAPI:
         ctx.settings = save_settings(ctx.settings, {"setup_completed": True})
         ctx.runner.settings = ctx.settings
         record(ctx.settings, "setup", "Einrichtung abgeschlossen")
-        started = await ctx.start_crawl() if start_crawl else False
+        started = await ctx.start_crawl() if start_crawl and not ctx.settings.demo else False
         return {"ok": True, "crawl_started": started}
 
     # ------------------------------------------------------------------ Stellen
@@ -625,6 +639,7 @@ def create_app(runtime: Runtime) -> FastAPI:
     async def add_job(body: UrlIn) -> dict[str, Any]:
         from ..jobpage import add_fetched_job, fetch_job
 
+        ensure_not_demo(ctx.settings, "Stelle per Link laden")
         rt = ctx.runtime()
         try:
             fetched = await fetch_job(body.url.strip(), llm=rt.llm(), fast_model=ctx.settings.llm_model_fast)
@@ -829,6 +844,7 @@ def create_app(runtime: Runtime) -> FastAPI:
     async def autopilot_run() -> dict[str, Any]:
         if ctx.autopilot_running:
             raise HTTPException(409, "Autopilot läuft bereits")
+        ensure_not_demo(ctx.settings, "Autopilot")
         ctx.spawn(ctx.run_autopilot())
         return {"started": True}
 

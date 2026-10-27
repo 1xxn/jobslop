@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import random
 import shutil
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 from jobslop.classify import fingerprint, match_key
@@ -92,9 +92,11 @@ def build(home: Path, *, seed: int = 7) -> None:
     profile.save(settings.profile_path)
     config = default_search_config()
     config.save(settings.search_path)
-    # Autopilot an, aber erst in zwei Stunden fällig – ein Demo-Server soll nie echt crawlen
-    later = (datetime.now() + timedelta(hours=2)).strftime("%H:00")
-    save_settings(settings, {"setup_completed": True, "autopilot_enabled": True, "autopilot_time": later})
+    # Autopilot aus und Demo-Modus an: ein Demo-Server darf nie echt crawlen, bewerben oder Nachrichten senden.
+    # „demo“ ist im Dashboard nicht änderbar und steht deshalb direkt in settings.toml.
+    save_settings(settings, {"setup_completed": True, "autopilot_enabled": False, "autopilot_time": "08:00"})
+    with settings.settings_path.open("a", encoding="utf-8") as fh:
+        fh.write("demo = true\n")
     roles = config.role_names
     now = utcnow()
 

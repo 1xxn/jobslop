@@ -2,6 +2,7 @@ import {
   Activity,
   BellRing,
   Briefcase,
+  FlaskConical,
   LayoutDashboard,
   ListChecks,
   Monitor,
@@ -42,6 +43,12 @@ export function AppShell() {
         <div className="mb-5 flex items-center justify-between lg:hidden">
           <Logo />
         </div>
+        {status?.demo && (
+          <div className="mb-6 flex items-center gap-3 rounded-lg border border-border bg-surface-2 px-4 py-3 text-[0.875rem]">
+            <FlaskConical className="size-4 shrink-0 text-fg-muted" />
+            <span className="font-medium">{t("shell.demo")}</span>
+          </div>
+        )}
         {waiting > 0 && location.pathname !== "/" && (
           <Link
             to="/"

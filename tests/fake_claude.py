@@ -31,7 +31,7 @@ def opt(name: str) -> str:
 
 record = {
     "args": args,
-    "stdin": sys.stdin.read(),
+    "stdin": sys.stdin.buffer.read().decode("utf-8"),  # wie Claude Code: UTF-8, auch unter Windows
     "cwd": os.getcwd(),
     "files": sorted(os.listdir(".")),
     "api_key_seen": "ANTHROPIC_API_KEY" in os.environ,

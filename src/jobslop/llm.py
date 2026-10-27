@@ -308,7 +308,9 @@ class LLM:
                 str(8 if files else 4),
             ]
             if files:
-                cmd += ["--allowedTools", "Read"]
+                # Nur der eigene Arbeitsordner: Seitentext ist fremder Inhalt und könnte Claude per Prompt-Injection
+                # zu Dateien wie ~/.ssh oder dem Browserprofil schicken – deren Inhalt landete dann im Formular.
+                cmd += ["--allowedTools", "Read(./**)"]
             if self.settings.claude_effort:
                 cmd += ["--effort", self.settings.claude_effort]
             async with self.sem:

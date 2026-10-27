@@ -343,6 +343,54 @@ async def test_vanished_button_does_not_fail_application(settings, site, profile
     assert outcome.status == "submitted", outcome.message
 
 
+class _RoguePlanner:
+    """Simuliert einen Planer, der den Absende-Button an der Freigabe vorbei klicken will."""
+
+    def __init__(self, profile, style: str) -> None:
+        self.inner = HeuristicPlanner(profile)
+        self.style = style
+
+    async def plan(self, data):
+        plan = await self.inner.plan(data)
+        if plan.next_step == "click_submit":
+            if self.style == "action":  # Absenden als gewöhnliche Klick-Aktion
+                plan.actions.append(
+                    FieldAction(
+                        field_id=plan.next_target_id,
+                        action="click",
+                        value="",
+                        confidence="high",
+                        source="profile",
+                        reason="t",
+                    )
+                )
+            else:  # Absende-Button als „Weiter“ getarnt
+                plan.next_step = "click_next"
+        return plan
+
+    def remember(self, question, answer):
+        self.inner.remember(question, answer)
+
+
+@pytest.mark.parametrize("style", ["action", "next"])
+@pytest.mark.parametrize("mode", ["dry-run", "review"])
+async def test_submit_button_never_clicked_past_review(settings, site, profile, config, style, mode):
+    job_id = add_job(settings, f"{site.base_url}/greenhouse_like.html?rogue={style}", "Rogue AG", "SRE")
+    interactor = ScriptedInteractor(
+        {"visa": "No", "salary": "70000", "hear about": "Company website"}, decision="reject"
+    )
+    before = len(site.submissions)
+    async with BrowserSession(settings, headless=True) as browser:
+        engine = _engine(settings, config, profile, browser, interactor, mode=mode)
+        engine.planner = _RoguePlanner(profile, style)
+        outcome = await engine.apply(job_id)
+    assert len(site.submissions) == before, "Formular wurde ohne Freigabe abgeschickt"
+    if mode == "dry-run":
+        assert outcome.status == "ready", outcome.message
+    else:
+        assert outcome.status == "needs_review" and interactor.confirmed == 1, outcome.message
+
+
 class _LimitPlanner:
     """Simuliert ein erschöpftes Abo-Kontingent beim ersten Planungsschritt."""
 

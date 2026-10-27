@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..classify import classify, content_hash, fingerprint, match_key, score, title_allowed, where_of
-from ..config import SearchConfig, Settings
+from ..config import SearchConfig, Settings, ensure_not_demo
 from ..db import CrawlRun, Job, JobSnapshot, session_scope, utcnow
 from ..llm import LLM, LLMLimitReached
 from ..profile import Profile
@@ -68,6 +68,7 @@ async def run_crawl(
     enrich: bool = True,
     use_browser: bool = True,
 ) -> CrawlReport:
+    ensure_not_demo(settings, "Crawlen")
     with session_scope(settings.db_path) as s:
         run = CrawlRun(status="running")
         s.add(run)
@@ -84,6 +85,9 @@ async def run_crawl(
             results = await gather_limited([src.fetch(client) for src in sources], limit=8)
             ok_sources: set[str] = set()
             partial_sources: set[str] = set()
+            # Alles, was die Quellen gelistet haben – auch Stellen, die nur am Filter scheitern. Sie sind nicht
+            # geschlossen; sonst würde jede Änderung an Rollen oder Orten Stellen „schließen“.
+            listed: set[str] = set()
             kept: list[tuple[Any, RawPosting, str]] = []
             for src, result in zip(sources, results, strict=True):
                 if isinstance(result, BaseException):
@@ -94,6 +98,7 @@ async def run_crawl(
                 report.per_source[src.name] = len(result)
                 report.fetched += len(result)
                 for posting in result:
+                    listed.add(fingerprint(posting.source, posting.external_id))
                     allowed, _why = title_allowed(posting.title, config)
                     if not allowed:
                         report.rejected["Titel"] += 1
@@ -134,6 +139,9 @@ async def run_crawl(
         open_jobs = s.execute(select(Job).where(Job.status == "open", Job.origin == "crawl")).scalars().all()
         for job in open_jobs:
             if job.id in seen_ids:
+                continue
+            if job.fingerprint in listed:
+                job.last_seen = utcnow()  # noch online, passt nur nicht mehr zum Filter
                 continue
             if job.source in ok_sources or (
                 job.source in partial_sources and job.last_seen and job.last_seen < stale_before
