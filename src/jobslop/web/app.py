@@ -25,6 +25,7 @@ from sqlalchemy import func, select
 
 from .. import __version__, assist
 from ..autopilot import Scheduler, crawl_and_queue, next_run, record
+from ..classify import SCORE_MAX, score_parts
 from ..config import (
     EDITABLE_SETTINGS,
     DemoModeError,
@@ -34,6 +35,7 @@ from ..config import (
     save_settings,
     search_config_from_preset,
 )
+from ..crawl.pipeline import BROWSER_ONLY_PENALTY
 from ..db import (
     Activity,
     Answer,
@@ -48,6 +50,7 @@ from ..db import (
     utcnow,
 )
 from ..guard import ACTIVE_STATES, DONE_STATES, check_job
+from ..hosts import is_browser_only
 from ..notify import notify
 from ..presets import presets_for_ui
 from ..profile import TODO, Profile, Work, normalize_question
@@ -264,7 +267,13 @@ class Context:
             except Exception as exc:
                 log.exception("Crawl fehlgeschlagen")
                 self.crawl["last"] = {"error": str(exc)}
-                record(self.settings, "crawl", f"Crawl fehlgeschlagen: {exc}")
+                record(
+                    self.settings,
+                    "crawl",
+                    f"Crawl fehlgeschlagen: {exc}",
+                    code="crawl.failed",
+                    error=str(exc),
+                )
             finally:
                 self.crawl["running"] = False
                 self.crawl_idle.set()
@@ -282,7 +291,7 @@ class Context:
             return
         self.autopilot_running = True
         s = self.settings
-        record(s, "autopilot", "Autopilot gestartet")
+        record(s, "autopilot", "Autopilot gestartet", code="autopilot.started")
         try:
             await self.crawl_idle.wait()
             self.crawl.update(running=True, started_at=_iso(utcnow()))
@@ -302,7 +311,16 @@ class Context:
             text = f"{summary['new']} neue Stellen, {len(summary['queued'])} eingereiht" + (
                 " – Bewerbungen laufen" if started else ""
             )
-            record(s, "autopilot", f"Autopilot: {text}", summary)
+            record(
+                s,
+                "autopilot",
+                f"Autopilot: {text}",
+                summary,
+                code="autopilot.done",
+                new=summary["new"],
+                queued=len(summary["queued"]),
+                started=int(started),
+            )
             await self.notify("jobslop Autopilot", text)
         finally:
             self.autopilot_running = False
@@ -349,7 +367,14 @@ class Context:
         text = (
             ", ".join(f"{n}× {status}" for status, n in counts.most_common()) or "keine Bewerbung gestartet"
         )
-        record(self.settings, "run", f"Bewerbungslauf beendet: {text}", dict(counts))
+        record(
+            self.settings,
+            "run",
+            f"Bewerbungslauf beendet: {text}",
+            dict(counts),
+            code="run.finished",
+            counts=dict(counts),
+        )
         await self.notify("jobslop: Lauf beendet", text)
 
 
@@ -469,7 +494,7 @@ def create_app(runtime: Runtime) -> FastAPI:
     @app.post("/api/extension/install")
     def extension_install(request: Request) -> dict[str, Any]:
         assist.install(ctx.settings, server=str(request.base_url))
-        record(ctx.settings, "setup", "Browser-Erweiterung eingerichtet")
+        record(ctx.settings, "setup", "Browser-Erweiterung eingerichtet", code="extension.installed")
         return assist_info()
 
     @app.post("/api/extension/open-folder")
@@ -648,7 +673,7 @@ def create_app(runtime: Runtime) -> FastAPI:
     async def setup_complete(start_crawl: bool = True) -> dict[str, Any]:
         ctx.settings = save_settings(ctx.settings, {"setup_completed": True})
         ctx.runner.settings = ctx.settings
-        record(ctx.settings, "setup", "Einrichtung abgeschlossen")
+        record(ctx.settings, "setup", "Einrichtung abgeschlossen", code="setup.done")
         started = await ctx.start_crawl() if start_crawl and not ctx.settings.demo else False
         return {"ok": True, "crawl_started": started}
 
@@ -725,7 +750,21 @@ def create_app(runtime: Runtime) -> FastAPI:
             j = s.get(Job, job_id)
             if j is None:
                 raise HTTPException(404)
-            verdict = check_job(s, j, ctx.runtime().config.limits)
+            config = ctx.runtime().config
+            verdict = check_job(s, j, config.limits)
+            parts = score_parts(
+                j.category,
+                j.fit,
+                j.segment,
+                j.level,
+                bool(j.near and "km" in j.near),
+                j.where,
+                config.role_names,
+            )
+            if is_browser_only(j.target_url):
+                parts.append(("browser_only", -BROWSER_ONLY_PENALTY))
+            if abs(rest := round(j.score - sum(p for _, p in parts), 2)) >= 0.1:
+                parts.append(("other", rest))  # z. B. Import mit eigener Einordnung
             return job_summary(j) | {
                 "description": j.description,
                 "apply_url": j.apply_url,
@@ -735,7 +774,14 @@ def create_app(runtime: Runtime) -> FastAPI:
                 "segment": j.segment,
                 "language": j.language,
                 "last_seen": _iso(j.last_seen),
-                "verdict": {"ok": verdict.ok, "reason": verdict.reason},
+                "verdict": {
+                    "ok": verdict.ok,
+                    "reason": verdict.reason,
+                    "code": verdict.code,
+                    "params": verdict.params,
+                },
+                "score_parts": [{"key": k, "points": p} for k, p in parts],
+                "score_max": SCORE_MAX,
                 "history": [
                     {"seen_at": _iso(sn.seen_at), "change": sn.change, "diff": sn.diff} for sn in j.snapshots
                 ],
@@ -791,7 +837,20 @@ def create_app(runtime: Runtime) -> FastAPI:
                     )
                 )
             j.queued = False
-            s.add(Activity(kind="status", message=f"{j.company} · {j.title}: {body.status}"))
+            s.add(
+                Activity(
+                    kind="status",
+                    message=f"{j.company} · {j.title}: {body.status}",
+                    data={
+                        "code": "status.changed",
+                        "params": {
+                            "company": j.company,
+                            "title": j.title,
+                            "status": MARK.get(body.status, body.status),
+                        },
+                    },
+                )
+            )
             s.flush()
             return job_summary(j)
 
@@ -847,7 +906,14 @@ def create_app(runtime: Runtime) -> FastAPI:
                 if not s.scalar(select(func.count(Job.id)).where(Job.queued)):
                     raise HTTPException(409, "Die Warteschlange ist leer")
         ctx.runner.start(body.job_ids or None, mode=mode, max_count=body.max, force=body.force)  # type: ignore[arg-type]
-        record(ctx.settings, "run", f"Bewerbungslauf gestartet ({ctx.runner.label}, {mode})")
+        record(
+            ctx.settings,
+            "run",
+            f"Bewerbungslauf gestartet ({ctx.runner.label}, {mode})",
+            code="run.started",
+            jobs=len(body.job_ids),
+            mode=mode,
+        )
         return ctx.runner.state()
 
     @app.get("/api/runner")
@@ -858,7 +924,7 @@ def create_app(runtime: Runtime) -> FastAPI:
     def runner_stop() -> dict[str, Any]:
         stopped = ctx.runner.stop()
         if stopped:
-            record(ctx.settings, "run", "Bewerbungslauf abgebrochen")
+            record(ctx.settings, "run", "Bewerbungslauf abgebrochen", code="run.stopped")
         return ctx.runner.state() | {"stopped": stopped}
 
     # ------------------------------------------------------------------ Crawl & Autopilot
@@ -1000,7 +1066,16 @@ def create_app(runtime: Runtime) -> FastAPI:
                 a.stage_changed_at = utcnow()
                 if body.status in ("offer", "rejected"):
                     a.follow_up_at = None
-                s.add(Activity(kind="status", message=f"{a.job.company} · {a.job.title}: {body.status}"))
+                s.add(
+                    Activity(
+                        kind="status",
+                        message=f"{a.job.company} · {a.job.title}: {body.status}",
+                        data={
+                            "code": "status.changed",
+                            "params": {"company": a.job.company, "title": a.job.title, "status": body.status},
+                        },
+                    )
+                )
             if body.notes is not None:
                 a.notes = body.notes
             if body.clear_follow_up:

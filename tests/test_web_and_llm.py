@@ -366,3 +366,18 @@ def test_extension_install_uses_the_running_address(settings, config, profile):
     assert client.get("/api/assist/status").status_code == 401
     token = (settings.home / "extension-token").read_text(encoding="utf-8")
     assert client.get("/api/assist/status", headers={"X-Jobslop-Token": token}).json()["portals"] is False
+
+
+def test_backend_texts_carry_codes_for_translation(settings, config, profile):
+    """Das Dashboard übersetzt Aktivitäten und Prüf-Ergebnisse über Code + Parameter statt deutschem Klartext."""
+    client = _client(settings, config, profile)
+    client.post("/api/setup/complete", params={"start_crawl": False})
+    entry = client.get("/api/activity").json()[0]
+    assert entry["data"]["code"] == "setup.done" and entry["message"] == "Einrichtung abgeschlossen"
+    job = next(j for j in client.get("/api/jobs", params={"view": "all", "status": "all"}).json()["items"])
+    client.post("/api/exclusions", json={"kind": "company", "value": job["company"], "reason": "test"})
+    verdict = client.get(f"/api/jobs/{job['id']}").json()["verdict"]
+    assert not verdict["ok"] and verdict["code"].startswith("guard.") and verdict["params"]
+    detail = client.get(f"/api/jobs/{job['id']}").json()
+    assert sum(p["points"] for p in detail["score_parts"]) == pytest.approx(detail["score"], abs=0.11)
+    assert detail["score_max"] == 21

@@ -14,6 +14,14 @@
   asks for missing answers in an in-page panel and only submits after your click. LinkedIn/Indeed Easy Apply
   can be enabled explicitly, with a daily limit.
 - Read-only smoke tests against real sites (`JOBSLOP_NETWORK=1`).
+- Every score is explained in the job details (target role, stack, company, level, location – out of 21 points).
+- Activity and guard messages are translated in the English UI (backend stores a code with parameters).
+
+### Improved
+- Leaner overview: what needs you, key figures, top matches and one “up next” card; the weekly chart moved to
+  Applications, the full log is on the Activity page.
+- The dashboard loads only the page you open (code splitting); libraries are cached separately across updates.
+- The job list and job details show where a job came from (LinkedIn, Indeed, Arbeitsagentur, Greenhouse …).
 
 ### Fixed
 - The submit button can no longer be clicked past the review: a planner that lists it as a plain click action or as

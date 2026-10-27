@@ -123,7 +123,9 @@ export interface JobDetail extends JobSummary {
   segment: string;
   language: string;
   last_seen: string | null;
-  verdict: { ok: boolean; reason: string };
+  verdict: { ok: boolean; reason: string; code?: string; params?: Record<string, unknown> };
+  score_parts: { key: string; points: number }[];
+  score_max: number;
   history: { seen_at: string; change: string; diff: Record<string, unknown> }[];
   applications: ApplicationSummary[];
 }
@@ -191,6 +193,7 @@ export interface ActivityItem {
   ts: string;
   kind: string;
   message: string;
+  data?: Record<string, unknown>;
 }
 
 export interface Stats {

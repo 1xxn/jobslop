@@ -73,14 +73,17 @@ export function RoleBadge({ category, roles }: { category: string; roles: string
 }
 
 /** Score als kleiner Ring – auf einen Blick vergleichbar (max. ~20 Punkte). */
+/** Höchster möglicher Score (classify.SCORE_MAX): erste Zielrolle, Stack ●●●, große Firma, Level, in der Nähe. */
+export const SCORE_MAX = 21;
+
 export function ScoreRing({ score, size = 36 }: { score: number; size?: number }) {
   const { t } = useI18n();
-  const pct = Math.max(0, Math.min(1, score / 20));
+  const pct = Math.max(0, Math.min(1, score / SCORE_MAX));
   const r = (size - 5) / 2;
   const c = 2 * Math.PI * r;
   const tone = pct >= 0.75 ? "var(--success)" : pct >= 0.5 ? "var(--primary)" : pct >= 0.3 ? "var(--warning)" : "var(--fg-subtle)";
   return (
-    <Tooltip content={t("job.score_hint")}>
+    <Tooltip content={t("job.score_hint", { max: SCORE_MAX })}>
       <span className="relative inline-grid shrink-0 place-items-center" style={{ width: size, height: size }}>
         <svg width={size} height={size} className="-rotate-90">
           <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-3)" strokeWidth="3" />
@@ -198,5 +201,32 @@ export function Stat({
       <div className="tabular mt-2 text-title1 font-bold tracking-[-0.02em]">{value}</div>
       {hint && <div className="mt-0.5 text-caption text-fg-subtle">{hint}</div>}
     </div>
+  );
+}
+
+/** Gesendete Bewerbungen pro Woche (letzte 12 Wochen). */
+export function WeeklyChart({ weeks }: { weeks: { week: string; sent: number }[] }) {
+  const { t, lang } = useI18n();
+  const max = Math.max(1, ...weeks.map((w) => w.sent));
+  return (
+    <>
+      <div className="flex h-28 items-end gap-1.5" role="img" aria-label={t("overview.weekly")}>
+        {weeks.map((w) => (
+          <div key={w.week} className="group flex flex-1 flex-col items-center gap-1.5">
+            <span className="tabular text-caption text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100">
+              {w.sent}
+            </span>
+            <div
+              className="w-full rounded-t-[5px] bg-primary/80 transition-[height] duration-500 group-hover:bg-primary"
+              style={{ height: `${Math.max(3, (w.sent / max) * 80)}px`, opacity: w.sent ? 1 : 0.25 }}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 flex justify-between text-caption text-fg-subtle">
+        <span>{weeks[0] && new Date(weeks[0].week).toLocaleDateString(lang, { day: "numeric", month: "short" })}</span>
+        <span>{t("overview.this_week")}</span>
+      </div>
+    </>
   );
 }
