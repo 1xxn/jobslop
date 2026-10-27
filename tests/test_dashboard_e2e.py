@@ -97,6 +97,18 @@ async def test_dashboard_end_to_end(dashboard):
             config = SearchConfig.load(home / "search.toml")
             assert "linkedin" not in config.sources.portals and "indeed" in config.sources.portals
 
+            # Bewerbungen: nach Stand gruppiert, wartende oben; Detail mit Stand, Nachfassen und Notizen rechts
+            await page.goto(f"{base}/applications")
+            await page.get_by_role("button", name=re.compile("Wartet auf dich")).wait_for()
+            assert (
+                await page.get_by_role("button", name=re.compile("Absagen")).get_attribute("aria-expanded")
+                == "false"
+            )
+            await page.get_by_role("link", name=re.compile(r"DevSecOps Engineer\s*Mitte Consulting")).click()
+            stage = page.get_by_label("Stand", exact=True)
+            await stage.select_option("interview")
+            await page.get_by_text("Gespeichert").first.wait_for()
+
             # Alte Adressen: Pipeline ist die Board-Ansicht der Bewerbungen
             await page.goto(f"{base}/pipeline")
             await page.wait_for_url("**/applications?view=board")

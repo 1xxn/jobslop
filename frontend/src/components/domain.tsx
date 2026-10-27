@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
 import type { AppStatus, Stats } from "@/lib/types";
-import { cn, initials, percent } from "@/lib/utils";
+import { cn, percent } from "@/lib/utils";
 import { Tooltip } from "./ui/overlays";
 
 /** Wortmarke: einfarbiges Zeichen in Petrol – der Tropfen im Logo ist die Herkunft der Akzentfarbe. */
@@ -142,42 +142,6 @@ export function Score({ score, className }: { score: number; className?: string 
   );
 }
 
-export function FitDots({ fit }: { fit: number }) {
-  const { t } = useI18n();
-  return (
-    <Tooltip content={t("job.fit_hint", { n: fit })}>
-      <span className="inline-flex gap-0.5" aria-label={t("job.fit_hint", { n: fit })} role="img">
-        {[1, 2, 3].map((i) => (
-          <span key={i} className={cn("h-3 w-1 rounded-full", i <= fit ? "bg-ink-2" : "bg-sunken")} />
-        ))}
-      </span>
-    </Tooltip>
-  );
-}
-
-export function CompanyAvatar({ name, size = 36 }: { name: string; size?: number }) {
-  return (
-    <span
-      className="avatar grid shrink-0 place-items-center rounded-md text-small font-semibold"
-      style={{ width: size, height: size }}
-      aria-hidden
-    >
-      {initials(name) || "?"}
-    </span>
-  );
-}
-
-export function WhereLabel({ where, workplace, location }: { where: string; workplace?: string; location?: string }) {
-  const { t } = useI18n();
-  const label = where === "R" ? t("where.remote") : where === "BR" ? t("where.both") : t("where.onsite");
-  return (
-    <span className="truncate text-meta text-ink-2">
-      {location ? location.split(";")[0] : label}
-      {workplace && <span className="text-ink-3"> · {workplace}</span>}
-    </span>
-  );
-}
-
 export function PageHeader({
   title,
   description,
@@ -200,43 +164,6 @@ export function PageHeader({
       </div>
       {children}
     </header>
-  );
-}
-
-export function Stat({ label, value, hint }: { label: ReactNode; value: ReactNode; hint?: ReactNode }) {
-  return (
-    <div className="border-t border-line pt-3">
-      <div className="text-meta text-ink-2">{label}</div>
-      <div className="tabular mt-1 text-title font-semibold">{value}</div>
-      {hint && <div className="text-small text-ink-3">{hint}</div>}
-    </div>
-  );
-}
-
-/** Gesendete Bewerbungen pro Woche (letzte 12 Wochen). */
-export function WeeklyChart({ weeks }: { weeks: { week: string; sent: number }[] }) {
-  const { t, lang } = useI18n();
-  const max = Math.max(1, ...weeks.map((w) => w.sent));
-  return (
-    <>
-      <div className="flex h-24 items-end gap-1" role="img" aria-label={t("overview.weekly")}>
-        {weeks.map((w, i) => (
-          <div key={w.week} className="group flex flex-1 flex-col items-center gap-1">
-            <span className="tabular text-small text-ink-3 opacity-0 transition-opacity group-hover:opacity-100">
-              {w.sent}
-            </span>
-            <div
-              className={cn("w-full rounded-t-sm", i === weeks.length - 1 ? "bg-accent" : "bg-ink-3/50")}
-              style={{ height: `${Math.max(2, (w.sent / max) * 72)}px` }}
-            />
-          </div>
-        ))}
-      </div>
-      <div className="mt-2 flex justify-between text-small text-ink-3">
-        <span>{weeks[0] && new Date(weeks[0].week).toLocaleDateString(lang, { day: "numeric", month: "short" })}</span>
-        <span>{t("overview.this_week")}</span>
-      </div>
-    </>
   );
 }
 

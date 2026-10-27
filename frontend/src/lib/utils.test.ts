@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "./messages";
-import { formatWhen, hostOf, initials, sourceName } from "./utils";
+import { formatWhen, hostOf, sourceName } from "./utils";
 
 const t = (key: keyof typeof messages.en) => messages.en[key];
 
@@ -20,15 +20,12 @@ describe("sourceName", () => {
   });
 });
 
-describe("hostOf / initials", () => {
+describe("hostOf", () => {
   it("strips www and survives garbage", () => {
     expect(hostOf("https://www.example.com/jobs/1")).toBe("example.com");
     expect(hostOf("not a url")).toBe("");
   });
 
-  it("builds avatar initials", () => {
-    expect(initials("Brandenburg Data AG")).toBe("BD");
-  });
 });
 
 describe("formatWhen", () => {
