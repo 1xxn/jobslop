@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 
 from sqlalchemy import select
 
-from ..config import ApplyMode, SearchConfig, Settings
+from ..config import ApplyMode, SearchConfig, Settings, ensure_not_demo
 from ..db import Answer, Application, ApplicationEvent, Job, session_scope, utcnow
 from ..guard import check_job
 from ..llm import LLM, LLMLimitReached
@@ -27,7 +27,7 @@ from .executor import Executor, Files, click_element
 from .extract import PageState, extract_state
 from .interact import Interactor
 from .marks import annotated_screenshots, save_screenshot
-from .planner import _CONFIRM_RX, JobContext, LLMPlanner, PagePlan, PlanInput, Planner
+from .planner import _CONFIRM_RX, JobContext, LLMPlanner, PagePlan, PlanInput, Planner, is_final_submit
 from .prepare import dismiss_cookie_banners, reveal_lazy_content, try_autofill
 
 log = logging.getLogger(__name__)
@@ -154,6 +154,7 @@ class ApplyEngine:
         self.llm = llm
         self.mode = mode
         self.on_event = on_event or (lambda _m: None)
+        self._kept_page: Any = None  # zuletzt im Testlauf ausgefüllte Seite (bleibt zum Nachsehen offen)
         base = settings.profile_path.parent
         self.files = Files(
             cv=profile.cv_path(base),
@@ -165,6 +166,11 @@ class ApplyEngine:
 
     # ------------------------------------------------------------------ public
     async def apply(self, job_id: int, *, force: bool = False) -> Outcome:
+        ensure_not_demo(self.settings, "Bewerben")
+        if self._kept_page is not None:  # nur die jeweils letzte Testlauf-Seite offen halten
+            with contextlib.suppress(Exception):
+                await self._kept_page.close()
+            self._kept_page = None
         with session_scope(self.settings.db_path) as s:
             job = s.get(Job, job_id)
             if job is None:
@@ -209,7 +215,9 @@ class ApplyEngine:
             final_url = page.url if page is not None else ""
             if page is not None:
                 await save_screenshot(page, artdir / "final.jpg")
-                if status not in ("ready",):  # Testlauf: Seite offen lassen, damit man reinschauen kann
+                if status == "ready":  # Testlauf: Seite offen lassen, damit man reinschauen kann
+                    self._kept_page = page
+                else:
                     with contextlib.suppress(Exception):
                         await page.close()
             usage = self._usage_delta(usage_before)
@@ -242,12 +250,15 @@ class ApplyEngine:
         title = f"{run.job.company} – {run.job.title}"
         self._event(run.app_id, "navigate", run.job.url)
         await page.goto(run.job.url, wait_until="domcontentloaded")
-        if any(h in host_of(page.url) for h in HANDOFF_HOSTS):
-            page = await self._aggregator_handoff(run, page, title)
 
         failures: list[str] = []
         for step in range(1, self.settings.max_steps_per_application + 1):
             await settle(page)
+            # Auch mitten im Ablauf: führt ein Klick (Weiterleitung, „Mit LinkedIn bewerben“) auf LinkedIn/Indeed,
+            # wird dort nichts automatisch bedient.
+            if any(h in host_of(page.url) for h in HANDOFF_HOSTS):
+                page = await self._aggregator_handoff(run, page, title)
+                await settle(page)
             state = await self._prepare(run, page)
 
             if run.submit_clicked and _CONFIRM_RX.search(state.text):
@@ -346,6 +357,7 @@ class ApplyEngine:
             elif wants_letter:
                 await self._ensure_cover_letter(run)
 
+            self._guard_submit_clicks(run, state, plan)
             results = await Executor(page, self.files).run(state, plan.actions)
             planned = {a.field_id: a for a in plan.actions}
             for r in results:
@@ -596,6 +608,28 @@ class ApplyEngine:
         await target.bring_to_front()
         run.history.append(f"Von LinkedIn/Indeed zur Firmenseite gewechselt: {host_of(target.url)}")
         return target
+
+    @staticmethod
+    def _guard_submit_clicks(run: _Run, state: PageState, plan: PagePlan) -> None:
+        """Abgesendet wird nur über ``_submit`` (Freigabe, Testlauf, Doppel-Schutz) – nie als Nebenbei-Klick.
+
+        Planer (vor allem Claude) legen den Absende-Button gelegentlich als ``click``-Aktion oder als
+        ``click_next`` an. Ersteres wird übersprungen, Letzteres zu ``click_submit`` umgeleitet.
+        """
+        filled = (
+            any(r["ok"] and r["action"] != "click" for r in run.filled)
+            or any(a.action in ("fill", "select", "check", "upload") for a in plan.actions)
+            or sum(1 for f in state.form_fields if f.get("value")) >= 2
+        )
+        for a in plan.actions:
+            button = state.button(a.field_id) if a.action == "click" else None
+            if button and is_final_submit(button, form_filled=filled):
+                a.action = "skip"
+                run.history.append(f"Klick auf '{button['text']}' ignoriert – Absenden nur über click_submit")
+        if plan.next_step in ("click_apply", "click_next"):
+            target = state.button(plan.next_target_id)
+            if target and is_final_submit(target, form_filled=filled):
+                plan.next_step = "click_submit"
 
     def _loop_guard(self, run: _Run, state: PageState) -> None:
         sig = (

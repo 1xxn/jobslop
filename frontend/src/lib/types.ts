@@ -63,6 +63,7 @@ export interface RunnerState {
 export interface Status {
   version: string;
   setup_completed: boolean;
+  demo: boolean;
   prompts: Prompt[];
   runner: RunnerState;
   crawl: { running: boolean; started_at: string | null; last: CrawlSummary | null };

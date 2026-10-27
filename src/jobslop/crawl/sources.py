@@ -8,6 +8,7 @@ import re
 import xml.etree.ElementTree as ET
 from collections.abc import Awaitable, Callable
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from pydantic import BaseModel
@@ -254,6 +255,7 @@ class WorkdaySource:
     def __init__(self, site: WorkdaySite) -> None:
         self.site = site
         self.name = f"workday:{site.tenant}/{site.site}"
+        self.complete = True
 
     @property
     def _api(self) -> str:
@@ -288,6 +290,7 @@ class WorkdaySource:
                 )
             offset += len(postings)
             if offset >= 400:
+                self.complete = offset >= total  # gedeckelt: fehlende Stellen sind nicht geschlossen
                 break
         return out
 
@@ -312,6 +315,7 @@ class AmazonSource:
         self.queries = queries
         self.country = country
         self.name = "amazon"
+        self.complete = True
 
     async def fetch(self, client: httpx.AsyncClient) -> list[RawPosting]:
         seen: dict[str, RawPosting] = {}
@@ -355,6 +359,8 @@ class AmazonSource:
                 offset += len(jobs)
                 if not jobs or offset >= int(data.get("hits", 0)):
                     break
+            else:
+                self.complete = False  # mehr als 500 Treffer: Rest nicht abgefragt
         return list(seen.values())
 
 
@@ -364,8 +370,28 @@ class AmazonSource:
 # geschlossen sind – solche Quellen setzen ``complete = False``, damit der Crawl daraus keine Schließungen ableitet.
 
 
+# Arbeitnow betreibt Länderseiten; die Domain der Stellen-URL verrät das Land (Ortsangaben fehlt es oft).
+_ARBEITNOW_COUNTRIES = {
+    "arbeitnow.com": ("Germany", r"germany|deutschland"),
+    "arbeitnow.de": ("Germany", r"germany|deutschland"),
+    "arbeitnow.at": ("Austria", r"austria|österreich"),
+    "arbeitnow.ch": ("Switzerland", r"switzerland|schweiz|suisse"),
+    "arbeitnow.nl": ("Netherlands", r"netherlands|nederland"),
+    "arbeitnow.fr": ("France", r"france|frankreich"),
+    "arbeitnow.co.uk": ("United Kingdom", r"united kingdom|uk|england|scotland|wales"),
+}
+
+
+def _arbeitnow_location(location: str, url: str) -> str:
+    host = (urlparse(url).hostname or "").removeprefix("www.")
+    country, known = _ARBEITNOW_COUNTRIES.get(host, ("", ""))
+    if not country or re.search(known, location, re.I):
+        return location
+    return f"{location}, {country}" if location else country
+
+
 class ArbeitnowSource:
-    """arbeitnow.com: freie API mit Stellen aus Deutschland (viele direkt aus Greenhouse, Personio, Join …)."""
+    """arbeitnow.com: freie API mit Stellen aus Deutschland und Nachbarländern (viele aus Greenhouse, Personio …)."""
 
     name = "arbeitnow"
 
@@ -391,9 +417,7 @@ class ArbeitnowSource:
             for j in data.get("data", []):
                 slug = j.get("slug") or j.get("url", "")
                 types = " ".join(j.get("job_types") or [])
-                location = (j.get("location") or "").strip()
-                if not re.search(r"germany|deutschland", location, re.I):
-                    location = f"{location}, Germany" if location else "Germany"  # Börse nur für Deutschland
+                location = _arbeitnow_location((j.get("location") or "").strip(), j.get("url", ""))
                 out[slug] = RawPosting(
                     source=self.name,
                     external_id=slug,
@@ -495,6 +519,8 @@ class GenericPageSource:
         self.render = render
         self.llm = llm
         self.model = model
+        # Claude liest die Liste aus gekürztem Seitentext – eine fehlende Stelle heißt nicht „geschlossen“
+        self.complete = False
         import hashlib
 
         self.name = f"generic:{page.company.lower()}:{hashlib.sha1(page.url.encode()).hexdigest()[:8]}"

@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- The submit button can no longer be clicked past the review: a planner that lists it as a plain click action or as
+  "next" is routed through approval / dry run.
+- Claude may only read files in its own work folder when it gets screenshots (prompt injection from job pages).
+- Demo folders are in demo mode: no crawling, applying, autopilot or notifications. The demo script no longer turns
+  the autopilot on.
+- Changing roles or locations no longer marks jobs as closed that are still online; capped Workday/amazon.jobs
+  searches and careers pages read by Claude no longer close jobs they simply did not list.
+- Arbeitnow jobs from its UK/French/Swiss/Dutch sites are no longer labelled as Germany.
+- The CLI no longer crashes on Windows when its output is redirected (Task Scheduler, pipes).
+- "Stop" ends the whole application run including browser processes; LinkedIn/Indeed are detected at every step,
+  not only on the first page; a dry-run batch keeps only the last filled page open.
+- Claude Code tests now also run on Windows.
+
 ## 1.0.0 – jobslop
 
 The project formerly known as *jobpilot* becomes **jobslop**.

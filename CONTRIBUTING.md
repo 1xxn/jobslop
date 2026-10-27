@@ -11,7 +11,9 @@ uv run jobslop install-browser
 cd frontend && npm ci && cd ..
 ```
 
-Work with fictional data, never your own:
+Work with fictional data, never your own. The demo folder is in *demo mode* (`demo = true` in its
+`settings.toml`): it cannot crawl, apply, run the autopilot or send notifications, so a demo server is safe to
+leave running.
 
 ```bash
 uv run python scripts/demo_data.py --home .demo-home

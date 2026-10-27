@@ -34,6 +34,7 @@ environment variables `JOBSLOP_*`. The old prefix `JOBPILOT_*` is still understo
 | `notify_webhook_url` | – | Receives `{"title","message","content","text","url"}` |
 | `follow_up_days` | `10` | Follow-up reminder after submitting |
 | `dashboard_host` / `dashboard_port` | `127.0.0.1` / `8765` | Where the dashboard listens (environment only) |
+| `demo` | `false` | Demo folder: crawling, applying, autopilot, add-by-link and notifications are blocked. Set by `scripts/demo_data.py`, not editable in the dashboard |
 
 ## Search (`search.toml`)
 

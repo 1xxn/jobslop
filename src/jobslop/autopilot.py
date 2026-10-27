@@ -70,7 +70,7 @@ def last_autopilot_run(settings: Settings) -> datetime | None:
 
 def next_run(settings: Settings, now: datetime | None = None) -> datetime | None:
     """Nächster geplanter Lauf in Ortszeit (None, wenn der Autopilot aus ist)."""
-    if not settings.autopilot_enabled or not settings.autopilot_days:
+    if settings.demo or not settings.autopilot_enabled or not settings.autopilot_days:
         return None
     now = now or datetime.now()
     try:

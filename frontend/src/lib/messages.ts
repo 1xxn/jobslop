@@ -13,6 +13,7 @@ const de = {
   "shell.waiting": "jobslop braucht dich bei {n} Bewerbung(en)",
   "shell.open": "Ansehen",
   "shell.busy": "läuft gerade",
+  "shell.demo": "Demo-Modus – erfundene Daten. Suchen, Bewerben und Benachrichtigungen sind gesperrt.",
 
   "theme.light": "Hell",
   "theme.dark": "Dunkel",
@@ -563,6 +564,7 @@ const en: Record<MessageKey, string> = {
   "shell.waiting": "jobslop needs you for {n} application(s)",
   "shell.open": "View",
   "shell.busy": "running",
+  "shell.demo": "Demo mode – fictional data. Searching, applying and notifications are disabled.",
 
   "theme.light": "Light",
   "theme.dark": "Dark",

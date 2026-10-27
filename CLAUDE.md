@@ -1,0 +1,99 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+jobslop is a local job-application autopilot: it crawls job sources, ranks jobs against a profile and fills out
+application forms in a real Playwright browser. Claude is called through the locally installed Claude Code CLI
+(`claude -p`, subscription login) – there is no Anthropic API key anywhere in the code.
+
+## Commands
+
+```bash
+uv sync                                   # Python deps (Python 3.12+)
+uv run jobslop install-browser            # Playwright Chromium, needed by browser tests
+uv run ruff check . && uv run ruff format --check .
+uv run pytest -m "not live"               # full suite, ~2 min (real headless Chromium against tests/fixtures/site)
+uv run pytest tests/test_browser.py::test_name -m "not live"   # single test
+uv run pytest -m "not browser and not live"                    # fast subset without Chromium
+
+cd frontend && npm ci
+npm run typecheck
+npm run build                             # tsc + vite → writes ../src/jobslop/web/dist (committed!)
+npm run dev                               # :5173, proxies /api and /artifacts to :8765
+```
+
+Before finishing any change, run all of: `ruff check`, `ruff format --check`, `pytest -m "not live"`,
+`npm run typecheck`, `npm run build`. CI (`.github/workflows/ci.yml`, Ubuntu 3.12/3.13 + Windows 3.12) fails if
+`src/jobslop/web/dist` differs from a fresh build – always commit the build output with frontend changes.
+
+`live` tests call the real Claude Code and spend the user's quota; they only run with `JOBSLOP_LIVE=1`.
+`tests/test_claude_code.py` runs `tests/fake_claude.py` as a stand-in `claude` binary (by patching `find_claude`).
+
+## Data safety – read before running anything
+
+- All state lives in `JOBSLOP_HOME` (default `~/.jobslop`; a legacy `~/.jobpilot` is auto-migrated on first
+  start). The developer's **real** data is in `~/.jobslop` / `~/.jobpilot` – never run the app, tests or scripts
+  against it, and never commit personal data, CVs, screenshots of real data or `.demo-home/`.
+- For UI work use fictional data: `uv run python scripts/demo_data.py --home .demo-home`, then
+  `JOBSLOP_HOME=.demo-home uv run jobslop start --no-open --port 8799` (PowerShell: `$env:JOBSLOP_HOME=...`).
+- Demo homes are in demo mode (`demo = true` in `settings.toml`, `config.ensure_not_demo`): crawl, apply, autopilot,
+  add-by-link and notifications raise `DemoModeError`. A non-demo dashboard with the autopilot enabled really crawls
+  and **really applies**. When stopping a server kill the whole process tree – apply runs are child processes
+  (`runner.py` spawns `python -m jobslop apply --via-dashboard`) that own a Chromium.
+
+## Architecture
+
+Single package `src/jobslop`; `cli.py` (Typer) is the entry point and `jobslop` with no arguments starts the
+dashboard. `runtime.Runtime` is the shared composition root used by CLI, dashboard and autopilot: it loads
+`Settings` + `SearchConfig` + `Profile` and builds the LLM, planner and `ApplyEngine`.
+
+**Config layers** (`config.py`): `Settings` (pydantic-settings) merges defaults < `settings.toml` (written by the
+dashboard) < `.env` < `JOBSLOP_*` env vars (legacy `JOBPILOT_*` still read). `SearchConfig` is `search.toml`
+(roles, filters, limits, sources). The profile is `profile.yaml` (`profile.py`).
+
+**Database** (`db.py`): SQLite (WAL) via SQLAlchemy. There are no migration files – new columns are added at
+startup by `_add_missing_columns`, so schema changes must be additive and nullable/defaulted.
+
+**Crawl** (`crawl/`): each source class in `sources.py` returns `RawPosting`s (API boards: Greenhouse, Ashby,
+Lever, SmartRecruiters, Personio, Workday, amazon.jobs; aggregators Arbeitnow/Himalayas; `GenericPageSource`
+renders a careers page with a shared headless browser from `render.py` and lets Claude extract the list).
+`pipeline.py` filters by roles/locations, dedupes by `fingerprint`/`match_key`, writes `JobSnapshot` history and
+decides closures. Sources with `complete = False` (capped searches) must never cause jobs to be closed.
+`classify.py` is the rule-based scorer; Claude enrichment is capped by `limits.max_enrich_per_crawl`.
+
+**Apply engine** (`apply/`), one loop per application in `engine.py`:
+`prepare.py` (cookie banners, lazy iframes, autofill buttons; no Claude) → `extract.js`, injected into every
+frame and evaluated by `extract.py` into a `PageState` (fields incl. shadow DOM/iframes, buttons, errors, CAPTCHA
+signals) → `planner.py` (`LLMPlanner` with schema-validated `PagePlan`, or `HeuristicPlanner` without Claude) →
+`executor.py` (fills each field type and reads the value back) → guards in `engine.py` (questions, review before
+submit, no double submit, confirmation detection, loop/step limits). Stopping conditions raise `Park(status, …)`.
+`guard.check_job` (exclusions, duplicates across sources, per-company window) runs before every application.
+LinkedIn/Indeed URLs (`HANDOFF_HOSTS`) and aggregator pages are handed off to the user, never automated.
+
+**Human in the loop** (`apply/interact.py`): the engine talks to an `Interactor` – terminal implementation for
+the CLI, and a DB-backed one for the dashboard where questions/approvals/handoffs are `Prompt` rows that both the
+runner process and the web UI poll. Answers go into the answer bank (`Answer`) and are reused.
+
+**LLM** (`llm.py`): `find_claude` locates the CLI (handles the Windows npm `.cmd` shim by starting the native
+`claude.exe`), `subscription_env` strips API-key variables so usage always goes to the subscription, structured
+output comes from `--json-schema` (`strict_schema` inlines refs). Usage-limit errors raise `LLMLimitReached` and
+park runs as `paused`; `DYNAMIC_BOUNDARY` splits the cacheable system prompt from the variable part.
+
+**Dashboard** (`web/app.py`): FastAPI JSON API under `/api` plus the prebuilt SPA from `web/dist`. Security model
+for a local server: bind to 127.0.0.1, reject unknown `Host` headers (DNS rebinding), and require `X-Jobslop: 1`
+on every mutating request (CSRF). Apply runs are separate processes managed by `runner.Runner`; the autopilot
+`Scheduler` (`autopilot.py`) runs in the server's lifespan.
+
+**Frontend** (`frontend/src`): React 19 + TS + Vite + Tailwind 4 + Radix + TanStack Query + React Router.
+API client and types in `lib/api.ts` / `lib/types.ts`; all UI strings live in `lib/messages.ts` in German and
+English and the type checker enforces both languages exist.
+
+## Conventions
+
+- Code comments, docstrings, log/event messages and CLI output are mostly German; commit messages are English.
+- New form quirks get an HTML fixture in `tests/fixtures/site/` plus a test in `tests/test_browser.py` (served by
+  the `site` fixture in `conftest.py`, which also records POSTed submissions).
+- Guard rails are product requirements: never invent applicant data (only profile/CV/answer bank), never submit
+  twice, review mode asks before submitting. Every click on a final submit button must go through
+  `ApplyEngine._submit` (`planner.is_final_submit` + `_guard_submit_clicks`).
+- Ruff: line length 110, rules `E F W I UP B SIM ASYNC RUF`.

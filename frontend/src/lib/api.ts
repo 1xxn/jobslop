@@ -54,7 +54,13 @@ async function request<T>(method: string, path: string, body?: unknown, form?: F
     throw new ApiError(0, "jobslop ist nicht erreichbar – läuft das Programm noch?");
   }
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: unknown = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    // z. B. „Internal Server Error“ als Klartext – die Statuszeile ist dann die bessere Meldung
+    if (res.ok) throw new ApiError(res.status, "Unerwartete Antwort von jobslop");
+  }
   if (!res.ok) throw new ApiError(res.status, detail(data, `${res.status} ${res.statusText}`));
   return data as T;
 }
