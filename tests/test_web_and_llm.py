@@ -6,13 +6,17 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
+import pytest
 import respx
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from jobslop.apply.engine import ApplyEngine
 from jobslop.apply.extract import PageState
 from jobslop.apply.planner import JobContext, LLMPlanner, PagePlan, PlanInput
 from jobslop.autopilot import next_run, record
+from jobslop.config import DemoModeError
+from jobslop.crawl.pipeline import run_crawl
 from jobslop.db import Answer, Application, Job, Prompt, session_scope
 from jobslop.importer import import_jobs
 from jobslop.jobpage import parse_html
@@ -35,6 +39,34 @@ def test_api_rejects_foreign_sites(settings, config, profile):
     assert client.post("/api/crawl", headers={"X-Jobslop": ""}).status_code == 403  # CSRF
     assert client.get("/api/status", headers={"Host": "evil.example"}).status_code == 403  # DNS-Rebinding
     assert client.get("/api/status").status_code == 200
+
+
+async def test_demo_mode_blocks_real_actions(settings, config, profile):
+    """Ein Demo-Ordner darf nie echt crawlen, bewerben oder Nachrichten verschicken."""
+    settings.demo = True
+    settings.autopilot_enabled = True
+    settings.notify_webhook_url = "https://hooks.example/abc"
+    client = _client(settings, config, profile)
+    assert client.get("/api/status").json()["demo"] is True
+    for path, body in (
+        ("/api/crawl", None),
+        ("/api/apply", {"job_ids": [1], "mode": "dry-run"}),
+        ("/api/autopilot/run", None),
+        ("/api/jobs", {"url": "https://example.com/jobs/1"}),
+    ):
+        r = client.post(path, json=body)
+        assert r.status_code == 409 and "Demo-Modus" in r.json()["detail"], (path, r.text)
+    assert next_run(settings) is None
+    with respx.mock(assert_all_called=False) as router:
+        hook = router.post("https://hooks.example/abc").respond(204)
+        assert await notify(settings, "t", "m") == 0
+        assert not hook.called
+    with pytest.raises(DemoModeError):
+        await run_crawl(settings, config)
+    engine = ApplyEngine.__new__(ApplyEngine)
+    engine.settings = settings
+    with pytest.raises(DemoModeError):
+        await engine.apply(1)
 
 
 def test_jobs_pipeline_and_stats(settings, config, profile):
@@ -321,3 +353,55 @@ async def test_llm_planner_uses_cv_text(settings, profile):
     call = fake.calls[0]
     assert "Terraform-Module für GCP" in call["system"].split(DYNAMIC_BOUNDARY)[0]
     assert all(block["type"] == "text" for block in call["content"])  # kein Datei-Upload nötig
+
+
+def test_extension_install_uses_the_running_address(settings, config, profile):
+    client = _client(settings, config, profile)
+    info = client.post("/api/extension/install").json()
+    assert info["installed"] and not info["outdated"]
+    cfg = (Path(info["path"]) / "config.js").read_text(encoding="utf-8")
+    assert '"server": "http://testserver"' in cfg  # Adresse, unter der das Dashboard gerade läuft
+    assert (Path(info["path"]) / "extract.js").read_text(encoding="utf-8").startswith("// Aus jobslop")
+    # Assistenz-API nur mit Kopplungs-Token
+    assert client.get("/api/assist/status").status_code == 401
+    token = (settings.home / "extension-token").read_text(encoding="utf-8")
+    assert client.get("/api/assist/status", headers={"X-Jobslop-Token": token}).json()["portals"] is False
+
+
+def test_backend_texts_carry_codes_for_translation(settings, config, profile):
+    """Das Dashboard übersetzt Aktivitäten und Prüf-Ergebnisse über Code + Parameter statt deutschem Klartext."""
+    client = _client(settings, config, profile)
+    client.post("/api/setup/complete", params={"start_crawl": False})
+    entry = client.get("/api/activity").json()[0]
+    assert entry["data"]["code"] == "setup.done" and entry["message"] == "Einrichtung abgeschlossen"
+    job = next(j for j in client.get("/api/jobs", params={"view": "all", "status": "all"}).json()["items"])
+    client.post("/api/exclusions", json={"kind": "company", "value": job["company"], "reason": "test"})
+    verdict = client.get(f"/api/jobs/{job['id']}").json()["verdict"]
+    assert not verdict["ok"] and verdict["code"].startswith("guard.") and verdict["params"]
+    detail = client.get(f"/api/jobs/{job['id']}").json()
+    assert sum(p["points"] for p in detail["score_parts"]) == pytest.approx(detail["score"], abs=0.11)
+
+
+def test_frontend_score_max_matches_backend():
+    """Der Score-Kreis im Dashboard misst gegen dieselbe Obergrenze wie classify."""
+    from jobslop.classify import SCORE_MAX
+
+    domain = (Path(__file__).resolve().parents[1] / "frontend/src/components/domain.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert f"export const SCORE_MAX = {SCORE_MAX:g};" in domain
+
+
+def test_every_backend_code_has_a_translation():
+    """Jeder Code, den das Backend ausgibt (record/activity/_no), braucht einen be.*-Text in beiden Sprachen.
+    Abgeleitet aus dem Quelltext – ein neuer Code ohne Übersetzung fällt hier auf."""
+    import re
+
+    root = Path(__file__).resolve().parents[1]
+    source = "\n".join(p.read_text(encoding="utf-8") for p in (root / "src" / "jobslop").rglob("*.py"))
+    codes = set(re.findall(r'code="([a-z_]+\.[a-z_.]+)"', source))
+    codes |= {f"guard.{c}" for c in re.findall(r'_no\(\s*(?:f?"[^"]*"|\w+),\s*"([a-z_]+)"', source, re.S)}
+    assert {"crawl.done", "status.changed", "guard.closed", "guard.company_limit"} <= codes
+    messages = (root / "frontend" / "src" / "lib" / "messages.ts").read_text(encoding="utf-8")
+    missing = [c for c in sorted(codes) if messages.count(f'"be.{c}":') != 2]  # Deutsch und Englisch
+    assert missing == []

@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect } from "react";
+import { lazy, type ReactNode, Suspense, useEffect } from "react";
 import { createBrowserRouter, Navigate, RouterProvider, useLocation } from "react-router";
 import { Toaster } from "sonner";
 import { AppShell } from "./components/layout/AppShell";
@@ -7,30 +7,36 @@ import { TooltipProvider } from "./components/ui/overlays";
 import { Spinner } from "./components/ui/primitives";
 import { useStatus } from "./lib/hooks";
 import { useI18n } from "./lib/i18n";
-import { ActivityPage } from "./pages/Activity";
-import { ApplicationDetailPage } from "./pages/ApplicationDetail";
-import { ApplicationsPage } from "./pages/Applications";
-import { JobsPage } from "./pages/Jobs";
-import { OverviewPage } from "./pages/Overview";
-import { PipelinePage } from "./pages/Pipeline";
-import { SettingsPage } from "./pages/settings/Settings";
-import { SetupWizard } from "./pages/setup/SetupWizard";
+
+// Jede Seite ist ein eigener Chunk – geladen wird nur, was du öffnest.
+const ActivityPage = lazy(() => import("./pages/Activity").then((m) => ({ default: m.ActivityPage })));
+const ApplicationDetailPage = lazy(() =>
+  import("./pages/ApplicationDetail").then((m) => ({ default: m.ApplicationDetailPage })),
+);
+const ApplicationsPage = lazy(() => import("./pages/Applications").then((m) => ({ default: m.ApplicationsPage })));
+const JobsPage = lazy(() => import("./pages/Jobs").then((m) => ({ default: m.JobsPage })));
+const OverviewPage = lazy(() => import("./pages/Overview").then((m) => ({ default: m.OverviewPage })));
+const PipelinePage = lazy(() => import("./pages/Pipeline").then((m) => ({ default: m.PipelinePage })));
+const SettingsPage = lazy(() => import("./pages/settings/Settings").then((m) => ({ default: m.SettingsPage })));
+const SetupWizard = lazy(() => import("./pages/setup/SetupWizard").then((m) => ({ default: m.SetupWizard })));
+
+function FullPageSpinner() {
+  return (
+    <div className="grid min-h-dvh place-items-center">
+      <div className="flex flex-col items-center gap-4">
+        <Logo />
+        <Spinner />
+      </div>
+    </div>
+  );
+}
 
 /** Leitet beim ersten Start in die Einrichtung. */
 function SetupGate({ children }: { children: ReactNode }) {
   const { data, isLoading, isError } = useStatus();
   const location = useLocation();
   const { t } = useI18n();
-  if (isLoading) {
-    return (
-      <div className="grid min-h-dvh place-items-center">
-        <div className="flex flex-col items-center gap-4">
-          <Logo />
-          <Spinner />
-        </div>
-      </div>
-    );
-  }
+  if (isLoading) return <FullPageSpinner />;
   if (isError) {
     return (
       <div className="grid min-h-dvh place-items-center p-6 text-center">
@@ -52,7 +58,14 @@ function Gated({ children }: { children: ReactNode }) {
 }
 
 const router = createBrowserRouter([
-  { path: "/setup", element: <SetupWizard /> },
+  {
+    path: "/setup",
+    element: (
+      <Suspense fallback={<FullPageSpinner />}>
+        <SetupWizard />
+      </Suspense>
+    ),
+  },
   {
     element: (
       <Gated>

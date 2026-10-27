@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "jobslop Assistent",
+  "description": "Füllt Bewerbungsformulare in deinem eigenen Chrome mit deinem lokalen jobslop aus. Abgeschickt wird erst nach deinem Klick.",
+  "version": "1.0.0",
+  "action": {
+    "default_title": "jobslop: dieses Formular ausfüllen"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["scripting", "storage"],
+  "host_permissions": ["<all_urls>"]
+}

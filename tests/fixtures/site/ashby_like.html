@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Platform Engineer – Application</title></head>
+<body>
+<!-- Wie Ashby: kein <form>-Element, Upload über einen Button mit verstecktem Datei-Input, Absenden per Klick-Handler -->
+<div id="app">
+  <div><label for="n">Name</label><input id="n" required></div>
+  <div><label for="e">Email</label><input id="e" type="email" required></div>
+  <div>
+    <label for="resume">Resume</label>
+    <button type="button" onclick="document.getElementById('resume').click()">Upload File</button>
+    <input type="file" id="resume" style="display:none">
+  </div>
+  <div id="errors"></div>
+  <button type="button" id="send">Submit Application</button>
+</div>
+<script>
+  document.getElementById('send').addEventListener('click', async () => {
+    const data = {
+      name: document.getElementById('n').value,
+      email: document.getElementById('e').value,
+      resume: document.getElementById('resume').files.length ? document.getElementById('resume').files[0].name : '',
+    };
+    const missing = ['name', 'email', 'resume'].filter(k => !data[k]);
+    if (missing.length) {
+      document.getElementById('errors').innerHTML = '<div role="alert">Missing: ' + missing.join(', ') + '</div>';
+      return;
+    }
+    await fetch('/submit', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)});
+    document.body.innerHTML = '<h1>Application submitted</h1><p>Thank you for applying.</p>';
+  });
+</script>
+</body>
+</html>

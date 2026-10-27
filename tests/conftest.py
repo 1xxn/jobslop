@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import contextlib
 import json
+import socket
 import threading
+import time
+from collections.abc import Iterator
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
 import pytest
+import uvicorn
 
 from jobslop.apply.planner import OpenQuestion
 from jobslop.config import SearchConfig, Settings
@@ -121,3 +126,22 @@ class ScriptedInteractor:
 
     async def handoff(self, app_id, title, message, check=None) -> bool:
         return True
+
+
+@contextlib.contextmanager
+def serve(app) -> Iterator[str]:
+    """Startet eine App (Dashboard) auf einem freien lokalen Port in einem Thread und liefert ihre Adresse."""
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10
+    while not server.started and time.monotonic() < deadline:
+        time.sleep(0.05)
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.should_exit = True
+        thread.join(5)

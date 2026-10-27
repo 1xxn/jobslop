@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+### New
+- Many more jobs: the German Federal Employment Agency (official job search, every industry, without temp
+  agencies), LinkedIn, Indeed and Glassdoor (public search via JobSpy, no login), Recruitee and Workable boards.
+  One list of search terms now serves all job boards (`queries`, formerly `himalayas_queries`).
+- Company boards are discovered automatically: companies from job boards are looked up on Greenhouse, Ashby,
+  Lever, Recruitee, Workable and Personio; found boards are crawled and replace the job-board entries.
+- Jobs on pages behind bot checks (Himalayas, Glassdoor) are marked as browser-only: never queued automatically,
+  ranked lower, applied to in your own browser.
+- Browser extension: fills application forms in your own Chrome (same form reader and planner as the engine),
+  asks for missing answers in an in-page panel and only submits after your click. LinkedIn/Indeed Easy Apply
+  can be enabled explicitly, with a daily limit.
+- Read-only smoke tests against real sites (`JOBSLOP_NETWORK=1`).
+- Frontend tests (Vitest), an end-to-end test of the dashboard on demo data and a release workflow: tagging
+  `vX.Y.Z` re-runs CI, checks the version and publishes wheel, sdist and release notes.
+- Every score is explained in the job details (target role, stack, company, level, location – out of 21 points).
+- Activity and guard messages are translated in the English UI (backend stores a code with parameters).
+
+### Improved
+- Leaner overview: what needs you, key figures, top matches and one “up next” card; the weekly chart moved to
+  Applications, the full log is on the Activity page.
+- The dashboard loads only the page you open (code splitting); libraries are cached separately across updates.
+- The job list and job details show where a job came from (LinkedIn, Indeed, Arbeitsagentur, Greenhouse …).
+
+### Fixed
+- The submit button can no longer be clicked past the review: a planner that lists it as a plain click action or as
+  "next" is routed through approval / dry run.
+- Claude may only read files in its own work folder when it gets screenshots (prompt injection from job pages).
+- Demo folders are in demo mode: no crawling, applying, autopilot or notifications. The demo script no longer turns
+  the autopilot on.
+- Changing roles or locations no longer marks jobs as closed that are still online; capped Workday/amazon.jobs
+  searches and careers pages read by Claude no longer close jobs they simply did not list.
+- Arbeitnow jobs from its UK/French/Swiss/Dutch sites are no longer labelled as Germany.
+- The CLI no longer crashes on Windows when its output is redirected (Task Scheduler, pipes).
+- "Stop" ends the whole application run including browser processes; LinkedIn/Indeed are detected at every step,
+  not only on the first page; a dry-run batch keeps only the last filled page open.
+- Claude Code tests now also run on Windows.
+- The rule planner recognises "Send" as a submit button (Recruitee).
+
 ## 1.0.0 – jobslop
 
 The project formerly known as *jobpilot* becomes **jobslop**.
