@@ -6,12 +6,19 @@ import { PageHeader } from "@/components/domain";
 import { Tooltip } from "@/components/ui/overlays";
 import { Badge, Button, Card, CardHeader, EmptyState } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
+import { codeOf, useBackendText } from "@/lib/backendText";
 import { useStatus } from "@/lib/hooks";
 import { useI18n } from "@/lib/i18n";
+import { hasMessage } from "@/lib/messages";
 import { formatDateTime, formatRelative } from "@/lib/utils";
 
 export function ActivityPage() {
   const { t, lang } = useI18n();
+  const backendText = useBackendText();
+  const kindLabel = (kind: string) => {
+    const key = `kind.${kind}`;
+    return hasMessage(key) ? t(key) : kind;
+  };
   const qc = useQueryClient();
   const { data: status } = useStatus();
   const crawls = useQuery({ queryKey: ["crawls"], queryFn: api.crawls, refetchInterval: status?.crawl.running ? 3000 : 30_000 });
@@ -103,10 +110,10 @@ export function ActivityPage() {
             {activity.data?.map((item) => (
               <li key={item.id} className="flex gap-3">
                 <Badge tone="outline" className="mt-0.5 shrink-0">
-                  {item.kind}
+                  {kindLabel(item.kind)}
                 </Badge>
                 <div className="min-w-0">
-                  <div className="text-footnote leading-snug break-words">{item.message}</div>
+                  <div className="text-footnote leading-snug break-words">{backendText(...codeOf(item.data), item.message)}</div>
                   <div className="text-caption text-fg-subtle">{formatRelative(item.ts, lang)}</div>
                 </div>
               </li>

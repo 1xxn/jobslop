@@ -24,9 +24,28 @@ log = logging.getLogger(__name__)
 Notify = Callable[[str, str], Awaitable[Any]]
 
 
-def record(settings: Settings, kind: str, message: str, data: dict[str, Any] | None = None) -> None:
+def activity(
+    kind: str, message: str, data: dict[str, Any] | None = None, *, code: str = "", **params: Any
+) -> Activity:
+    """Eintrag im Aktivitätsprotokoll. ``message`` ist deutscher Klartext (CLI, ältere Einträge); ``code`` und
+    ``params`` übersetzt das Dashboard (Schlüssel ``be.<code>`` in frontend/src/lib/messages.ts)."""
+    payload = dict(data or {})
+    if code:
+        payload |= {"code": code, "params": params}
+    return Activity(kind=kind, message=message, data=payload)
+
+
+def record(
+    settings: Settings,
+    kind: str,
+    message: str,
+    data: dict[str, Any] | None = None,
+    *,
+    code: str = "",
+    **params: Any,
+) -> None:
     with session_scope(settings.db_path) as s:
-        s.add(Activity(kind=kind, message=message, data=data or {}))
+        s.add(activity(kind, message, data, code=code, **params))
 
 
 async def crawl_and_queue(runtime: Runtime, *, queue_count: int) -> dict[str, Any]:
@@ -48,12 +67,17 @@ async def crawl_and_queue(runtime: Runtime, *, queue_count: int) -> dict[str, An
         "kept": report.kept,
         "queued": added,
         "errors": len(report.errors),
+        "discovered": len(report.discovered),
     }
     record(
         runtime.settings,
         "crawl",
         f"Crawl #{report.run_id}: {len(report.new)} neue Stellen, {len(added)} eingereiht",
         summary,
+        code="crawl.done",
+        run=report.run_id,
+        new=len(report.new),
+        queued=len(added),
     )
     return summary
 
@@ -70,7 +94,7 @@ def last_autopilot_run(settings: Settings) -> datetime | None:
 
 def next_run(settings: Settings, now: datetime | None = None) -> datetime | None:
     """Nächster geplanter Lauf in Ortszeit (None, wenn der Autopilot aus ist)."""
-    if not settings.autopilot_enabled or not settings.autopilot_days:
+    if settings.demo or not settings.autopilot_enabled or not settings.autopilot_days:
         return None
     now = now or datetime.now()
     try:

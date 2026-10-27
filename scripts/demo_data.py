@@ -11,13 +11,13 @@ from __future__ import annotations
 import argparse
 import random
 import shutil
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
+from jobslop.autopilot import activity
 from jobslop.classify import fingerprint, match_key
 from jobslop.config import Settings, default_search_config, save_settings
 from jobslop.db import (
-    Activity,
     Answer,
     Application,
     ApplicationEvent,
@@ -92,9 +92,11 @@ def build(home: Path, *, seed: int = 7) -> None:
     profile.save(settings.profile_path)
     config = default_search_config()
     config.save(settings.search_path)
-    # Autopilot an, aber erst in zwei Stunden fällig – ein Demo-Server soll nie echt crawlen
-    later = (datetime.now() + timedelta(hours=2)).strftime("%H:00")
-    save_settings(settings, {"setup_completed": True, "autopilot_enabled": True, "autopilot_time": later})
+    # Autopilot aus und Demo-Modus an: ein Demo-Server darf nie echt crawlen, bewerben oder Nachrichten senden.
+    # „demo“ ist im Dashboard nicht änderbar und steht deshalb direkt in settings.toml.
+    save_settings(settings, {"setup_completed": True, "autopilot_enabled": False, "autopilot_time": "08:00"})
+    with settings.settings_path.open("a", encoding="utf-8") as fh:
+        fh.write("demo = true\n")
     roles = config.role_names
     now = utcnow()
 
@@ -348,16 +350,37 @@ def build(home: Path, *, seed: int = 7) -> None:
             ("Hast du eine Arbeitserlaubnis in der EU?", "Ja"),
         ):
             s.add(Answer(question_key=q.lower(), question=q, answer=a))
-        for i, (kind, msg) in enumerate(
-            (
-                ("crawl", "Crawl #6: 18 neue Stellen, 5 eingereiht"),
-                ("run", "Bewerbungslauf beendet: 3× submitted, 1× needs_input"),
-                ("status", "Spreebyte · Platform Engineer – Kubernetes: interview"),
-                ("autopilot", "Autopilot: 18 neue Stellen, 5 eingereiht – Bewerbungen laufen"),
-                ("setup", "Einrichtung abgeschlossen"),
-            )
-        ):
-            s.add(Activity(kind=kind, message=msg, ts=now - timedelta(hours=3 + i * 9)))
+        # Wie im echten Betrieb: Klartext plus Code/Parameter, die das Dashboard übersetzt
+        entries = [
+            activity(
+                "crawl", "Crawl #6: 18 neue Stellen, 5 eingereiht", code="crawl.done", run=6, new=18, queued=5
+            ),
+            activity(
+                "run",
+                "Bewerbungslauf beendet: 3× submitted, 1× needs_input",
+                code="run.finished",
+                counts={"submitted": 3, "needs_input": 1},
+            ),
+            activity(
+                "status",
+                "Spreebyte · Platform Engineer – Kubernetes: interview",
+                code="status.changed",
+                company="Spreebyte",
+                title="Platform Engineer – Kubernetes",
+                status="interview",
+            ),
+            activity(
+                "autopilot",
+                "Autopilot: 18 neue Stellen, 5 eingereiht",
+                code="autopilot.done",
+                new=18,
+                queued=5,
+            ),
+            activity("setup", "Einrichtung abgeschlossen", code="setup.done"),
+        ]
+        for i, entry in enumerate(entries):
+            entry.ts = now - timedelta(hours=3 + i * 9)
+            s.add(entry)
 
 
 def main() -> None:

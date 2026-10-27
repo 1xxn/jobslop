@@ -50,6 +50,19 @@ upserts jobs by fingerprint. Every run writes snapshots (`new`, `updated` with a
 - The same job from a job board and a company board is stored once; the company board wins.
 - Claude rates at most `limits.max_enrich_per_crawl` new jobs per run (best rule score first) to protect your quota.
 
+Sources: API boards (`greenhouse`, `ashby`, `lever`, `smartrecruiters`, `personio`, `recruitee`, `workable`,
+`workday`, `amazon`), job boards with keyword search (`arbeitsagentur` – the official German job search API,
+`himalayas`, `arbeitnow`) and the big portals (`portal:linkedin`, `portal:indeed`, `portal:glassdoor`) through
+[JobSpy](https://github.com/speedyapply/JobSpy) – public search only, no login, throttled; LinkedIn searches are
+bundled into one OR query per location and descriptions are loaded only for jobs that pass the filters.
+
+**Board discovery** (`crawl/boards.py`): companies from job-board hits are looked up on Greenhouse, Ashby, Lever,
+Recruitee, Workable and Personio (slug guesses from the company name). A board only counts if the same job is
+listed there; hits and misses are stored in the `boards` table (misses are rechecked after 30 days) and found
+boards are crawled from then on. Their postings replace the job-board entries – which matters for job boards whose
+pages sit behind bot checks (Himalayas, Glassdoor): those are *browser-only* (`hosts.py`), never queued
+automatically and ranked lower, and can still be applied to through the browser extension.
+
 ## The application engine (`apply/`)
 
 One application is a loop of up to `max_steps_per_application` steps:
@@ -71,6 +84,18 @@ One application is a loop of up to `max_steps_per_application` steps:
 
 Usage limits of the subscription pause the run (`paused`) without submitting anything half-filled.
 
+## Browser extension (`assist.py`, `extension/`)
+
+An unpacked Chrome extension (Manifest V3) that applies in the user's own browser – where the automated Chromium
+gets stuck in bot checks or needs a login. The dashboard writes it to `~/.jobslop/extension` together with
+`config.js` (server address + pairing token) and `extract.js` (the engine's form reader). Flow per step: the
+extension reads every frame with `extract.js`, posts it to `/api/assist/step` (token in `X-Jobslop-Token`), the
+server builds a `PageState`, plans with the normal planner, applies `guard_submit_clicks` and compiles each action
+into a concrete instruction (option already resolved, files as placeholders that the extension downloads). The
+extension fills, reports results, shows questions in an in-page panel and stops before the final submit until the
+user clicks “Submit”. CAPTCHA frames are never read or touched. LinkedIn/Indeed pages are refused unless
+`extension_portals` is on, with a daily submission limit.
+
 ## Dashboard
 
 FastAPI serves a JSON API and the pre-built React app. Security for a local server:
@@ -84,5 +109,23 @@ approvals, handoffs) are rows in the database that both sides poll. The autopilo
 dashboard; `jobslop autopilot` provides the same for OS schedulers.
 
 Frontend stack: React 19, TypeScript, Vite, Tailwind CSS 4, Radix UI primitives, TanStack Query, React Router,
-lucide icons. Design tokens follow Material 3 colour roles and Apple HIG typography/spacing; light and dark themes,
+lucide icons. Every page is its own chunk (`React.lazy`); libraries are split into `react` and `vendor` chunks so an
+update only reloads the app code.
+
+### Texts and languages
+
+The UI is German and English (`frontend/src/lib/messages.ts`, the type checker enforces both). Texts that originate
+in the backend are stored as German plain text **plus a code with parameters** – e.g. an activity entry
+`{"code": "crawl.done", "params": {"run": 6, "new": 18, "queued": 5}}` or a guard verdict
+`{"code": "guard.company_limit", "params": {…}}`. The dashboard translates them via `be.<code>` keys
+(`lib/backendText.ts`, which also translates `status`, `mode` and `counts` parameters) and falls back to the plain
+text for entries without a code (older data, free-form errors). New backend messages that reach the UI should
+follow this pattern: `record(…, code="…", **params)` for activity, `Verdict.code/params` for guard results.
+The CLI, logs and application events are still German only.
+
+### Score
+
+`classify.score_parts` lists the parts of a job's score (target role up to 10, stack fit up to 6, kind of company up
+to 3, level −4…+1, close by +1, remote −0.5; jobs that can only be applied to in your own browser −4). The maximum
+is `SCORE_MAX` = 21. The job detail API returns the parts, the dashboard explains every score with them. Design tokens follow Material 3 colour roles and Apple HIG typography/spacing; light and dark themes,
 German and English.

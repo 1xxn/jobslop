@@ -133,8 +133,83 @@ export function ApplySettings() {
           </Field>
         </CardBody>
       </Card>
+      <ExtensionCard
+        portals={s.extension_portals}
+        limit={s.extension_portal_daily_limit}
+        onPortals={(v) => set("extension_portals", v)}
+        onLimit={(v) => set("extension_portal_daily_limit", v)}
+      />
       {bar}
     </div>
+  );
+}
+
+function ExtensionCard({
+  portals,
+  limit,
+  onPortals,
+  onLimit,
+}: {
+  portals: boolean;
+  limit: number;
+  onPortals: (v: boolean) => void;
+  onLimit: (v: number) => void;
+}) {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  const info = useQuery({ queryKey: ["extension"], queryFn: api.extension });
+  const install = useMutation({
+    mutationFn: api.installExtension,
+    onSuccess: (r) => {
+      qc.setQueryData(["extension"], r);
+      toast.success(t("ext.installed"));
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const folder = useMutation({ mutationFn: api.openExtensionFolder });
+  const x = info.data;
+  return (
+    <Card>
+      <CardHeader title={t("ext.title")} description={t("ext.hint")} />
+      <CardBody className="space-y-4">
+        {x && (
+          <StatusLine
+            ok={x.installed && !x.outdated}
+            title={x.installed ? (x.outdated ? t("ext.outdated") : t("ext.ready")) : t("ext.missing")}
+            text={x.installed ? <code className="break-all text-footnote">{x.path}</code> : t("ext.missing_hint")}
+            action={
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant={x.installed && !x.outdated ? "secondary" : "primary"} onClick={() => install.mutate()} disabled={install.isPending}>
+                  <Wand2 /> {x.installed ? t("ext.update") : t("ext.install")}
+                </Button>
+                {x.installed && (
+                  <Button size="sm" variant="secondary" onClick={() => folder.mutate()}>
+                    <FolderOpen /> {t("ext.open_folder")}
+                  </Button>
+                )}
+              </div>
+            }
+          />
+        )}
+        <ol className="list-decimal space-y-1 pl-5 text-[0.875rem] text-fg-muted">
+          <li>{t("ext.step1")}</li>
+          <li>{t("ext.step2")}</li>
+          <li>{t("ext.step3")}</li>
+          <li>{t("ext.step4")}</li>
+        </ol>
+        <div className="divide-y divide-border">
+          <SwitchRow title={t("ext.portals")} description={t("ext.portals_hint")} checked={portals} onCheckedChange={onPortals} />
+        </div>
+        {portals && (
+          <Field
+            label={t("ext.limit")}
+            hint={x ? t("ext.limit_hint", { used: x.portal_used, limit: x.portal_limit }) : undefined}
+          >
+            <Input type="number" min={0} max={100} value={limit} onChange={(e) => onLimit(Number(e.target.value) || 0)} className="w-28" />
+          </Field>
+        )}
+      </CardBody>
+    </Card>
   );
 }
 

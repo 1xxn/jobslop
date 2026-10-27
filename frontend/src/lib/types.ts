@@ -63,6 +63,7 @@ export interface RunnerState {
 export interface Status {
   version: string;
   setup_completed: boolean;
+  demo: boolean;
   prompts: Prompt[];
   runner: RunnerState;
   crawl: { running: boolean; started_at: string | null; last: CrawlSummary | null };
@@ -96,6 +97,7 @@ export interface JobSummary {
   queued: boolean;
   starred: boolean;
   source: string;
+  board: boolean;
   url: string;
   posted: string;
   first_seen: string | null;
@@ -122,7 +124,8 @@ export interface JobDetail extends JobSummary {
   segment: string;
   language: string;
   last_seen: string | null;
-  verdict: { ok: boolean; reason: string };
+  verdict: { ok: boolean; reason: string; code?: string; params?: Record<string, unknown> };
+  score_parts: { key: string; points: number }[];
   history: { seen_at: string; change: string; diff: Record<string, unknown> }[];
   applications: ApplicationSummary[];
 }
@@ -190,6 +193,7 @@ export interface ActivityItem {
   ts: string;
   kind: string;
   message: string;
+  data?: Record<string, unknown>;
 }
 
 export interface Stats {
@@ -235,18 +239,33 @@ export interface SearchConfig {
     lever: string[];
     smartrecruiters: string[];
     personio: string[];
+    recruitee: string[];
+    workable: string[];
     workday: { company: string; host: string; tenant: string; site: string; search_text: string }[];
     amazon_queries: string[];
     amazon_country: string;
+    queries: string[];
     arbeitnow: boolean;
     arbeitnow_max_pages: number;
-    himalayas_queries: string[];
+    himalayas: boolean;
     himalayas_country: string;
+    arbeitsagentur: boolean;
+    arbeitsagentur_radius_km: number;
+    arbeitsagentur_skip_agencies: boolean;
+    portals: Portal[];
+    portal_country: string;
+    portal_results: number;
+    portal_hours_old: number;
+    discover_boards: boolean;
+    discover_max_per_crawl: number;
     generic: { company: string; url: string }[];
   };
   segments: Record<string, string[]>;
   skills: string[];
 }
+
+export const PORTALS = ["linkedin", "indeed", "glassdoor"] as const;
+export type Portal = (typeof PORTALS)[number];
 
 export interface Preset {
   id: string;
@@ -277,6 +296,18 @@ export interface Settings {
   notify_webhook_url: string;
   follow_up_days: number;
   setup_completed: boolean;
+  extension_portals: boolean;
+  extension_portal_daily_limit: number;
+}
+
+export interface ExtensionInfo {
+  path: string;
+  installed: boolean;
+  outdated: boolean;
+  version: string;
+  portals: boolean;
+  portal_limit: number;
+  portal_used: number;
 }
 
 export interface Experience {

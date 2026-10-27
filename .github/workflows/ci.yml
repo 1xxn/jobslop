@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call: # vom Release-Workflow vor dem Veröffentlichen aufgerufen
 
 permissions:
   contents: read
@@ -55,6 +56,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run typecheck
+      - run: npm test
       - run: npm run build
       - name: Committed build matches the sources
         run: |

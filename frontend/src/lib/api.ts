@@ -6,6 +6,7 @@ import type {
   ApplyMode,
   CrawlRun,
   Exclusion,
+  ExtensionInfo,
   JobDetail,
   JobList,
   JobSummary,
@@ -54,7 +55,13 @@ async function request<T>(method: string, path: string, body?: unknown, form?: F
     throw new ApiError(0, "jobslop ist nicht erreichbar – läuft das Programm noch?");
   }
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: unknown = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    // z. B. „Internal Server Error“ als Klartext – die Statuszeile ist dann die bessere Meldung
+    if (res.ok) throw new ApiError(res.status, "Unerwartete Antwort von jobslop");
+  }
   if (!res.ok) throw new ApiError(res.status, detail(data, `${res.status} ${res.statusText}`));
   return data as T;
 }
@@ -92,6 +99,9 @@ export const api = {
   claudeInstall: () => post<{ opened: boolean }>("/api/system/claude-install"),
   browserInstall: () => post<SystemReport["browser_install"]>("/api/system/browser-install"),
   openFolder: () => post<{ opened: boolean }>("/api/system/open-folder"),
+  extension: () => get<ExtensionInfo>("/api/extension"),
+  installExtension: () => post<ExtensionInfo>("/api/extension/install"),
+  openExtensionFolder: () => post<{ opened: boolean }>("/api/extension/open-folder"),
 
   profile: () => get<ProfileResponse>("/api/profile"),
   saveProfile: (profile: Profile) => put<ProfileResponse>("/api/profile", profile),

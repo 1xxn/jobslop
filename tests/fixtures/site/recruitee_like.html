@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>System Analyst – Beispiel Payments</title></head>
+<body>
+<!-- Wie Recruitee: Reiter, „Apply with Indeed“ neben dem eigenen Formular, Absende-Button heißt nur „Send“ -->
+<div role="tablist">
+  <button type="button" role="tab" aria-selected="false">Job details</button>
+  <button type="button" role="tab" aria-selected="true">Application</button>
+</div>
+<button type="button" id="indeed" onclick="window.indeedClicked = true">Apply with Indeed</button>
+<form id="app" novalidate>
+  <p><label for="name">Full name *</label><input id="name" name="name" required></p>
+  <p><label for="email">Email address *</label><input id="email" name="email" type="email" placeholder="Your email address" required></p>
+  <p><label for="cv">CV or resume *</label><input id="cv" name="cv" type="file" required></p>
+  <div id="errors"></div>
+  <button type="submit">Send</button>
+</form>
+<script>
+  document.getElementById('app').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const data = { name: f.name.value, email: f.email.value, cv: f.cv.files.length ? f.cv.files[0].name : '', indeed: !!window.indeedClicked };
+    const missing = ['name', 'email', 'cv'].filter(k => !data[k]);
+    if (missing.length) {
+      document.getElementById('errors').innerHTML = '<div role="alert">Required: ' + missing.join(', ') + '</div>';
+      return;
+    }
+    await fetch('/submit', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)});
+    document.body.innerHTML = '<h1>Thank you for your application!</h1><p>We have received your application.</p>';
+  });
+</script>
+</body>
+</html>
