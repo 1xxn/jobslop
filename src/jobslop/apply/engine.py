@@ -441,6 +441,12 @@ class ApplyEngine:
                 if failures and run.submit_attempts < 2:
                     run.submit_attempts += 1
                     continue  # erst Fehler beheben lassen
+                empty = state.missing_required() if not run.submit_clicked else []
+                if empty and run.submit_attempts < 2:
+                    # Nicht mit leerem Pflichtfeld um Freigabe bitten (Echttest Arbeitnow: Lebenslauf fehlte)
+                    run.submit_attempts += 1
+                    failures = [f"Pflichtfeld noch leer: {f.get('label') or f['id']}" for f in empty[:5]]
+                    continue
                 # Schutz vor Doppel-Bewerbungen: erneut absenden nur, wenn seit dem letzten Klick etwas korrigiert wurde.
                 if run.submit_clicked and (run.fills_since_submit == 0 or run.submit_clicks >= 3):
                     errors = "; ".join(state.errors[:5]) or "keine Fehlermeldung sichtbar"

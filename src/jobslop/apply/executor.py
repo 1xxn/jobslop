@@ -297,8 +297,10 @@ class Executor:
             before = await self._page_text()
             await loc.set_input_files([str(p) for p in chosen], timeout=10_000)
             await asyncio.sleep(1.2)
-            if not multiple and not await self._shows_files(chosen, before):
-                # Drop-Zonen (z. B. JOIN) übernehmen Dateien nur über die Dateiauswahl ihrer sichtbaren Fläche
+            # Nur versteckte Felder hinter einer Drop-Zone (z. B. JOIN) brauchen die Rückfallebene. Ein sichtbares Feld
+            # zeigt den Dateinamen selbst an (nicht im Seitentext) – dort bleibt die Datei einfach gesetzt.
+            hidden = not await loc.is_visible()
+            if hidden and not multiple and not await self._shows_files(chosen, before):
                 await self._upload_via_zone(loc, chosen)
         else:
             async with self.page.expect_file_chooser(timeout=8000) as fc_info:
@@ -326,15 +328,19 @@ class Executor:
         zone = handle.as_element()
         if zone is None:
             return
-        # Dieselbe Datei steckt schon im Feld – ohne Leeren meldet der Browser bei erneuter Auswahl keine Änderung
-        with contextlib.suppress(Exception):
+        try:
+            # Dieselbe Datei steckt schon im Feld – ohne Leeren meldet der Browser bei erneuter Auswahl keine Änderung
             await loc.evaluate("e => { e.value = ''; }")
-        with contextlib.suppress(Exception):
             async with self.page.expect_file_chooser(timeout=6000) as fc_info:
-                await zone.click()
+                await zone.click(timeout=4000)
             chooser = await fc_info.value
             await chooser.set_files([str(p) for p in files])
             log.info("Upload über die sichtbare Upload-Fläche wiederholt")
+        except Exception as exc:
+            # Fläche nicht klickbar (Overlay o. Ä.): Datei wieder direkt setzen – nie ein geleertes Feld zurücklassen
+            log.info("Upload-Fläche nicht nutzbar (%s) – Datei wieder direkt gesetzt", type(exc).__name__)
+            with contextlib.suppress(Exception):
+                await loc.set_input_files([str(p) for p in files], timeout=10_000)
 
 
 # Sichtbare Fläche zu einem (meist versteckten) Datei-Feld: zugehöriges Label oder der nächste sichtbare Vorfahr
