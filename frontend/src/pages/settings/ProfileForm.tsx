@@ -3,12 +3,13 @@ import { CircleAlert, FileText, Plus, Trash2, Upload } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ChipsInput, Switch } from "@/components/ui/controls";
-import { Button, SectionBody, SectionHeader, Field, Input, Select, Skeleton, Textarea } from "@/components/ui/primitives";
+import { Button, SectionBody, SectionHeader, Field, Input, Select, Textarea } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import type { Profile } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { SaveBar } from "./SaveBar";
+import { Pending } from "@/components/domain";
 
 type Section = "personal" | "work" | "documents" | "preferences" | "experience" | "answers";
 
@@ -37,7 +38,6 @@ export function ProfileForm({
       if (!autosave) toast.success(t("common.saved"));
       onSaved?.();
     },
-    onError: (e: Error) => toast.error(e.message),
   });
   // Im Assistenten: Änderungen nach kurzer Pause automatisch speichern
   useEffect(() => {
@@ -47,7 +47,7 @@ export function ProfileForm({
   }, [p, dirty, autosave]); // save absichtlich nicht als Abhängigkeit (neue Referenz je Render)
   const show = (s: Section) => !sections || sections.includes(s);
 
-  if (!p) return <Skeleton className="h-96 rounded-lg" />;
+  if (!p) return <Pending query={data} className="h-96 rounded-lg" />;
   const set = <K extends keyof Profile>(key: K, value: Profile[K]) => {
     setP({ ...p, [key]: value });
     setDirty(true);
@@ -305,7 +305,6 @@ export function DocumentsCard({ importOnUpload = false, onImported }: { importOn
       toast.success(r.message || t("profile.uploaded"));
       if (importOnUpload) onImported?.();
     },
-    onError: (e: Error) => toast.error(e.message),
   });
   const docs = data.data?.documents;
   const slot = (kind: "cv" | "cv_en", title: string, hint: string) => {

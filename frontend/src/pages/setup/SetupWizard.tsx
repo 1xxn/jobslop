@@ -3,7 +3,7 @@ import { Check } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
-import { Logo, StatusGlyph } from "@/components/domain";
+import { LoadError, Logo, StatusGlyph } from "@/components/domain";
 import { ChipsInput, Segmented, SwitchRow } from "@/components/ui/controls";
 import { Button, SectionBody, Kbd, Progress } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
@@ -39,9 +39,8 @@ export function SetupWizard() {
     if (current.id === "search" && searchDraft) {
       try {
         await saveSearch.mutateAsync(searchDraft);
-      } catch (e) {
-        toast.error((e as Error).message);
-        return;
+      } catch {
+        return; // die Meldung kommt als Toast (main.tsx)
       }
     }
     setStep((s) => Math.min(s + 1, STEPS.length - 1));
@@ -158,7 +157,9 @@ function ClaudeStep() {
       <StepTitle title={t("setup.claude_title")} text={t("setup.claude_text")} />
       <section>
         <SectionBody className="pt-5">
-          {!c ? (
+          {sys.isError ? (
+            <LoadError error={sys.error} onRetry={() => sys.refetch()} />
+          ) : !c ? (
             <p className="text-meta text-ink-2">{t("setup.checking")}</p>
           ) : c.ok ? (
             <StatusLine
@@ -308,7 +309,6 @@ function FinishStep() {
       toast.success(t("setup.done_toast"));
       navigate("/");
     },
-    onError: (e: Error) => toast.error(e.message),
   });
   const s = sys.data;
   return (

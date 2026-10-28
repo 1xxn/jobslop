@@ -44,7 +44,8 @@ export const PromptCard = forwardRef<HTMLDivElement, { prompt: Prompt; showLink?
         qc.invalidateQueries({ queryKey: ["status"] });
         qc.invalidateQueries({ queryKey: ["application", prompt.application_id] });
       },
-      onError: (e: Error) => toast.error(e.message),
+      // z. B. „nicht mehr offen“, weil der Lauf vorbei ist: die veraltete Karte verschwinden lassen
+      onError: () => qc.invalidateQueries({ queryKey: ["status"] }),
     });
     const questions = prompt.payload.questions ?? [];
     const rows = prompt.payload.rows ?? [];

@@ -96,6 +96,7 @@ function RunDrawer({
   const crawl = useCrawl();
   const autopilot = useAutopilotRun();
   const last = crawls.data?.[0];
+  const failed = status?.crawl.last?.error;
   const s = runSummary(status, t, lang);
 
   return (
@@ -105,12 +106,14 @@ function RunDrawer({
 
         <Section title={t("run.search")}>
           <div className="flex flex-wrap items-center justify-between gap-3 pt-3">
-            <p className="text-meta text-ink-2">
+            <p className={cn("text-meta text-ink-2", failed && "text-danger [overflow-wrap:anywhere]")}>
               {status?.crawl.running
                 ? t("run.searching")
-                : last
-                  ? t("run.last_search", { when: formatRelative(last.started_at, lang), n: last.stats.new ?? 0 })
-                  : t("run.no_search")}
+                : failed
+                  ? t("run.search_failed", { error: failed })
+                  : last
+                    ? t("run.last_search", { when: formatRelative(last.started_at, lang), n: last.stats.new ?? 0 })
+                    : t("run.no_search")}
             </p>
             <Button size="sm" onClick={() => crawl.mutate()} loading={!!status?.crawl.running}>
               {t("crawl.start")}

@@ -7,7 +7,7 @@ import {
 import { type ReactNode, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
-import { StatusGlyph } from "@/components/domain";
+import { LoadError, Pending, StatusGlyph } from "@/components/domain";
 import { SwitchRow } from "@/components/ui/controls";
 import { Dialog, DialogContent } from "@/components/ui/overlays";
 import {
@@ -19,7 +19,6 @@ import {
   Field,
   Input,
   Select,
-  Skeleton,
   Textarea,
 } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
@@ -48,22 +47,22 @@ function useSettingsForm() {
       setDirty(false);
       toast.success(t("common.saved"));
     },
-    onError: (e: Error) => toast.error(e.message),
   });
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => {
     setS((prev) => (prev ? { ...prev, [k]: v } : prev));
     setDirty(true);
   };
   const bar = <SaveBar dirty={dirty} saving={save.isPending} onSave={() => save.mutate()} onReset={() => setDirty(false)} />;
-  return { s, set, bar };
+  const pending = <Pending query={data} className="h-80 rounded-lg" />;
+  return { s, set, bar, pending };
 }
 
 /* ----------------------------------------------------------------- Bewerben */
 
 export function ApplySettings() {
   const { t } = useI18n();
-  const { s, set, bar } = useSettingsForm();
-  if (!s) return <Skeleton className="h-80 rounded-lg" />;
+  const { s, set, bar, pending } = useSettingsForm();
+  if (!s) return pending;
   return (
     <div className="space-y-10">
       <section>
@@ -131,8 +130,8 @@ export function ApplySettings() {
 /* ----------------------------------------------------------------- Browser-Erweiterung */
 
 export function ExtensionSettings() {
-  const { s, set, bar } = useSettingsForm();
-  if (!s) return <Skeleton className="h-80 rounded-lg" />;
+  const { s, set, bar, pending } = useSettingsForm();
+  if (!s) return pending;
   return (
     <div className="space-y-10">
       <ExtensionSection
@@ -166,7 +165,6 @@ function ExtensionSection({
       qc.setQueryData(["extension"], r);
       toast.success(t("ext.installed"));
     },
-    onError: (e: Error) => toast.error(e.message),
   });
   const folder = useMutation({ mutationFn: api.openExtensionFolder });
   const x = info.data;
@@ -174,6 +172,7 @@ function ExtensionSection({
     <section>
       <p className="max-w-prose text-meta text-ink-2">{t("ext.hint")}</p>
       <SectionBody className="space-y-4">
+        {info.isError && <LoadError error={info.error} onRetry={() => info.refetch()} />}
         {x && (
           <StatusLine
             ok={x.installed && !x.outdated}
@@ -219,8 +218,8 @@ function ExtensionSection({
 
 export function AutopilotSettings() {
   const { t } = useI18n();
-  const { s, set, bar } = useSettingsForm();
-  if (!s) return <Skeleton className="h-80 rounded-lg" />;
+  const { s, set, bar, pending } = useSettingsForm();
+  if (!s) return pending;
   const days = [t("day.mon"), t("day.tue"), t("day.wed"), t("day.thu"), t("day.fri"), t("day.sat"), t("day.sun")];
   return (
     <div className="space-y-10">
@@ -307,14 +306,14 @@ export function AutopilotSettings() {
 
 export function NotificationSettings() {
   const { t } = useI18n();
-  const { s, set, bar } = useSettingsForm();
+  const { s, set, bar, pending } = useSettingsForm();
   const [permission, setPermission] = useState(typeof Notification !== "undefined" ? Notification.permission : "denied");
   const test = useMutation({
     mutationFn: () => fetch("/api/notify/test", { method: "POST", headers: { "X-Jobslop": "1" } }).then((r) => r.json()),
     onSuccess: (r: { sent: number }) =>
       r.sent ? toast.success(t("notify.test_ok", { n: r.sent })) : toast(t("notify.test_none")),
   });
-  if (!s) return <Skeleton className="h-80 rounded-lg" />;
+  if (!s) return pending;
   return (
     <div className="space-y-10">
       <section>
@@ -468,7 +467,6 @@ export function ExclusionSettings() {
       setValue("");
       qc.invalidateQueries({ queryKey: ["exclusions"] });
     },
-    onError: (e: Error) => toast.error(e.message),
   });
   const remove = useMutation({
     mutationFn: api.deleteExclusion,
@@ -496,7 +494,9 @@ export function ExclusionSettings() {
             {t("common.add")}
           </Button>
         </form>
-        {rows.data?.length === 0 ? (
+        {rows.isError ? (
+          <LoadError error={rows.error} onRetry={() => rows.refetch()} />
+        ) : rows.data?.length === 0 ? (
           <EmptyState title={t("excl.empty")} />
         ) : (
           <ul className="divide-y divide-line border-y border-line">
@@ -541,7 +541,7 @@ export function SystemSettings() {
       navigate("/setup");
     },
   });
-  if (!sys.data) return <Skeleton className="h-80 rounded-lg" />;
+  if (!sys.data) return <Pending query={sys} className="h-80 rounded-lg" />;
   const s = sys.data;
   return (
     <div className="space-y-6">
