@@ -18,12 +18,18 @@ from .extract import PageState
 # --------------------------------------------------------------------------- Schemas (Structured Outputs)
 
 
+ActionKind = Literal["fill", "select", "check", "uncheck", "upload", "click", "skip"]
+Confidence = Literal["high", "medium", "low"]
+Source = Literal["profile", "answer_bank", "job_tailored", "policy", "unknown"]
+NextStep = Literal["click_apply", "click_next", "click_submit", "wait_for_user", "done", "abort"]
+
+
 class FieldAction(BaseModel):
     field_id: str
-    action: Literal["fill", "select", "check", "uncheck", "upload", "click", "skip"]
+    action: ActionKind
     value: str
-    confidence: Literal["high", "medium", "low"]
-    source: Literal["profile", "answer_bank", "job_tailored", "policy", "unknown"]
+    confidence: Confidence
+    source: Source
     reason: str
 
 
@@ -46,7 +52,7 @@ class PagePlan(BaseModel):
     ]
     actions: list[FieldAction]
     open_questions: list[OpenQuestion]
-    next_step: Literal["click_apply", "click_next", "click_submit", "wait_for_user", "done", "abort"]
+    next_step: NextStep
     next_target_id: str
     summary: str
 
@@ -445,6 +451,7 @@ class HeuristicPlanner:
                 next_target_id=apply["id"],
                 summary="Stellenanzeige – Bewerben klicken",
             )
+        step: NextStep
         if questions:
             step, target = "wait_for_user", ""
         elif nxt and not submit:
@@ -463,13 +470,15 @@ class HeuristicPlanner:
         )
 
     def _plan_field(self, f: dict[str, Any], label: str, kind: str) -> FieldAction | None:
-        def act(action: str, value: str, source: str = "profile", conf: str = "high") -> FieldAction:
+        def act(
+            action: ActionKind, value: str, source: Source = "profile", conf: Confidence = "high"
+        ) -> FieldAction:
             return FieldAction(
                 field_id=f["id"],
                 action=action,
                 value=value,
                 confidence=conf,
-                source=source,  # type: ignore[arg-type]
+                source=source,
                 reason="Regel",
             )
 

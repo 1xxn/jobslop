@@ -25,6 +25,7 @@ cd frontend && npm run dev                       # hot reload on :5173, proxies 
 
 ```bash
 uv run ruff check . && uv run ruff format --check .
+uv run mypy
 uv run pytest -m "not live"                      # includes real-Chromium tests against tests/fixtures/site
 cd frontend && npm run typecheck && npm test && npm run build
 ```

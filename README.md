@@ -218,7 +218,7 @@ Because it is, admittedly, an AI‑slopped automation bot – just one that doub
 ```bash
 uv sync                      # Python deps
 uv run pytest -m "not live"  # tests (real Chromium against local test forms)
-uv run ruff check . && uv run ruff format --check .
+uv run ruff check . && uv run ruff format --check . && uv run mypy
 
 cd frontend && npm ci && npm run dev     # dashboard with hot reload (proxies to :8765)
 npm run build                            # builds into src/jobslop/web/dist (committed)

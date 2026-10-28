@@ -68,7 +68,7 @@ class Files:
         if token in ("@cv", "cv"):
             return [self.cv] if self.cv else []
         if token in ("@cv_en", "cv_en"):
-            return [self.cv_en or self.cv] if (self.cv_en or self.cv) else []
+            return [cv] if (cv := self.cv_en or self.cv) else []
         if token in ("@cover_letter_pdf", "@cover_letter", "cover_letter"):
             return [self.cover_letter_pdf] if self.cover_letter_pdf else []
         if token in ("@certificates", "certificates"):

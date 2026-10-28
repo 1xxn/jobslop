@@ -119,9 +119,16 @@ class Runner:
         return True
 
     def tail(self, lines: int = 80) -> str:
-        if not self.log_path.exists():
+        """Die letzten Zeilen des Protokolls – nur das Dateiende wird gelesen (Abruf alle paar Sekunden, das
+        Protokoll eines langen Laufs hat schnell einige MB)."""
+        if lines <= 0 or not self.log_path.exists():
             return ""
-        data = self.log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        with self.log_path.open("rb") as f:
+            start = max(0, f.seek(0, os.SEEK_END) - lines * 400)
+            f.seek(start)
+            data = f.read().decode("utf-8", errors="replace").splitlines()
+        if start and data:
+            data = data[1:]  # angeschnittene erste Zeile
         return "\n".join(data[-lines:])
 
     def state(self, lines: int = 80) -> dict[str, Any]:
