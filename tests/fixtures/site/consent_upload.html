@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="de">
+<head><meta charset="utf-8"><title>Site Reliability Engineer – Solactive (Arbeitnow-artig)</title></head>
+<body>
+<!-- Wie Arbeitnow: Googles Consent-Dialog („Funding Choices“) liegt über einem Formular mit sichtbarem Datei-Feld. -->
+<div class="fc-consent-root" id="consent" style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:10">
+  <div class="fc-dialog-container">
+    <div class="fc-dialog fc-choice-dialog" role="dialog" aria-modal="true" style="background:#fff;margin:80px auto;width:420px;padding:20px">
+      <p>Arbeitnow benötigt Ihre Einwilligung, damit Ihre personenbezogenen Daten für die folgenden Zwecke verwendet werden dürfen.</p>
+      <button type="button" class="fc-button fc-cta-manage-options">Optionen verwalten</button>
+      <button type="button" class="fc-button fc-cta-consent" onclick="document.getElementById('consent').remove()">Einwilligen</button>
+    </div>
+  </div>
+</div>
+<form>
+  <label for="first">First name</label> <input id="first" name="first" required>
+  <label for="resume">CV / Resume</label> <input type="file" id="resume" name="resume" required>
+  <button type="submit">Apply</button>
+</form>
+</body>
+</html>

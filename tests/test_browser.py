@@ -611,3 +611,30 @@ async def test_wait_with_actions_runs_them_before_handing_off(settings, site, pr
     with session_scope(settings.db_path) as s:
         filled = s.get(Application, outcome.application_id).filled
     assert [(r["action"], r["ok"]) for r in filled] == [("upload", True), ("click", True)]
+
+
+async def test_visible_file_input_keeps_its_file_and_google_consent_is_dismissed(settings, site, profile):
+    """Echttest Arbeitnow: Googles Consent-Dialog („Einwilligen“) blieb offen, und das sichtbare Datei-Feld wurde von der
+    Drop-Zonen-Rückfallebene geleert. Das versteckte JOIN-Feld (test_upload_through_a_dropzone…) bleibt unberührt."""
+    session, page = await _page(settings)
+    try:
+        await page.goto(f"{site.base_url}/consent_upload.html")
+        state = await extract_state(page)
+        upload = next(f for f in state.fields if f["kind"] == "file")
+        action = FieldAction(
+            field_id=upload["id"],
+            action="upload",
+            value="@cv",
+            confidence="high",
+            source="profile",
+            reason="t",
+        )
+        results = await Executor(page, Files(cv=profile.cv_path(settings.home))).run(state, [action])
+        assert results[0].ok, results[0].detail
+        assert (
+            await page.evaluate("document.getElementById('resume').files.length") == 1
+        )  # trotz Overlay gesetzt
+        assert await dismiss_cookie_banners(page) == ["Einwilligen"]
+        assert await page.locator("#consent").count() == 0
+    finally:
+        await session.__aexit__(None, None, None)
