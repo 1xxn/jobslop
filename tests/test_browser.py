@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import select
 
 from conftest import ScriptedInteractor, add_job
-from jobslop.apply.engine import ApplyEngine, BrowserSession, captcha_solved
+from jobslop.apply.engine import ApplyEngine, BrowserSession, captcha_solved, show_notice
 from jobslop.apply.executor import Executor, Files
 from jobslop.apply.extract import extract_state
 from jobslop.apply.planner import FieldAction, HeuristicPlanner, JobContext, PagePlan
@@ -749,3 +749,19 @@ async def test_usage_limit_after_submit_never_requeues(settings, site, profile, 
     assert outcome.status == "needs_review" and "Claude-Limit" in outcome.message
     with session_scope(settings.db_path) as s:
         assert s.get(Job, job_id).queued is False
+
+
+async def test_fields_know_their_form_and_the_notice_shows(settings, site):
+    """Feld und Absende-Button tragen dieselbe Formular-Kennung (für „leere Pflichtfelder“ nur dieses Formulars);
+    der Hinweis vor dem Schließen erscheint im Fenster."""
+    session, page = await _page(settings)
+    try:
+        await page.goto(f"{site.base_url}/consent_upload.html")
+        state = await extract_state(page)
+        apply_btn = next(b for b in state.buttons if b["text"] == "Apply")
+        first = next(f for f in state.fields if f["label"].startswith("First name"))
+        assert apply_btn["form"] and first["form"] == apply_btn["form"]
+        await show_notice(page, "jobslop: Claude-Limit erreicht", seconds=0)
+        assert await page.get_by_role("status").inner_text() == "jobslop: Claude-Limit erreicht"
+    finally:
+        await session.__aexit__(None, None, None)
