@@ -386,7 +386,7 @@ async def step(rt: Runtime, body: StepIn, llm: LLM | None = None) -> dict[str, A
         )
         if note:
             notes.append(note)
-    if wants_cover_letter(plan, rt.profile):
+    if wants_cover_letter(plan, rt.profile, state):
         _created, problem = await ensure_cover_letter(
             llm,
             rt.profile,

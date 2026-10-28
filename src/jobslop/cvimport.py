@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from .cvtext import cv_text
 from .llm import LLM, file_block
-from .profile import Education, Experience, Language, Profile
+from .profile import Education, Experience, Language, Profile, split_city, web_url
 
 
 class _Personal(BaseModel):
@@ -73,8 +73,13 @@ async def import_cv(llm: LLM, cv: Path, profile: Profile, *, overwrite: bool = F
     def take(current: str, new: str) -> str:
         return new if (overwrite or not current) and new else current
 
+    found = data.personal.model_copy()
+    found.city, postal_code = split_city(found.city)
+    for attr in ("linkedin", "github", "website"):
+        setattr(found, attr, web_url(getattr(found, attr)))
     for attr in ("first_name", "last_name", "email", "phone", "city", "linkedin", "github", "website"):
-        setattr(p.personal, attr, take(getattr(p.personal, attr), getattr(data.personal, attr)))
+        setattr(p.personal, attr, take(getattr(p.personal, attr), getattr(found, attr)))
+    p.personal.postal_code = take(p.personal.postal_code, postal_code)
     p.work.current_title = take(p.work.current_title, data.current_title)
     p.work.current_employer = take(p.work.current_employer, data.current_employer)
     p.summary = take(p.summary, data.summary)

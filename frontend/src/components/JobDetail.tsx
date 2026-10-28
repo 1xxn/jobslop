@@ -93,6 +93,10 @@ function TailoredCvBlock({ jobId }: { jobId: number }) {
   );
 }
 
+// Hängen gebliebene Bewerbungen (abgebrochen, Übergabe offen, Limit) lassen sich gezielt neu starten; der Server
+// lehnt ab, solange noch ein Lauf aktiv ist.
+const RETRYABLE = new Set(["failed", "needs_review", "needs_input", "paused"]);
+
 function Block({ title, children, aside }: { title: ReactNode; children: ReactNode; aside?: ReactNode }) {
   return (
     <section className="grid gap-1.5">
@@ -364,7 +368,7 @@ function JobMenu({
         </Button>
       </MenuTrigger>
       <MenuContent>
-        <MenuItem onSelect={onApply} disabled={!job.verdict.ok && job.app_status !== "failed"}>
+        <MenuItem onSelect={onApply} disabled={!job.verdict.ok && !RETRYABLE.has(job.app_status)}>
           {t("decide.apply_now")}
         </MenuItem>
         <MenuSeparator />

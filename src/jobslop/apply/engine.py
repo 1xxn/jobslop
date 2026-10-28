@@ -25,7 +25,7 @@ from ..hosts import host_of, is_handoff
 from ..llm import LLM, LLMLimitReached
 from ..profile import Profile, normalize_question
 from .coverletter import cover_letter_html, cover_letter_text, render_pdf, write_cover_letter
-from .executor import Executor, Files, click_element
+from .executor import Executor, Files, click_element, live_page
 from .extract import PageState, extract_state
 from .interact import Interactor
 from .marks import annotated_screenshots, save_screenshot
@@ -80,6 +80,7 @@ class _Run:
     vision_forced: bool = False
     seen_urls: set[str] = field(default_factory=set)
     autofill_tried: set[str] = field(default_factory=set)
+    watched: set[int] = field(default_factory=set)  # Tabs mit Beobachtern für Öffnen/Schließen
     cv_checked: bool = False  # Lebenslauf je Stelle nur einmal pro Bewerbung versuchen
     tailored_cv: Path | None = None
 
@@ -110,6 +111,10 @@ class BrowserSession:
 
         self.settings.ensure_dirs()
         self._pw = await async_playwright().start()
+        await self._launch()
+        return self
+
+    async def _launch(self) -> None:
         self.context = await self._pw.chromium.launch_persistent_context(
             str(self.settings.browser_profile_dir),
             headless=self.headless,
@@ -120,7 +125,6 @@ class BrowserSession:
         )
         self.context.set_default_timeout(15_000)
         self.context.set_default_navigation_timeout(self.settings.navigation_timeout_ms)
-        return self
 
     async def __aexit__(self, *exc: object) -> None:
         for closer in (self.context, self._pdf_browser):
@@ -131,7 +135,18 @@ class BrowserSession:
             await self._pw.stop()
 
     async def new_page(self) -> Any:
-        return await self.context.new_page()
+        try:
+            return await self.context.new_page()
+        except Exception as exc:
+            if "closed" not in str(exc).lower():
+                raise
+            # Fenster von Hand geschlossen oder Chromium abgestürzt: neu starten, statt dass jede weitere Bewerbung
+            # des Laufs sofort scheitert
+            log.warning("Browser war geschlossen – starte ihn neu")
+            with contextlib.suppress(Exception):
+                await self.context.close()
+            await self._launch()
+            return await self.context.new_page()
 
     async def pdf_context(self) -> Any:
         if self._pdf_browser is None:
@@ -202,6 +217,15 @@ class ApplyEngine:
             status, message = "paused", str(exc)[:300]
         except Exception as exc:
             status, message = "failed", f"{type(exc).__name__}: {exc}"
+            if page is not None and live_page(page) is None:  # das ganze Fenster ist zu
+                status, message = (
+                    (
+                        "needs_review",
+                        "Browserfenster während der Bewerbung geschlossen – bitte prüfen, ob sie ankam",
+                    )
+                    if run.submit_clicked
+                    else ("failed", "Browserfenster während der Bewerbung geschlossen – nichts abgeschickt")
+                )
             self._event(app_id, "error", message, {"traceback": traceback.format_exc()[-4000:]})
         finally:
             final_url = page.url if page is not None else ""
@@ -245,13 +269,26 @@ class ApplyEngine:
 
         failures: list[str] = []
         for step in range(1, self.settings.max_steps_per_application + 1):
+            current = live_page(page)
+            if current is None:
+                raise Park("needs_review", "Das Browserfenster wurde geschlossen – bitte im Browser prüfen")
+            page = current
+            self._watch(run, page)
             await settle(page)
+            await save_screenshot(page, run.artdir / f"step-{step:02d}-before.jpg", full_page=False)
             # Auch mitten im Ablauf: führt ein Klick (Weiterleitung, „Mit LinkedIn bewerben“) auf LinkedIn/Indeed,
             # wird dort nichts automatisch bedient.
             if is_handoff(page.url):
                 page = await self._aggregator_handoff(run, page, title)
                 await settle(page)
-            state = await self._prepare(run, page)
+            try:
+                state = await self._prepare(run, page)
+            except Exception as exc:
+                if not page.is_closed():
+                    raise
+                # Tab ist während des Lesens zugegangen (Popup, Weiterleitung): im nächsten Schritt den offenen nehmen
+                failures.append(f"Tab wurde geschlossen ({type(exc).__name__}) – weiter im offenen Tab")
+                continue
 
             if run.submit_clicked and _CONFIRM_RX.search(state.text):
                 await save_screenshot(page, run.artdir / "confirmation.jpg")
@@ -326,8 +363,11 @@ class ApplyEngine:
                 )
             if plan.page_kind == "closed_or_error" or plan.next_step == "abort":
                 return "failed", f"Abgebrochen: {plan.summary}", page
+            # „Warten“ mit geplanten Aktionen heißt: erst ausführen, dann die Seite neu ansehen (z. B. JOIN: Upload,
+            # danach erscheint „Confirm“). Übergeben wird erst, wenn nichts mehr zu tun ist.
+            pending = any(a.action != "skip" for a in plan.actions)
             if plan.page_kind in ("login_or_account", "captcha") or (
-                plan.next_step == "wait_for_user" and not plan.open_questions
+                plan.next_step == "wait_for_user" and not plan.open_questions and not pending
             ):
                 page = await self._handoff(run, page, title, self._handoff_text(plan))
                 run.history.append(f"Schritt {step}: Übergabe an dich ({plan.page_kind}) erledigt")
@@ -338,7 +378,7 @@ class ApplyEngine:
                 failures = []
                 continue
 
-            if wants_cover_letter(plan, self.profile):
+            if wants_cover_letter(plan, self.profile, state):
                 await self._ensure_cover_letter(run)
             if not run.cv_checked and wants_cv(plan.actions):
                 await self._ensure_tailored_cv(run)
@@ -457,6 +497,9 @@ class ApplyEngine:
                 run.submit_clicked = True
                 return page
             raise Park("needs_review", "Manuelles Absenden nicht bestätigt")
+        if decision == "timeout":
+            minutes = max(1, self.settings.user_wait_timeout_s // 60)
+            raise Park("needs_review", f"Keine Freigabe innerhalb von {minutes} Minuten – nichts abgeschickt")
         if decision != "submit":
             raise Park(
                 "needs_review",
@@ -475,6 +518,18 @@ class ApplyEngine:
         run.history.append("Absenden geklickt")
         return page
 
+    def _watch(self, run: _Run, page: Any) -> None:
+        """Neue und geschlossene Tabs im Verlauf festhalten – sonst ist im Nachhinein nicht zu sagen, ob eine Seite,
+        ein Klick oder der Mensch ein Fenster geschlossen hat."""
+        if id(page) in run.watched:
+            return
+        run.watched.add(id(page))
+        app_id = run.app_id
+        page.on("close", lambda p: self._event(app_id, "tab", f"Tab geschlossen: {p.url}"))
+        page.on("popup", lambda p: self._event(app_id, "tab", f"Neues Fenster geöffnet: {p.url}"))
+        with contextlib.suppress(Exception):
+            page.context.on("close", lambda _c: self._event(app_id, "tab", "Browserfenster geschlossen"))
+
     async def _prepare(self, run: _Run, page: Any) -> PageState:
         """Cookie-Banner schließen und (beim ersten Besuch einer URL) nachgeladene Inhalte wecken, dann erfassen."""
         key = page.url.split("#")[0]
@@ -485,6 +540,9 @@ class ApplyEngine:
             log.info("Cookie-Banner konnte nicht geprüft werden: %s", exc)
         if closed:
             run.history.append(f"Cookie-Banner geschlossen ('{closed[-1]}')")
+            self._event(
+                run.app_id, "prepare", f"Cookie-Banner: '{', '.join(closed)}' geklickt", {"url": page.url}
+            )
             await settle(page)
         if key not in run.seen_urls:
             run.seen_urls.add(key)
@@ -700,12 +758,17 @@ def artifacts_dir(settings: Settings, app_id: int, job: Job) -> Path:
 _LETTER_TOKENS = ("@cover_letter", "@cover_letter_pdf")
 
 
-def wants_cover_letter(plan: PagePlan, profile: Profile) -> bool:
-    """Verlangt das Formular ein Anschreiben? Ist es abgeschaltet, werden diese Felder ausgelassen."""
+def wants_cover_letter(plan: PagePlan, profile: Profile, state: PageState | None = None) -> bool:
+    """Verlangt das Formular ein Anschreiben? Ist es abgeschaltet, werden diese Felder ausgelassen – außer einem
+    Pflicht-Upload: den bedient dann der Lebenslauf (sonst kommt man bei Portalen wie JOIN nicht weiter)."""
     letter = [a for a in plan.actions if a.action != "skip" and a.value.strip().lower() in _LETTER_TOKENS]
     if letter and profile.documents.cover_letter == "none":
         for a in letter:
-            a.action = "skip"
+            required = state is None or bool((state.field(a.field_id) or {}).get("required"))
+            if a.action == "upload" and required:
+                a.value = "@cv"
+            else:
+                a.action = "skip"
         return False
     return bool(letter)
 

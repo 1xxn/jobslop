@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -14,6 +15,20 @@ TODO = "TODO"
 class _Model(BaseModel):
     # In der YAML stehen Zahlen oft ohne Anführungszeichen (75000, 10115) – als Text übernehmen.
     model_config = ConfigDict(coerce_numbers_to_str=True)
+
+
+def split_city(value: str) -> tuple[str, str]:
+    """„10115 Berlin, Deutschland“ → ("Berlin", "10115"): nur der Ort, Land und PLZ getrennt. Formulare und der
+    Ortsfilter der Suche erwarten den reinen Ortsnamen."""
+    city = value.split(",")[0].strip()
+    m = re.match(r"^(\d{4,5})\s+(.+)$", city)
+    return (m.group(2).strip(), m.group(1)) if m else (city, "")
+
+
+def web_url(value: str) -> str:
+    """„linkedin.com/in/x“ → „https://linkedin.com/in/x“ – URL-Felder in Formularen verlangen das Schema."""
+    value = value.strip()
+    return value if not value or re.match(r"^https?://", value, re.I) else f"https://{value.lstrip('/')}"
 
 
 class Personal(_Model):
