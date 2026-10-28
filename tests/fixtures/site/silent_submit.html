@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Site Reliability Engineer – Limit GmbH</title></head>
+<body>
+<!-- Nach dem Absenden kommt keine erkennbare Bestätigung: die Engine müsste Claude fragen, was die Seite zeigt. -->
+<form id="f">
+  <label for="note">Note</label> <input id="note" name="note">
+  <button type="submit">Apply</button>
+</form>
+<script>
+  document.getElementById("f").addEventListener("submit", (e) => {
+    e.preventDefault();
+    document.body.innerHTML = "<h1>Solactive</h1><p>Your profile</p>";
+  });
+</script>
+</body>
+</html>
