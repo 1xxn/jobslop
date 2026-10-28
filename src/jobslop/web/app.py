@@ -11,6 +11,7 @@ import asyncio
 import csv
 import io
 import logging
+import os
 import re
 from collections import Counter
 from contextlib import asynccontextmanager
@@ -1450,9 +1451,12 @@ def create_app(runtime: Runtime) -> FastAPI:
             a = s.get(Application, app_id)
             if a is None or not a.artifacts_dir:
                 raise HTTPException(404)
-            base = Path(a.artifacts_dir).resolve()
-        path = (base / name).resolve()
-        if base not in path.parents or not path.is_file():
+            base = os.path.realpath(a.artifacts_dir)
+        # nur Dateien direkt im Belege-Ordner, nie ein Pfad nach draußen
+        if name != os.path.basename(name) or name.startswith("."):
+            raise HTTPException(404)
+        path = os.path.realpath(os.path.join(base, name))
+        if not path.startswith(base + os.sep) or not os.path.isfile(path):
             raise HTTPException(404)
         return FileResponse(path)
 
@@ -1636,8 +1640,9 @@ def create_app(runtime: Runtime) -> FastAPI:
         if path.startswith("api/"):
             raise HTTPException(404)
         if DIST.is_dir():
-            candidate = (DIST / path).resolve()
-            if path and candidate.is_file() and DIST.resolve() in candidate.parents:
+            root = os.path.realpath(DIST)
+            candidate = os.path.realpath(os.path.join(root, path))
+            if path and candidate.startswith(root + os.sep) and os.path.isfile(candidate):
                 return FileResponse(candidate)
             index = DIST / "index.html"
             if index.exists():
