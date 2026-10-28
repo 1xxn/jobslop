@@ -62,6 +62,15 @@ class Settings(BaseSettings):
     notify_ntfy_url: str = ""  # z. B. https://ntfy.sh/mein-geheimes-thema
     notify_webhook_url: str = ""  # Discord-/Slack-kompatibel (JSON mit "content" und "text")
     follow_up_days: int = 10  # Nachfassen-Erinnerung nach dem Absenden
+    # Antworten aus dem Postfach (IMAP, nur lesend; inbox.py). Passwort = App-Passwort, liegt lokal in settings.toml
+    inbox_enabled: bool = False
+    inbox_host: str = ""  # z. B. imap.gmail.com, outlook.office365.com, imap.web.de
+    inbox_port: int = 993
+    inbox_user: str = ""
+    inbox_password: str = ""
+    inbox_folder: str = "INBOX"
+    inbox_interval_min: int = 30
+    inbox_lookback_days: int = 30  # beim ersten Mal so weit zurück
     setup_completed: bool = False
     # Browser-Erweiterung: LinkedIn/Indeed in deinem eigenen Chrome ausfüllen (Nutzungsbedingungen der Portale!)
     extension_portals: bool = False
@@ -134,6 +143,14 @@ EDITABLE_SETTINGS = {
     "notify_ntfy_url",
     "notify_webhook_url",
     "follow_up_days",
+    "inbox_enabled",
+    "inbox_host",
+    "inbox_port",
+    "inbox_user",
+    "inbox_password",
+    "inbox_folder",
+    "inbox_interval_min",
+    "inbox_lookback_days",
     "setup_completed",
     "extension_portals",
     "extension_portal_daily_limit",

@@ -57,6 +57,42 @@ export function DecisionButtons({ job, decisions, fill }: { job: Job; decisions:
   );
 }
 
+/** Lebenslauf für diese Stelle: Vorschau genau der Datei, die jobslop später hochlädt. Erscheint nur, wenn
+ * der Zuschnitt im Profil an ist oder schon ein Lebenslauf für die Stelle existiert. */
+function TailoredCvBlock({ jobId }: { jobId: number }) {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  const cv = useQuery({ queryKey: ["tailored-cv", jobId], queryFn: () => api.tailoredCv(jobId) });
+  const create = useMutation({
+    mutationFn: () => api.createTailoredCv(jobId),
+    onSuccess: (r) => qc.setQueryData(["tailored-cv", jobId], r),
+  });
+  const d = cv.data;
+  if (!d || (!d.enabled && !d.file)) return null;
+  return (
+    <Block title={t("tailor.title")}>
+      <p className="text-meta text-ink-2">
+        {d.file && d.url ? (
+          <>
+            <a href={d.url} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
+              {d.file} ↗
+            </a>
+            {d.matched_keywords.length > 0 && ` · ${t("tailor.keywords", { list: d.matched_keywords.slice(0, 8).join(", ") })}`}
+          </>
+        ) : (
+          t("tailor.none")
+        )}
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button size="sm" variant="secondary" onClick={() => create.mutate()} loading={create.isPending}>
+          {d.file ? t("tailor.recreate") : t("tailor.create")}
+        </Button>
+        {create.isPending && <span className="text-meta text-ink-3">{t("tailor.working")}</span>}
+      </div>
+    </Block>
+  );
+}
+
 function Block({ title, children, aside }: { title: ReactNode; children: ReactNode; aside?: ReactNode }) {
   return (
     <section className="grid gap-1.5">
@@ -245,6 +281,8 @@ export function JobDetail({
           )}
         </Block>
       )}
+
+      <TailoredCvBlock jobId={job.id} />
 
       {job.description && (
         <Block

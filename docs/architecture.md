@@ -34,7 +34,9 @@ Everything lives in `~/.jobslop` (override with `JOBSLOP_HOME`):
 | `search.toml` | Target roles, filters, sources, limits |
 | `settings.toml` | Dashboard-managed settings (mode, models, autopilot, notifications) |
 | `documents/` | Your CV(s) and certificates |
-| `artifacts/` | Per application: screenshots, plans, filled values, cover letter PDF |
+| `artifacts/` | Per application: screenshots, plans, filled values, cover letter PDF, the CV that was uploaded |
+| `tailored/` | Per job: the tailored CV (`job-<id>/`, PDF + `meta.json` with fingerprint and matched keywords) |
+| `inbox.json` | Inbox position (IMAP `UIDVALIDITY` + last checked UID) |
 | `browser-profile/` | The persistent Chromium profile (portal logins stay signed in) |
 
 New columns are added automatically on start (`db._add_missing_columns`), so upgrades never need a manual migration.
@@ -84,6 +86,18 @@ One application is a loop of up to `max_steps_per_application` steps:
 
 Usage limits of the subscription pause the run (`paused`) without submitting anything half-filled.
 
+**CV per job** (`tailor.py`, opt-in via `documents.tailor_cv`): when a form asks for the CV, Claude builds a
+`TailoredCv` (headline, summary, skills, stations) from profile and CV text only. `fact_check` then compares it with
+those sources without Claude: every number, every year of a period, every company and skill must appear there, and
+no title may claim more seniority than the sources do. One retry with the findings; what is still unverified is
+removed (skills, bullets, a summary with a number) – a wrong company, title or period discards the result and the
+original CV is used. The PDF is cached per job with a fingerprint of sources and posting, so the dashboard preview
+(`POST /api/jobs/{id}/cv`) is exactly the file the engine and the extension upload.
+
+A stopped or crashed run never leaves work behind: when the runner process ends, the dashboard marks its
+applications that are still `running` as `failed` and expires their open prompts; a non-zero exit that was not a
+“Stop” is logged as `run.crashed` with the last lines of the run log.
+
 ## Browser extension (`assist.py`, `extension/`)
 
 An unpacked Chrome extension (Manifest V3) that applies in the user's own browser – where the automated Chromium
@@ -95,6 +109,16 @@ into a concrete instruction (option already resolved, files as placeholders that
 extension fills, reports results, shows questions in an in-page panel and stops before the final submit until the
 user clicks “Submit”. CAPTCHA frames are never read or touched. LinkedIn/Indeed pages are refused unless
 `extension_portals` is on, with a daily submission limit.
+
+## Replies from the inbox (`inbox.py`)
+
+Opt-in IMAP check every `inbox_interval_min` minutes while the dashboard runs (and on “Check now”). The mailbox is
+opened with `EXAMINE` and messages are fetched with `BODY.PEEK[]` (capped at 150 KB), so nothing is marked read,
+moved or deleted; `inbox.json` remembers the position. `related()` decides locally which mails can belong to an
+application – the company appears in sender, subject or text, or the sender is an applicant tracking system – and
+only those go to Claude (fast model) together with the candidate applications. Confirmations are logged on the
+application; rejections, invitations and offers become an `InboxMessage` that waits on *Today* until you apply or
+dismiss it. The app password stays in `settings.toml` and is never sent back by the API.
 
 ## Dashboard
 
@@ -111,6 +135,14 @@ dashboard; `jobslop autopilot` provides the same for OS schedulers.
 Frontend stack: React 19, TypeScript, Vite, Tailwind CSS 4, Radix UI primitives, TanStack Query, React Router,
 lucide icons. Every page is its own chunk (`React.lazy`); libraries are split into `react` and `vendor` chunks so an
 update only reloads the app code.
+
+### Errors
+
+API errors carry a code: `Problem(status, "api.<code>", detail, **params)` (and `DemoModeError`, the Claude usage
+limit and a missing Claude login) return `{detail, code, params}`; unexpected exceptions return JSON with
+`api.internal` instead of a plain-text 500. In the frontend one `MutationCache` handler shows every failed action as
+a toast in the chosen language (`useErrorText`), `LoadError`/`Pending` replace endless skeletons with a retry, and a
+route `errorElement` catches render crashes inside the app shell (with a reload hint after an update).
 
 ### Texts and languages
 

@@ -42,6 +42,7 @@ from .apply.planner import (
     confirmation_excerpt,
     guard_submit_clicks,
 )
+from .apply.tailor import cached_cv, ensure_tailored_cv, wants_cv
 from .config import SearchConfig, Settings, ensure_not_demo
 from .db import Application, ApplicationEvent, Job, session_scope, utcnow
 from .guard import already_applied
@@ -254,10 +255,12 @@ def portal_submissions_today(settings: Settings) -> int:
 # --------------------------------------------------------------------------- Dateien & Anschreiben
 
 
-def files_for(rt: Runtime, artdir: Path) -> Files:
-    """Dateien aus dem Profil plus ein in einem früheren Schritt erzeugtes Anschreiben (jeder Schritt ist eine
-    eigene Anfrage – die Engine hält das im Speicher)."""
+def files_for(rt: Runtime, artdir: Path, job_id: int | None = None) -> Files:
+    """Dateien aus dem Profil plus ein in einem früheren Schritt erzeugtes Anschreiben und der Lebenslauf für die
+    Stelle (jeder Schritt ist eine eigene Anfrage – die Engine hält das im Speicher)."""
     files = Files.from_profile(rt.profile, rt.settings.profile_path.parent)
+    if rt.profile.documents.tailor_cv and job_id and (cached := cached_cv(rt.settings.home, job_id)):
+        files.cv = files.cv_en = cached[0]
     if artdir.is_dir() and (pdfs := sorted(artdir.glob("Anschreiben_*.pdf"))):
         files.cover_letter_pdf = pdfs[-1]
     if (letter := artdir / "anschreiben.txt").is_file():
@@ -370,7 +373,19 @@ async def step(rt: Runtime, body: StepIn, llm: LLM | None = None) -> dict[str, A
     except LLMLimitReached as exc:
         return base | {"blocked": f"Claude-Limit erreicht – später weitermachen. ({str(exc)[:160]})"}
     notes = guard_submit_clicks(state, plan, filled)
-    files = files_for(rt, artdir)
+    files = files_for(rt, artdir, job.id)
+    if wants_cv(plan.actions):
+        _pdf, note = await ensure_tailored_cv(
+            llm,
+            rt.profile,
+            job,
+            settings.home,
+            settings.profile_path.parent,
+            files,
+            headless_pdf_context,
+        )
+        if note:
+            notes.append(note)
     if wants_cover_letter(plan, rt.profile):
         _created, problem = await ensure_cover_letter(
             llm,
@@ -487,6 +502,6 @@ def upload_file(rt: Runtime, application_id: int, value: str, index: int) -> Pat
         app = s.get(Application, application_id)
         if app is None:
             return None
-        artdir = Path(app.artifacts_dir)
-    paths = [p for p in files_for(rt, artdir).resolve_upload(value) if p and p.exists()]
+        artdir, job_id = Path(app.artifacts_dir), app.job_id
+    paths = [p for p in files_for(rt, artdir, job_id).resolve_upload(value) if p and p.exists()]
     return paths[index] if 0 <= index < len(paths) else None
