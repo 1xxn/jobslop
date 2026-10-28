@@ -57,6 +57,29 @@
   databases on start), the job list no longer loads job descriptions, exclusion rules are prepared once per request
   instead of once per job, and the status poll reads only the end of the run log. Measured with 5,000 jobs: status
   124 → 29 ms (polled every 3 s), job list 300 → 177 ms, statistics 92 → 21 ms.
+- Crawling no longer slows down with the size of the database: the duplicate check for every new posting read all
+  open jobs including their descriptions (SQLite picked the job-state index for it). A crawl that adds 1,337 jobs to a
+  database of 5,000 takes 3.0 s instead of 20.3 s; a crawl without changes 2.0 s instead of 2.9 s.
+- The job list reads plain rows and takes the job state from its index, and only the visible page is loaded
+  completely: 210 → 48 ms with 5,000 jobs, 883 → 198 ms with 20,000. Dismissing or saving a job (X/S) updates the list
+  in 204 ms instead of 316 ms (p95 212 instead of 821 ms).
+- The status poll counts the jobs to review again only when something changed in the database (any process):
+  43 → 9 ms with 5,000 jobs, 152 → 10 ms with 20,000.
+- Applications, pipeline, statistics, job details and the CSV export no longer run one query per application or job:
+  pipeline 246 → 73 ms (913 → 4 queries), CSV export 4.3 s → 0.1 s with 20,000 jobs.
+- SQLite reads the database through a memory map (list queries up to three times faster on Windows);
+  `synchronous=FULL` is now set explicitly so a submitted application always survives a power cut.
+- The dashboard starts in 1.2 s instead of 5.1 s on Windows (checking the port waited twice for a 2-second connection
+  retry).
+- Pages appear 300 ms sooner on start and reload: the router loads the page code instead of `React.lazy`, whose
+  placeholder React 19 shows for at least 300 ms. The first job appears after 0.2 s instead of 0.7 s.
+- Moving through a long job list (J/K) re-renders only the rows that change: 50 → 18 ms per key with 600 jobs.
+- Application forms: visually hidden radio buttons and checkboxes (custom styles as on Greenhouse) are set after
+  1 s instead of 5 s each, and uploads into visible file fields wait once instead of twice – 5 s less on the
+  Greenhouse-like test form.
+- Developers: `scripts/bench.py` measures API, crawl, application engine, start-up, frontend and memory on invented
+  data in a temporary folder; `tests/test_performance.py` keeps query counts, index use, the status cache and the
+  port check from regressing.
 
 ### Fixed
 - Found in a live test with real job boards: reposted job-board listings (same company, title and place) are merged;
