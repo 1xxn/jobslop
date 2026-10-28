@@ -396,7 +396,7 @@ export function AnswersSettings() {
         }
       />
       <SectionBody>
-        <Input placeholder={t("answers.search")} value={filter} onChange={(e) => setFilter(e.target.value)} className="mb-3" />
+        <Input aria-label={t("answers.search")} placeholder={t("answers.search")} value={filter} onChange={(e) => setFilter(e.target.value)} className="mb-3" />
         {rows.length === 0 ? (
           <EmptyState title={t("answers.empty")} description={t("answers.empty_hint")} />
         ) : (
@@ -485,13 +485,13 @@ export function ExclusionSettings() {
             if (value.trim()) add.mutate();
           }}
         >
-          <Select value={kind} onChange={(e) => setKind(e.target.value as Exclusion["kind"])} className="w-40">
+          <Select aria-label={t("excl.kind")} value={kind} onChange={(e) => setKind(e.target.value as Exclusion["kind"])} className="w-40">
             <option value="company">{t("excl.company")}</option>
             <option value="title">{t("excl.title_rx")}</option>
             <option value="url">{t("excl.url")}</option>
             <option value="job">{t("excl.job")}</option>
           </Select>
-          <Input value={value} onChange={(e) => setValue(e.target.value)} placeholder={t("excl.value")} className="min-w-48 flex-1" />
+          <Input aria-label={t("excl.value")} value={value} onChange={(e) => setValue(e.target.value)} placeholder={t("excl.value")} className="min-w-48 flex-1" />
           <Button type="submit" variant="primary" disabled={!value.trim()} loading={add.isPending}>
             {t("common.add")}
           </Button>

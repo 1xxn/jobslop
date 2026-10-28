@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, Link2, Play, Rocket, ShieldCheck } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -25,7 +24,7 @@ export function ApplyDialog({
   jobIds?: number[];
   queuedCount?: number;
 }) {
-  const { t } = useI18n();
+  const { t, tp } = useI18n();
   const qc = useQueryClient();
   const run = useRunDrawer();
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings, enabled: open });
@@ -44,16 +43,16 @@ export function ApplyDialog({
     },
     onError: (e: Error) => toast.error(e.message),
   });
-  const modes: { value: ApplyMode; icon: ReactNode; title: string; text: string }[] = [
-    { value: "review", icon: <ShieldCheck />, title: t("mode.review"), text: t("mode.review_text") },
-    { value: "auto", icon: <Rocket />, title: t("mode.auto"), text: t("mode.auto_text") },
-    { value: "dry-run", icon: <Eye />, title: t("mode.dry"), text: t("mode.dry_text") },
+  const modes: { value: ApplyMode; title: string; text: string }[] = [
+    { value: "review", title: t("mode.review"), text: t("mode.review_text") },
+    { value: "auto", title: t("mode.auto"), text: t("mode.auto_text") },
+    { value: "dry-run", title: t("mode.dry"), text: t("mode.dry_text") },
   ];
   const count = jobIds?.length ?? queuedCount ?? 0;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        title={jobIds?.length ? t("apply.title_selected", { n: count }) : t("apply.title_queue", { n: count })}
+        title={jobIds?.length ? tp("apply.title_selected", count) : tp("apply.title_queue", count)}
         description={t("apply.description")}
         footer={
           <>
@@ -61,7 +60,6 @@ export function ApplyDialog({
               {t("common.cancel")}
             </Button>
             <Button variant="primary" onClick={() => start.mutate()} loading={start.isPending} disabled={!count}>
-              <Play />
               {t("apply.start")}
             </Button>
           </>
@@ -76,17 +74,18 @@ export function ApplyDialog({
               aria-checked={mode === m.value}
               onClick={() => setMode(m.value)}
               className={cn(
-                "flex w-full items-start gap-3 rounded-lg border p-3.5 text-left transition-colors",
-                mode === m.value ? "border-accent bg-accent-soft" : "border-line hover:bg-sunken",
+                "flex w-full items-start gap-3 rounded-md border p-3 text-left transition-colors duration-[120ms]",
+                mode === m.value ? "border-accent bg-accent-soft" : "border-line-input hover:bg-sunken",
               )}
             >
               <span
+                aria-hidden
                 className={cn(
-                  "mt-0.5 grid size-8 shrink-0 place-items-center rounded-md [&_svg]:size-4",
-                  mode === m.value ? "bg-accent text-on-accent" : "bg-sunken text-ink-2",
+                  "mt-0.5 grid size-4 shrink-0 place-items-center rounded-full border",
+                  mode === m.value ? "border-accent" : "border-line-input",
                 )}
               >
-                {m.icon}
+                {mode === m.value && <span className="size-2 rounded-full bg-accent" />}
               </span>
               <span>
                 <span className="flex items-center gap-2 text-body font-semibold">
@@ -144,7 +143,6 @@ export function AddJobDialog({ open, onOpenChange }: { open: boolean; onOpenChan
               {t("common.cancel")}
             </Button>
             <Button variant="primary" onClick={() => add.mutate()} loading={add.isPending} disabled={!/^https?:\/\//.test(url)}>
-              <Link2 />
               {t("addjob.submit")}
             </Button>
           </>

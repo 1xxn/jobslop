@@ -254,6 +254,7 @@ export function RolesEditor({ config, onChange }: { config: SearchConfig; onChan
               value={role.keywords}
               onChange={(v) => setRoles(config.roles.map((r, j) => (j === i ? { ...r, keywords: v } : r)))}
               placeholder={t("search.keywords_placeholder")}
+              label={t("search.keywords_for", { role: role.name })}
             />
           </div>
         ))}
@@ -282,11 +283,13 @@ function GenericPages({ config, onChange }: { config: SearchConfig; onChange: (c
         {pages.map((p, i) => (
           <div key={i} className="grid gap-2 sm:grid-cols-[180px_1fr_auto]">
             <Input
+              aria-label={t("search.company")}
               placeholder={t("search.company")}
               value={p.company}
               onChange={(e) => set(pages.map((x, j) => (j === i ? { ...x, company: e.target.value } : x)))}
             />
             <Input
+              aria-label={t("search.page_url")}
               placeholder="https://…/jobs"
               value={p.url}
               onChange={(e) => set(pages.map((x, j) => (j === i ? { ...x, url: e.target.value } : x)))}

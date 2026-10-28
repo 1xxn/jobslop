@@ -1,4 +1,4 @@
-import type { AppStatus, ApplicationSummary, Prompt } from "./types";
+import type { AppStatus, ApplicationSummary } from "./types";
 import { parseDate } from "./utils";
 
 /** Gruppen der Bewerbungsliste – die früheren Pipeline-Spalten plus das, was davor und daneben passiert. */
@@ -28,27 +28,21 @@ export function groupOf(status: AppStatus): AppGroup {
 
 const time = (v: string | null | undefined) => parseDate(v)?.getTime() ?? 0;
 
-/**
- * Stand, wie du ihn siehst: Während ein Lauf auf deine Freigabe oder Antwort wartet, steht die Bewerbung technisch noch
- * auf „running“ – für dich ist sie aber dran. Offene Rückfragen überstimmen deshalb den gespeicherten Stand.
- */
-export function effectiveStatus(app: Pick<ApplicationSummary, "id" | "status">, prompts: Prompt[] = []): AppStatus {
-  const open = prompts.filter((p) => p.application_id === app.id);
-  if (open.some((p) => p.kind === "confirm")) return "needs_review";
-  if (open.length) return "needs_input";
-  return app.status;
+/** Stände, bei denen Nachfassen noch Sinn hat (gesendet, Interview) – wie im Backend. */
+export function canFollowUp(status: AppStatus): boolean {
+  return status === "submitted" || status === "manual" || status === "interview";
 }
 
 /** Ist ein Nachfass-Termin fällig? (nur solange die Bewerbung noch offen ist) */
 export function followUpDue(a: ApplicationSummary, now = Date.now()): boolean {
-  return !!a.follow_up_at && time(a.follow_up_at) <= now && ["submitted", "manual", "interview"].includes(a.status);
+  return !!a.follow_up_at && time(a.follow_up_at) <= now && canFollowUp(a.status);
 }
 
 /**
  * Pro Stelle zählt die letzte Bewerbung (wie in der Pipeline), gefiltert nach Suchtext und gruppiert nach Stand.
  * Gesendete mit fälligem Nachfassen stehen oben, sonst die neuesten zuerst.
  */
-export function groupApplications(apps: ApplicationSummary[], query = "", now = Date.now(), prompts: Prompt[] = []) {
+export function groupApplications(apps: ApplicationSummary[], query = "", now = Date.now()) {
   const latest = new Map<number, ApplicationSummary>();
   for (const a of apps) if ((latest.get(a.job_id)?.id ?? -1) < a.id) latest.set(a.job_id, a);
   const q = query.trim().toLowerCase();
@@ -58,8 +52,7 @@ export function groupApplications(apps: ApplicationSummary[], query = "", now = 
   >;
   for (const a of latest.values()) {
     if (q && !`${a.company} ${a.title}`.toLowerCase().includes(q)) continue;
-    const status = effectiveStatus(a, prompts);
-    groups[groupOf(status)].push(status === a.status ? a : { ...a, status });
+    groups[groupOf(a.status)].push(a);
   }
   const recent = (a: ApplicationSummary) => time(a.submitted_at ?? a.started_at);
   for (const g of GROUPS) {

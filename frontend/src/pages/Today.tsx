@@ -4,12 +4,13 @@ import { Link } from "react-router";
 import { toast } from "sonner";
 import { ApplicationsSummary, PageHeader, Score, StatusGlyph } from "@/components/domain";
 import { PROMPT_KIND, PromptCard } from "@/components/PromptCard";
-import { Button, Card, EmptyState, Section, Skeleton } from "@/components/ui/primitives";
+import { nextSearchText } from "@/components/layout/run";
+import { Button, Card, EmptyState, rowHover, Section, Skeleton } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { useStatus } from "@/lib/hooks";
 import { useI18n } from "@/lib/i18n";
 import type { ApplicationSummary, Prompt } from "@/lib/types";
-import { cn, formatDate, formatRelative, formatWhen } from "@/lib/utils";
+import { cn, formatDate, formatRelative } from "@/lib/utils";
 
 type Item =
   | { key: string; kind: "prompt"; prompt: Prompt }
@@ -74,9 +75,7 @@ export function TodayPage() {
 
       {!loading && !items.length && (
         <p className="-mt-3 mb-2 text-meta text-ink-2">
-          {status?.autopilot.enabled
-            ? t("today.next_search", { when: formatWhen(status.autopilot.next_run, lang) })
-            : t("today.autopilot_off")}
+          {nextSearchText(status, t, lang)}
         </p>
       )}
 
@@ -117,11 +116,7 @@ export function TodayPage() {
           {fresh.data?.items.length === 0 && (
             <EmptyState
               title={t("today.all_reviewed")}
-              description={
-                status?.autopilot.enabled
-                  ? t("today.next_search", { when: formatWhen(status.autopilot.next_run, lang) })
-                  : t("today.autopilot_off")
-              }
+              description={nextSearchText(status, t, lang)}
             />
           )}
           <ul>
@@ -129,7 +124,7 @@ export function TodayPage() {
               <li key={j.id} className="border-b border-line">
                 <Link
                   to={`/jobs?job=${j.id}`}
-                  className="-mx-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-md px-2 py-2.5 transition-colors hover:bg-sunken"
+                  className={cn(rowHover, "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 py-2.5")}
                 >
                   <span className="min-w-0">
                     <span className="block truncate font-semibold">{j.title}</span>
@@ -186,7 +181,7 @@ function QueueRow({ item, onPick }: { item: Item; onPick: () => void }) {
     <button
       type="button"
       onClick={onPick}
-      className="-mx-2 grid w-[calc(100%+1rem)] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-md px-2 py-2.5 text-left transition-colors hover:bg-sunken"
+      className={cn(rowHover, "grid w-[calc(100%+1rem)] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-2.5 text-left")}
     >
       <StatusGlyph status={item.kind === "prompt" ? "needs_input" : "submitted"} />
       <span className="min-w-0">

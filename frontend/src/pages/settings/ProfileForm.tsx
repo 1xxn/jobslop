@@ -278,10 +278,10 @@ function ExperienceList({ value, onChange }: { value: Profile["experience"]; onC
       <div className="space-y-3">
         {value.map((e, i) => (
           <div key={i} className="grid gap-2 border-b border-line pb-3 last:border-b-0 sm:grid-cols-[1fr_1fr_110px_110px_auto]">
-            <Input placeholder={t("profile.exp_title")} value={e.title} onChange={(ev) => update(i, { title: ev.target.value })} />
-            <Input placeholder={t("profile.exp_company")} value={e.company} onChange={(ev) => update(i, { company: ev.target.value })} />
-            <Input placeholder="2022-01" value={e.start} onChange={(ev) => update(i, { start: ev.target.value })} />
-            <Input placeholder={t("profile.exp_today")} value={e.end} onChange={(ev) => update(i, { end: ev.target.value })} />
+            <Input aria-label={t("profile.exp_title")} placeholder={t("profile.exp_title")} value={e.title} onChange={(ev) => update(i, { title: ev.target.value })} />
+            <Input aria-label={t("profile.exp_company")} placeholder={t("profile.exp_company")} value={e.company} onChange={(ev) => update(i, { company: ev.target.value })} />
+            <Input aria-label={t("profile.exp_start")} placeholder="2022-01" value={e.start} onChange={(ev) => update(i, { start: ev.target.value })} />
+            <Input aria-label={t("profile.exp_end")} placeholder={t("profile.exp_today")} value={e.end} onChange={(ev) => update(i, { end: ev.target.value })} />
             <Button size="icon" variant="quiet" onClick={() => onChange(value.filter((_, j) => j !== i))} aria-label={t("common.delete")}>
               <Trash2 />
             </Button>

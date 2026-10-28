@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { effectiveStatus, followUpDue, groupApplications } from "./applications";
-import type { ApplicationSummary, Prompt } from "./types";
+import { followUpDue, groupApplications } from "./applications";
+import type { ApplicationSummary } from "./types";
 
 const app = (id: number, job_id: number, status: ApplicationSummary["status"], extra: Partial<ApplicationSummary> = {}) =>
   ({
@@ -35,16 +35,6 @@ describe("groupApplications", () => {
     const later = app(6, 6, "submitted", { follow_up_at: "2026-11-02T09:00:00Z" });
     expect(groupApplications([later, due], "", now).sent.map((a) => a.id)).toEqual([5, 6]);
     expect(groupApplications([later, due], "firma 6", now).sent.map((a) => a.id)).toEqual([6]);
-  });
-});
-
-describe("effectiveStatus", () => {
-  it("treats a running application with an open prompt as waiting for you", () => {
-    const prompts = [{ id: 1, kind: "confirm", application_id: 7 }] as Prompt[];
-    expect(effectiveStatus({ id: 7, status: "running" }, prompts)).toBe("needs_review");
-    expect(effectiveStatus({ id: 8, status: "running" }, prompts)).toBe("running");
-    const g = groupApplications([app(7, 7, "running")], "", now, prompts);
-    expect(g.waiting.map((a) => [a.id, a.status])).toEqual([[7, "needs_review"]]);
   });
 });
 

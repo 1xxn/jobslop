@@ -127,5 +127,19 @@ The CLI, logs and application events are still German only.
 
 `classify.score_parts` lists the parts of a job's score (target role up to 10, stack fit up to 6, kind of company up
 to 3, level −4…+1, close by +1, remote −0.5; jobs that can only be applied to in your own browser −4). The maximum
-is `SCORE_MAX` = 21. The job detail API returns the parts, the dashboard explains every score with them. Design tokens follow Material 3 colour roles and Apple HIG typography/spacing; light and dark themes,
-German and English.
+is `SCORE_MAX` = 21. The job detail API returns the parts, the dashboard explains every score with them.
+
+### Interface
+
+Three work areas and the settings behind them: **Today** (what needs you – approvals, questions, handovers, due
+follow-ups – one item expanded at a time, then new jobs), **Jobs** (triage: list and job side by side, Apply / Save /
+Dismiss with A / S / X, undo with Z; `/api/jobs` views `triage`, `starred`, `queued`, `all`, `dismissed` with counts)
+and **Applications** (grouped by stage or as a board, detail page with status, follow-up and notes). The live run,
+search and autopilot open as a side panel from anywhere; the former activity page is Settings › Log.
+
+Design tokens live in `frontend/src/styles.css`: warm neutrals (`paper`, `raised`, `sunken`, `line`, `ink` 1–3) and a
+single petrol accent that means "your turn" – primary action, focus, links and anything waiting for you. Content sits
+on the page separated by headings and rules; cards are reserved for the one object you act on and for overlays.
+Status is a glyph plus a word (`StatusLabel`), never a coloured pill. System font, three weights, tabular numbers.
+Keyboard shortcuts share one registry (`lib/hotkeys.ts`: G then a letter to navigate, `?` for help). All text colours
+meet WCAG AA in both themes; form fields link label, hint and error automatically (`Field`).
