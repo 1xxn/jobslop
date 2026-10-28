@@ -1,5 +1,5 @@
 import { cva, type VariantProps } from "class-variance-authority";
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Search } from "lucide-react";
 import { Slot } from "radix-ui";
 import { cloneElement, type ComponentProps, forwardRef, isValidElement, type ReactElement, type ReactNode, useId } from "react";
 import { cn } from "@/lib/utils";
@@ -24,8 +24,8 @@ const buttonVariants = cva(
         sm: "h-7 px-2.5 text-meta",
         md: "h-8 px-3 text-body",
         lg: "h-10 px-4 text-body",
-        icon: "size-8",
-        "icon-sm": "size-7 [&_svg]:size-[15px]",
+        icon: "size-8 shrink-0",
+        "icon-sm": "size-7 shrink-0 [&_svg]:size-[15px]",
       },
     },
     defaultVariants: { variant: "secondary", size: "md" },
@@ -274,7 +274,7 @@ export function EmptyState({
 }) {
   return (
     <div className={cn("py-8", className)}>
-      <h3 className="text-heading font-semibold">{title}</h3>
+      <p className="text-heading font-semibold">{title}</p>
       {description && <p className="mt-1 max-w-prose text-meta text-ink-2">{description}</p>}
       {action && <div className="mt-4">{action}</div>}
     </div>
@@ -305,8 +305,37 @@ export function Kbd({ children, className }: { children: ReactNode; className?: 
   );
 }
 
-export function Separator({ className }: { className?: string }) {
-  return <div role="separator" className={cn("h-px w-full bg-line", className)} />;
+/** Leiste, die unten am Inhalt klebt (über der Handy-Tab-Leiste) und bis an die Ränder des Hauptbereichs reicht. */
+export function StickyBar({ className, ...props }: ComponentProps<"div">) {
+  return (
+    <div
+      className={cn(
+        "sticky bottom-[var(--tabbar)] z-20 -mx-4 mt-4 flex flex-wrap items-center gap-2 border-t border-line bg-paper px-4 py-3 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8",
+        className,
+      )}
+      {...props}
+    />
+  );
 }
 
-export { buttonVariants };
+/** Suchfeld mit Lupe; optional mit Tastenkürzel-Hinweis rechts. */
+export const SearchInput = forwardRef<HTMLInputElement, ComponentProps<"input"> & { hint?: string }>(
+  function SearchInput({ className, hint, ...props }, ref) {
+    return (
+      <div className={cn("relative", className)}>
+        <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-ink-3" aria-hidden />
+        <Input
+          ref={ref}
+          type="search"
+          className={cn("pl-8 [&::-webkit-search-cancel-button]:appearance-none", hint && "pr-8")}
+          {...props}
+        />
+        {hint && <Kbd className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2">{hint}</Kbd>}
+      </div>
+    );
+  },
+);
+
+/** Hover-Fläche für Listenzeilen, die etwas über die Trennlinien hinausragt. */
+export const rowHover = "-mx-2 rounded-md px-2 transition-colors duration-[120ms] hover:bg-sunken";
+

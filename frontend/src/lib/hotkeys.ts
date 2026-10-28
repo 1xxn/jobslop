@@ -9,7 +9,7 @@ import { useEffect, useRef } from "react";
  */
 export type Hotkeys = Record<string, (e: KeyboardEvent) => void>;
 
-export function isTyping(target: EventTarget | null): boolean {
+function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   if (!el) return false;
   return el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName);

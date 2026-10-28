@@ -134,7 +134,7 @@ async def test_dashboard_end_to_end(dashboard):
             await page.wait_for_url("**/settings/log")
             await page.get_by_role("button", name="Sprache und Farbschema").click()
             await page.get_by_role("menuitemradio", name="English").click()
-            await page.get_by_text("Search #6: 18 new jobs, 5 queued").wait_for()
+            await page.get_by_text("Search #6: 18 new jobs, 5 up next").wait_for()
             await page.get_by_text("Application run finished: 3× Sent, 1× Question").wait_for()
         finally:
             await browser.close()

@@ -1,19 +1,17 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
 import { Tooltip } from "@/components/ui/overlays";
 import { Button, EmptyState, Section } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { codeOf, useBackendText } from "@/lib/backendText";
-import { useStatus } from "@/lib/hooks";
+import { useAutopilotRun, useCrawl, useStatus } from "@/lib/hooks";
 import { useI18n } from "@/lib/i18n";
 import { hasMessage } from "@/lib/messages";
 import type { ActivityItem } from "@/lib/types";
-import { formatDateTime, parseDate } from "@/lib/utils";
+import { formatDateTime, groupByDay, parseDate } from "@/lib/utils";
 
 /** Protokoll: Suchläufe und alles, was jobslop zuletzt getan hat (früher die Seite „Aktivität“). */
 export function LogSettings() {
   const { t, lang } = useI18n();
-  const qc = useQueryClient();
   const { data: status } = useStatus();
   const crawls = useQuery({
     queryKey: ["crawls"],
@@ -21,19 +19,8 @@ export function LogSettings() {
     refetchInterval: status?.crawl.running ? 3000 : 30_000,
   });
   const activity = useQuery({ queryKey: ["activity", 60], queryFn: () => api.activity(60), refetchInterval: 10_000 });
-  const crawl = useMutation({
-    mutationFn: api.crawl,
-    onSuccess: (r) => {
-      toast(r.started ? t("crawl.started") : t("crawl.running"));
-      qc.invalidateQueries({ queryKey: ["status"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-  const autopilot = useMutation({
-    mutationFn: api.autopilotRun,
-    onSuccess: () => toast(t("autopilot.started")),
-    onError: (e: Error) => toast.error(e.message),
-  });
+  const crawl = useCrawl();
+  const autopilot = useAutopilotRun();
 
   return (
     <div className="grid gap-10">
@@ -113,14 +100,9 @@ function ActivityByDay({ items }: { items: ActivityItem[] }) {
     const key = `kind.${kind}`;
     return hasMessage(key) ? t(key) : kind;
   };
-  const days = new Map<string, ActivityItem[]>();
-  for (const item of [...items].sort((a, b) => (parseDate(b.ts)?.getTime() ?? 0) - (parseDate(a.ts)?.getTime() ?? 0))) {
-    const day = parseDate(item.ts)?.toLocaleDateString(lang, { weekday: "long", day: "numeric", month: "long" }) ?? "";
-    days.set(day, [...(days.get(day) ?? []), item]);
-  }
   return (
     <div className="grid gap-4 pt-3">
-      {[...days].map(([day, list]) => (
+      {groupByDay(items, (item) => item.ts, lang, true).map(([day, list]) => (
         <section key={day}>
           <h3 className="pb-1 text-small font-semibold text-ink-2">{day}</h3>
           <ol className="grid gap-1 text-meta">

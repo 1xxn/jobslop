@@ -1,8 +1,8 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useMemo, useState } from "react";
 import { Link } from "react-router";
-import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { useAutopilotRun, useCrawl } from "@/lib/hooks";
 import { useI18n } from "@/lib/i18n";
 import type { Status } from "@/lib/types";
 import { cn, formatRelative, formatWhen } from "@/lib/utils";
@@ -41,6 +41,13 @@ export function runSummary(status: Status | undefined, t: ReturnType<typeof useI
     ? t("run.autopilot_at", { when: formatWhen(status.autopilot.next_run, lang) })
     : t("run.autopilot_off");
   return { busy, now, detail, autopilot };
+}
+
+/** Ein Satz, wann neue Stellen kommen – für Leerzustände („Die nächste Suche läuft morgen 08:00.“). */
+export function nextSearchText(status: Status | undefined, t: ReturnType<typeof useI18n>["t"], lang: string) {
+  return status?.autopilot.enabled
+    ? t("today.next_search", { when: formatWhen(status.autopilot.next_run, lang) })
+    : t("today.autopilot_off");
 }
 
 /** Statuszeile unten in der Navigation: öffnet die Lauf-Seitenleiste. */
@@ -85,21 +92,9 @@ function RunDrawer({
   status: Status | undefined;
 }) {
   const { t, lang } = useI18n();
-  const qc = useQueryClient();
   const crawls = useQuery({ queryKey: ["crawls"], queryFn: api.crawls, enabled: open });
-  const crawl = useMutation({
-    mutationFn: api.crawl,
-    onSuccess: (r) => {
-      toast(r.started ? t("crawl.started") : t("crawl.running"));
-      qc.invalidateQueries({ queryKey: ["status"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-  const autopilot = useMutation({
-    mutationFn: api.autopilotRun,
-    onSuccess: () => toast(t("autopilot.started")),
-    onError: (e: Error) => toast.error(e.message),
-  });
+  const crawl = useCrawl();
+  const autopilot = useAutopilotRun();
   const last = crawls.data?.[0];
   const s = runSummary(status, t, lang);
 

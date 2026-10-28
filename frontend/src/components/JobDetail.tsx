@@ -12,7 +12,7 @@ import { cn, formatDate, formatRelative, hostOf, sourceName } from "@/lib/utils"
 import { ApplyDialog } from "./actions";
 import { SCORE_MAX, StatusLabel } from "./domain";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "./ui/overlays";
-import { Button, Kbd, Skeleton, Textarea } from "./ui/primitives";
+import { Button, Kbd, rowHover, Skeleton, Textarea } from "./ui/primitives";
 
 /** Die drei Entscheidungen zu einer Stelle – liegen bei der Liste, weil sie dort die Auswahl weiterschieben. */
 export interface Decisions {
@@ -278,7 +278,7 @@ export function JobDetail({
               <li key={a.id} className="border-b border-line">
                 <Link
                   to={`/applications/${a.id}`}
-                  className="-mx-2 flex items-center justify-between gap-3 rounded-md px-2 py-2 hover:bg-sunken"
+                  className={cn(rowHover, "flex items-center justify-between gap-3 py-2")}
                 >
                   <span className="min-w-0 truncate text-meta text-ink-2">
                     {formatRelative(a.started_at, lang)} · {a.error || a.confirmation || t(`mode.${a.mode}` as MessageKey)}
