@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sqlite3
+import threading
+import weakref
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -244,6 +247,7 @@ class Activity(Base):
 # --------------------------------------------------------------------------- engine/session
 
 _engines: dict[Path, Engine] = {}
+MMAP_SIZE = 256 * 1024 * 1024  # größere Datenbanken lesen den Rest wie bisher
 
 
 def get_engine(db_path: Path) -> Engine:
@@ -255,8 +259,14 @@ def get_engine(db_path: Path) -> Engine:
         def _pragmas(dbapi_conn, _record):  # pragma: no cover - trivial
             cur = dbapi_conn.cursor()
             cur.execute("PRAGMA journal_mode=WAL")
+            # FULL ist auch der Standard – hier fest, weil „abgeschickt“ einen Stromausfall überleben muss (sonst droht
+            # eine zweite Bewerbung). Nicht für Tempo lockern.
+            cur.execute("PRAGMA synchronous=FULL")
             cur.execute("PRAGMA foreign_keys=ON")
             cur.execute("PRAGMA busy_timeout=5000")
+            # Lesen über Memory-Mapping statt read(): Listen, Zähler und Crawl lesen jede Zeile, das war unter Windows
+            # der größte Posten (gemessen bei 20.000 Stellen: Faktor 3). Schreiben geht weiter über das WAL.
+            cur.execute(f"PRAGMA mmap_size={MMAP_SIZE}")
             cur.close()
 
         Base.metadata.create_all(engine)
@@ -306,6 +316,30 @@ def _add_missing_indexes(engine: Engine) -> None:
             for index in table.indexes:
                 if not index.unique:
                     conn.execute(CreateIndex(index, if_not_exists=True))
+
+
+class ChangeCounter:
+    """Ändert sich, sobald irgendwer in die Datenbank schreibt – Dashboard, Bewerbungslauf oder CLI.
+
+    ``PRAGMA data_version`` einer eigenen Verbindung zählt jedes Commit aller anderen Verbindungen (auch aus
+    anderen Prozessen). Damit lassen sich teure Auswertungen zwischen zwei Abrufen wiederverwenden, solange sich
+    nichts geändert hat."""
+
+    def __init__(self, db_path: Path) -> None:
+        get_engine(db_path)  # Datei und Schema anlegen
+        conn = sqlite3.connect(db_path, check_same_thread=False, isolation_level=None)
+        self._conn = conn
+        self._lock = threading.Lock()
+        self._close = weakref.finalize(self, conn.close)  # spätestens beim Aufräumen schließen
+
+    def value(self) -> int:
+        with self._lock:
+            return int(self._conn.execute("PRAGMA data_version").fetchone()[0])
+
+    def close(self) -> None:
+        """Verbindung schließen (unter Windows hält sie sonst die Datenbankdatei offen)."""
+        with self._lock:
+            self._close()
 
 
 @contextmanager
