@@ -145,6 +145,15 @@ def test_triage_dismissed_and_counts(settings, config, profile):
     assert client.get("/api/status").status_code == 200
     assert client.get("/api/jobs", params={"view": "triage"}).json()["total"] == 1
 
+    # Echttest: Claude stufte vorgemerkte Stellen nachträglich als Stretch ein – „ohne Stretch“ versteckte sie dann
+    # auch unter „Als Nächstes“. Der Filter gilt nur beim Sichten.
+    client.patch(f"/api/jobs/{cloud['id']}", json={"queued": True})
+    with session_scope(settings.db_path) as s:
+        s.get(Job, cloud["id"]).level = "S"
+    queued = client.get("/api/jobs", params={"view": "queued", "level": "noS"}).json()
+    assert [j["id"] for j in queued["items"]] == [cloud["id"]] and queued["counts"]["queued"] == 1
+    assert client.get("/api/jobs", params={"view": "all", "level": "noS"}).json()["counts"]["triage"] == 0
+
     # fälliges Nachfassen zählt nur die letzte Bewerbung je Stelle mit Termin in der Vergangenheit
     due_before = client.get("/api/status").json()["counts"]["follow_ups_due"]
     with session_scope(settings.db_path) as s:

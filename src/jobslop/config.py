@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .presets import COMMON_EXCLUDES, LEADERSHIP_EXCLUDES, preset
+from .profile import split_city
 
 log = logging.getLogger(__name__)
 
@@ -562,7 +563,10 @@ def search_config_from_preset(
         roles=roles,
         filters=FilterConfig(
             exclude_titles=list(dict.fromkeys(excludes)),
-            onsite_locations=[c.strip().lower() for c in (cities or ["berlin"]) if c.strip()],
+            # „Berlin, Deutschland“ (so steht es oft im Profil) muss als „berlin“ filtern, sonst passt keine Stelle
+            onsite_locations=list(
+                dict.fromkeys(city.lower() for c in (cities or ["berlin"]) if (city := split_city(c)[0]))
+            ),
             remote_regions=[*remote_regions, "worldwide", "anywhere"],
             allow_remote=remote,
         ),

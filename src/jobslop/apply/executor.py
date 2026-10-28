@@ -293,7 +293,15 @@ class Executor:
         is_file_input = await loc.evaluate("e => e.tagName === 'INPUT' && e.type === 'file'")
         if is_file_input:
             multiple = await loc.evaluate("e => e.multiple")
-            await loc.set_input_files([str(p) for p in (paths if multiple else paths[:1])], timeout=10_000)
+            chosen = paths if multiple else paths[:1]
+            before = await self._page_text()
+            await loc.set_input_files([str(p) for p in chosen], timeout=10_000)
+            await asyncio.sleep(1.2)
+            # Nur versteckte Felder hinter einer Drop-Zone (z. B. JOIN) brauchen die Rückfallebene. Ein sichtbares Feld
+            # zeigt den Dateinamen selbst an (nicht im Seitentext) – dort bleibt die Datei einfach gesetzt.
+            hidden = not await loc.is_visible()
+            if hidden and not multiple and not await self._shows_files(chosen, before):
+                await self._upload_via_zone(loc, chosen)
         else:
             async with self.page.expect_file_chooser(timeout=8000) as fc_info:
                 await loc.click()
@@ -302,9 +310,67 @@ class Executor:
         await asyncio.sleep(1.2)  # Upload-Parser (z. B. Lebenslauf-Autofill) arbeiten lassen
         return "hochgeladen: " + ", ".join(p.name for p in paths)
 
+    async def _page_text(self) -> str:
+        with contextlib.suppress(Exception):
+            return await self.page.inner_text("body", timeout=3000)
+        return ""
+
+    async def _shows_files(self, files: list[Path], before: str) -> bool:
+        """Hat die Seite den Upload sichtbar übernommen (Dateiname erscheint)? Ohne sichtbare Änderung lief er ins Leere."""
+        after = await self._page_text()
+        if after == before:
+            return False
+        names = [n.lower() for p in files for n in (p.name, p.stem)]
+        return any(n in after.lower() and n not in before.lower() for n in names) or len(after) != len(before)
+
+    async def _upload_via_zone(self, loc: Any, files: list[Path]) -> None:
+        handle = await loc.evaluate_handle(_UPLOAD_ZONE_JS)
+        zone = handle.as_element()
+        if zone is None:
+            return
+        try:
+            # Dieselbe Datei steckt schon im Feld – ohne Leeren meldet der Browser bei erneuter Auswahl keine Änderung
+            await loc.evaluate("e => { e.value = ''; }")
+            async with self.page.expect_file_chooser(timeout=6000) as fc_info:
+                await zone.click(timeout=4000)
+            chooser = await fc_info.value
+            await chooser.set_files([str(p) for p in files])
+            log.info("Upload über die sichtbare Upload-Fläche wiederholt")
+        except Exception as exc:
+            # Fläche nicht klickbar (Overlay o. Ä.): Datei wieder direkt setzen – nie ein geleertes Feld zurücklassen
+            log.info("Upload-Fläche nicht nutzbar (%s) – Datei wieder direkt gesetzt", type(exc).__name__)
+            with contextlib.suppress(Exception):
+                await loc.set_input_files([str(p) for p in files], timeout=10_000)
+
+
+# Sichtbare Fläche zu einem (meist versteckten) Datei-Feld: zugehöriges Label oder der nächste sichtbare Vorfahr
+_UPLOAD_ZONE_JS = r"""
+(e) => {
+  const ok = (el) => { const r = el.getBoundingClientRect(); const st = getComputedStyle(el);
+    return r.width > 40 && r.height > 24 && st.visibility !== "hidden" && st.display !== "none"; };
+  if (e.id) { const l = document.querySelector(`label[for="${CSS.escape(e.id)}"]`); if (l && ok(l)) return l; }
+  // nur eine reine Upload-Fläche: enthält sie andere Eingaben, träfe der Klick womöglich etwas anderes
+  const other = (el) => el.querySelector('input:not([type="file"]):not([type="hidden"]), select, textarea');
+  for (let p = e.parentElement, i = 0; p && i < 6; p = p.parentElement, i++) {
+    if (other(p)) return null;
+    if (ok(p)) return p;
+  }
+  return null;
+}
+"""
+
+
+def live_page(page: Any) -> Any | None:
+    """Die Seite, auf der es weitergeht: die gegebene, solange sie offen ist, sonst der jüngste offene Tab (None, wenn
+    alle zu sind). Login-Fenster wie bei JOIN schließen sich nach dem Klick selbst wieder."""
+    if not page.is_closed():
+        return page
+    return next((p for p in reversed(page.context.pages) if not p.is_closed()), None)
+
 
 async def click_element(page: Any, state: PageState, element_id: str) -> Any:
-    """Klickt einen Button/Link. Öffnet sich ein neuer Tab, wird dieser zurückgegeben, sonst die Seite selbst."""
+    """Klickt einen Button/Link. Öffnet sich ein neuer Tab, wird dieser zurückgegeben, sonst die Seite selbst –
+    schließt sich der neue Tab gleich wieder (Login-Popup), geht es im bisherigen weiter."""
     context = page.context
     before = list(context.pages)
     frame = state.frame_for(element_id) or page.main_frame
@@ -318,5 +384,7 @@ async def click_element(page: Any, state: PageState, element_id: str) -> Any:
         new = new_pages[-1]
         with contextlib.suppress(Exception):
             await new.wait_for_load_state("domcontentloaded", timeout=20_000)
-        return new
-    return page
+        await asyncio.sleep(1.5)  # Popups, die sich gleich wieder schließen, nicht für die Bewerbung halten
+        if not new.is_closed():
+            return new
+    return live_page(page) or page

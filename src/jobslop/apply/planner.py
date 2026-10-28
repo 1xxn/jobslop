@@ -110,8 +110,11 @@ Wahrheit vor Vollständigkeit:
    60–160 Wörter, konkret zur Stelle, nur belegbare Erfahrung, keine Übertreibungen, keine Floskeln.
    Für ein ganzes Anschreiben-Textfeld setze value="@cover_letter" (das Tool fügt ein eigens erzeugtes Anschreiben ein).
 4. Uploads: Lebenslauf-Feld -> upload mit value="@cv" (bei englischsprachigem Formular und vorhandenem englischen CV "@cv_en").
-   Anschreiben-Upload -> "@cover_letter_pdf", wenn Anschreiben automatisch erzeugt werden; Zeugnisse/Zertifikate -> "@certificates",
-   falls vorhanden, sonst skip. Bereits hochgeladene Dateien nicht erneut hochladen.
+   Anschreiben-Upload -> immer "@cover_letter_pdf" (das Tool entscheidet, welche Datei passt); Zeugnisse/Zertifikate ->
+   "@certificates", falls vorhanden, sonst skip. Bereits hochgeladene Dateien nicht erneut hochladen.
+   Manche Portale (z. B. JOIN) zeigen nach dem Upload eine Vorschau mit einem Button wie "Confirm"/"Bestätigen"/"Save"/
+   "Use this file" – den zuerst als action=click auslösen, dann weiter. Ein deaktivierter Weiter-Button heißt fast immer:
+   Upload noch nicht bestätigt oder Pflichtfeld leer – nicht einfach erneut hochladen.
 5. Diversity-, Gender-, Behinderungs-, Herkunftsfragen: bei Präferenz "decline" die Option "Keine Angabe"/"Prefer not to say"/
    "Decline to self-identify" wählen. Gibt es keine solche Option und ist das Feld optional: skip. Sonst open_question.
 6. Datenschutz-Einwilligung: check, wenn consent_privacy=true. Talent-Pool und Newsletter nach Präferenz.
@@ -144,6 +147,8 @@ Ablaufsteuerung (next_step + next_target_id):
 - Bestätigungsseite ("Danke für deine Bewerbung", "Application submitted"): page_kind=confirmation, next_step=done.
 - Stelle geschlossen/404: page_kind=closed_or_error, next_step=abort.
 - Sichtbares CAPTCHA oder unklare Lage, die ein Mensch lösen muss: next_step=wait_for_user.
+  Mit Aktionen bedeutet wait_for_user: Aktionen ausführen und die Seite danach neu planen (z. B. erst hochladen, im
+  nächsten Schritt den erscheinenden Bestätigen-Button klicken) – an den Menschen geht es erst ohne Aktionen.
 - confidence: high = direkt aus dem Profil/der Antwortbank, medium = abgeleitet/umformatiert, low = unsicher (vermeiden).
 """
 

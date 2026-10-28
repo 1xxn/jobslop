@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Infrastructure Engineer – Popup GmbH</title></head>
+<body>
+<!-- Wie JOIN mit angemeldetem Konto: „Apply now“ öffnet kurz ein Fenster (Login-Abgleich), das sich selbst wieder
+     schließt; die Bewerbung geht im ursprünglichen Tab weiter. -->
+<h1>Infrastructure Engineer (m/f/d)</h1>
+<p>Berlin · Hybrid. Kubernetes, Terraform, Observability.</p>
+<button type="button" id="apply">Apply now</button>
+<script>
+  document.getElementById("apply").addEventListener("click", () => {
+    const popup = window.open("/apply.html", "_blank");
+    setTimeout(() => {
+      popup && popup.close();
+      location.href = "/apply.html";
+    }, 1800);
+  });
+</script>
+</body>
+</html>

@@ -79,6 +79,20 @@ def test_presets_make_jobslop_usable_beyond_devops():
     assert title_allowed("Lead DevOps Engineer", leaders)[0]
 
 
+def test_city_from_cv_import_still_matches_jobs():
+    """Echttest: Der CV-Import lieferte „Berlin, Deutschland“ – als Ortsfilter passte damit keine Berliner Stelle."""
+    from jobslop.profile import split_city, web_url
+
+    assert split_city("Berlin, Deutschland") == ("Berlin", "")
+    assert split_city("10115 Berlin, Germany") == ("Berlin", "10115")
+    assert split_city("Frankfurt am Main") == ("Frankfurt am Main", "")
+    assert web_url("linkedin.com/in/max") == "https://linkedin.com/in/max"
+    assert web_url("https://github.com/max") == "https://github.com/max" and web_url("") == ""
+    cfg = search_config_from_preset(["cloud"], cities=["Berlin, Deutschland", "berlin"])
+    assert cfg.filters.onsite_locations == ["berlin"]
+    assert where_of("Berlin", cfg.filters) == "B"
+
+
 def test_score_follows_role_priority(config):
     roles = config.role_names
     first = score(roles[0], 2, "tech", "O", False, "B", roles)
@@ -292,3 +306,44 @@ def test_versions_agree():
     pyproject = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
     package_json = json.loads((root / "frontend" / "package.json").read_text(encoding="utf-8"))["version"]
     assert jobslop.__version__ == pyproject == package_json
+
+
+def test_cover_letter_upload_falls_back_to_the_cv_when_letters_are_off(profile):
+    """Nutzerwunsch aus dem JOIN-Test: Anschreiben aus, Portal verlangt eins – dann den Lebenslauf hochladen."""
+    from jobslop.apply.engine import wants_cover_letter
+    from jobslop.apply.extract import PageState
+    from jobslop.apply.planner import FieldAction, PagePlan
+
+    def plan() -> PagePlan:
+        act = lambda fid, action, value: FieldAction(  # noqa: E731
+            field_id=fid, action=action, value=value, confidence="high", source="policy", reason="t"
+        )
+        return PagePlan(
+            page_kind="application_form",
+            actions=[
+                act("1", "upload", "@cover_letter_pdf"),
+                act("2", "upload", "@cover_letter_pdf"),
+                act("3", "fill", "@cover_letter"),
+            ],
+            open_questions=[],
+            next_step="click_next",
+            next_target_id="9",
+            summary="t",
+        )
+
+    state = PageState(url="https://join.com/x", title="t", text="")
+    state.fields = [
+        {"id": "1", "kind": "file", "label": "Cover letter", "required": True},
+        {"id": "2", "kind": "file", "label": "Weitere Unterlagen", "required": False},
+        {"id": "3", "kind": "textarea", "label": "Anschreiben", "required": True},
+    ]
+    profile.documents.cover_letter = "none"
+    p = plan()
+    assert wants_cover_letter(p, profile, state) is False
+    assert [(a.action, a.value) for a in p.actions] == [
+        ("upload", "@cv"),
+        ("skip", "@cover_letter_pdf"),
+        ("skip", "@cover_letter"),
+    ]
+    profile.documents.cover_letter = "auto"
+    assert wants_cover_letter(plan(), profile, state) is True  # eingeschaltet: Anschreiben wird erzeugt
