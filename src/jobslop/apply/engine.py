@@ -40,7 +40,7 @@ from .planner import (
     guard_submit_clicks,
 )
 from .prepare import dismiss_cookie_banners, reveal_lazy_content, try_autofill
-from .tailor import CV_TOKENS, ensure_tailored_cv, wants_cv
+from .tailor import ensure_tailored_cv, wants_cv
 
 log = logging.getLogger(__name__)
 
@@ -240,6 +240,13 @@ class ApplyEngine:
                 if status == "ready":  # Testlauf: Seite offen lassen, damit man reinschauen kann
                     self._kept_page = page
                 else:
+                    limit = "Claude-Limit" in message or status == "paused"
+                    if limit and not getattr(self.browser, "headless", True) and not page.is_closed():
+                        await show_notice(
+                            page,
+                            "jobslop: Das Claude-Nutzungslimit ist erreicht – der Lauf pausiert und dieses Fenster "
+                            "schließt sich gleich. Nichts ist verloren: siehe Dashboard.",
+                        )
                     with contextlib.suppress(Exception):
                         await page.close()
             usage = self._usage_delta(usage_before)
@@ -451,7 +458,7 @@ class ApplyEngine:
                 if failures and run.submit_attempts < 2:
                     run.submit_attempts += 1
                     continue  # erst Fehler beheben lassen
-                empty = state.missing_required() if not run.submit_clicked else []
+                empty = missing_in_form(state, plan.next_target_id) if not run.submit_clicked else []
                 if empty and run.submit_attempts < 2:
                     # Nicht mit leerem Pflichtfeld um Freigabe bitten (Echttest Arbeitnow: Lebenslauf fehlte)
                     run.submit_attempts += 1
@@ -479,7 +486,7 @@ class ApplyEngine:
         await save_screenshot(page, run.artdir / "pre-submit.jpg")
         rows = [r for r in run.filled if r["ok"]]
         low = [r for r in rows if r.get("confidence") == "low"]
-        missing = (await extract_state(page)).missing_required()
+        missing = missing_in_form(await extract_state(page), plan.next_target_id)
         self._event(
             run.app_id,
             "review",
@@ -638,13 +645,14 @@ class ApplyEngine:
             run.history.append(note)
             self._event(run.app_id, "tailored_cv", note)
 
-    @staticmethod
-    def _shown_value(run: _Run, value: str) -> str:
-        """Was in der Freigabe als Wert erscheint: Platzhalter werden zu lesbaren Dokumentnamen."""
+    def _shown_value(self, run: _Run, value: str) -> str:
+        """Was in der Freigabe als Wert erscheint: Platzhalter werden zu den echten Dateinamen („@cv_en“ sagt dir
+        nichts, „Leon_Segebart_CV_SRE_EN.pdf“ schon)."""
         if value == "@cover_letter":
             return "(Anschreiben)"
-        if run.tailored_cv and value.strip().lower() in CV_TOKENS:
-            return f"({run.tailored_cv.name})"
+        token = value.strip().lower()
+        if token.startswith("@") and (paths := self.files.resolve_upload(token)):
+            return "(" + ", ".join(p.name for p in paths) + ")"
         return value
 
     async def _handoff(
@@ -779,6 +787,36 @@ def artifacts_dir(settings: Settings, app_id: int, job: Job) -> Path:
 
 
 _LETTER_TOKENS = ("@cover_letter", "@cover_letter_pdf")
+
+
+def missing_in_form(state: PageState, submit_id: str) -> list[dict[str, Any]]:
+    """Leere Pflichtfelder – nur aus dem Formular des Absende-Buttons. Ein Newsletter-Feld im Seitenfuß
+    (Echttest Arbeitnow) gehört nicht zur Bewerbung."""
+    missing = state.missing_required()
+    form = (state.button(submit_id) or {}).get("form")
+    if isinstance(form, str) and form:
+        return [f for f in missing if f.get("form") == form]
+    return missing
+
+
+async def show_notice(page: Any, text: str, seconds: float = 6.0) -> None:
+    """Kurzer Hinweis im Browserfenster, bevor jobslop es schließt – ohne ihn wirkt das Schließen wie ein Absturz."""
+    with contextlib.suppress(Exception):
+        await page.evaluate(_NOTICE_JS, text)
+        await asyncio.sleep(seconds)
+
+
+_NOTICE_JS = """(text) => {
+  const box = document.createElement("div");
+  box.setAttribute("role", "status");
+  box.textContent = text;
+  Object.assign(box.style, {
+    position: "fixed", top: "24px", left: "50%", transform: "translateX(-50%)", zIndex: "2147483647",
+    maxWidth: "560px", padding: "14px 18px", borderRadius: "8px", background: "#1a1917", color: "#fff",
+    font: "15px/1.45 system-ui, sans-serif", boxShadow: "0 8px 24px rgba(0,0,0,.35)",
+  });
+  document.body.appendChild(box);
+}"""
 
 
 # Antwort-Token der gängigen CAPTCHA-Widgets: steht hier etwas, hat der Mensch die Abfrage gelöst
