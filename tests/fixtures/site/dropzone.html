@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Upload your cover letter</title></head>
+<body>
+<!-- Wie JOIN: Die Drop-Zone nimmt Dateien nur an, wenn die Dateiauswahl über ihre Fläche geöffnet wurde; danach
+     muss der Upload mit „Confirm“ bestätigt werden, erst dann wird „Continue“ aktiv. -->
+<h1>Upload your cover letter</h1>
+<div id="zone" role="presentation" style="width:420px;height:140px;border:1px dashed #999;display:grid;place-items:center">
+  <span id="label">Upload file</span>
+  <input type="file" id="cover" name="cover" required style="display:none">
+</div>
+<button type="button" id="confirm" hidden>Confirm</button>
+<button type="button" id="next" disabled>Continue</button>
+<script>
+  const zone = document.getElementById("zone"), input = document.getElementById("cover");
+  let armed = false;
+  zone.addEventListener("click", () => { armed = true; input.click(); });
+  input.addEventListener("change", () => {
+    if (!armed || !input.files.length) return;  // direkt gesetzte Dateien ignoriert die Zone
+    document.getElementById("label").textContent = input.files[0].name;
+    document.getElementById("confirm").hidden = false;
+  });
+  document.getElementById("confirm").addEventListener("click", () => { document.getElementById("next").disabled = false; });
+</script>
+</body>
+</html>

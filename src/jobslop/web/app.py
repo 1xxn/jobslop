@@ -988,9 +988,7 @@ def create_app(runtime: Runtime) -> FastAPI:
             stmt = select(Job)
             if where in ("B", "R"):
                 stmt = stmt.where(Job.where.in_([where, "BR"]))
-            if level == "noS":
-                stmt = stmt.where(Job.level != "S")
-            elif level:
+            if level and level != "noS":
                 stmt = stmt.where(Job.level.in_(level.split(",")))
             if min_fit:
                 stmt = stmt.where(Job.fit >= min_fit)
@@ -1010,6 +1008,14 @@ def create_app(runtime: Runtime) -> FastAPI:
             rows = list(s.execute(stmt.options(selectinload(Job.applications)).order_by(*order)).scalars())
             excluded = excluded_job_ids(s, rows)
             cats = set(category.split(",")) if category else set()
+
+            def shown(v: str, j: Job) -> bool:
+                # „Ohne Stretch“ gilt beim Sichten. Was du schon entschieden hast (vorgemerkt, gemerkt, aussortiert),
+                # bleibt sichtbar – auch wenn Claude die Stelle später als Stretch einstuft.
+                return _in_view(v, j, excluded) and not (
+                    level == "noS" and j.level == "S" and v in ("triage", "all")
+                )
+
             # Zähler für die Reiter: offene Stellen, bei „Alle“ und „Aussortiert“ auch geschlossene
             counts = {
                 v: sum(
@@ -1017,13 +1023,11 @@ def create_app(runtime: Runtime) -> FastAPI:
                     for j in rows
                     if (not cats or j.category in cats)
                     and (v in ("all", "dismissed") or j.status == "open")
-                    and _in_view(v, j, excluded)
+                    and shown(v, j)
                 )
                 for v in JOB_VIEWS
             }
-            rows = [
-                j for j in rows if (status == "all" or j.status == status) and _in_view(view, j, excluded)
-            ]
+            rows = [j for j in rows if (status == "all" or j.status == status) and shown(view, j)]
             facets = Counter(j.category for j in rows)  # vor dem Rollenfilter: das Menü zeigt alle Rollen
             if cats:
                 rows = [j for j in rows if j.category in cats]
