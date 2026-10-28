@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>reCAPTCHA</title></head>
+<body style="margin:0;font:14px sans-serif">
+<!-- Attrappe für tests/fixtures/site/captcha_form.html: Klick des Menschen setzt das Token im Formular. -->
+<label style="display:flex;gap:8px;align-items:center;padding:20px">
+  <span id="recaptcha-anchor" role="checkbox" aria-checked="false" tabindex="0"
+        style="display:inline-block;width:24px;height:24px;border:2px solid #999"></span> I'm not a robot
+</label>
+<script>
+  const box = document.getElementById("recaptcha-anchor");
+  box.addEventListener("click", () => {
+    box.setAttribute("aria-checked", "true");
+    box.style.background = "#1a73e8";
+    parent.document.getElementById("g-recaptcha-response").value = "token-from-human";
+  });
+</script>
+</body>
+</html>

@@ -239,7 +239,9 @@ function SearchStep({ draft, onDraft }: { draft: SearchConfig | null; onDraft: (
   const [leadership, setLeadership] = useState(true);
   useEffect(() => {
     const city = profile.data?.profile.personal.city;
-    if (city && cities.length === 0) setCities([city]); // nur beim ersten Laden vorbelegen
+    // nur beim ersten Laden vorbelegen – ohne Land/PLZ („Berlin, Deutschland“ → „Berlin“)
+    const name = city?.split(",")[0].replace(/^\d{4,5}\s+/, "").trim();
+    if (name && cities.length === 0) setCities([name]);
   }, [profile.data]);
   const preview = useMutation({ mutationFn: api.presetPreview, onSuccess: onDraft });
   useEffect(() => {

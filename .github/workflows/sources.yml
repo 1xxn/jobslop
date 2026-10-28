@@ -27,5 +27,5 @@ jobs:
           enable-cache: true
       - run: uv sync --locked
       - run: uv run playwright install --with-deps chromium
-      - name: Read real sources and forms
-        run: uv run pytest tests/test_real_sites.py -v
+      - name: Read real sources and forms, real reCAPTCHA widget (Google test key)
+        run: uv run pytest -m network -v

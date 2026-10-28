@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 from sqlalchemy import select
 
 from conftest import ScriptedInteractor, add_job
-from jobslop.apply.engine import ApplyEngine, BrowserSession
+from jobslop.apply.engine import ApplyEngine, BrowserSession, captcha_solved
 from jobslop.apply.executor import Executor, Files
 from jobslop.apply.extract import extract_state
-from jobslop.apply.planner import FieldAction, HeuristicPlanner, JobContext
+from jobslop.apply.planner import FieldAction, HeuristicPlanner, JobContext, PagePlan
 from jobslop.apply.prepare import dismiss_cookie_banners, reveal_lazy_content, try_autofill
 from jobslop.apply.tailor import fingerprint, sources_for, tailored_dir
 from jobslop.db import Answer, Application, ApplicationEvent, Job, session_scope
+from jobslop.llm import LLMLimitReached
 
 pytestmark = pytest.mark.browser
 
@@ -482,3 +484,268 @@ async def test_engine_uploads_the_cv_tailored_for_the_job(settings, site, profil
         assert "tailored_cv" in kinds
         assert (Path(app.artifacts_dir) / "Lebenslauf_Max_Mustermann.pdf").is_file()
         assert any(r["value"] == "(Lebenslauf_Max_Mustermann.pdf)" for r in app.filled)
+
+
+async def test_engine_continues_when_login_popup_closes_itself(settings, site, profile, config):
+    """Echttest JOIN: „Apply now“ öffnet kurz ein Fenster, das sich selbst schließt – die Bewerbung geht im
+    ursprünglichen Tab weiter, statt mit TargetClosedError abzubrechen."""
+    job_id = add_job(settings, f"{site.base_url}/popup_posting.html", "Popup GmbH", "Infrastructure Engineer")
+    before = len(site.submissions)
+    async with BrowserSession(settings, headless=True) as browser:
+        outcome = await _engine(settings, config, profile, browser).apply(job_id)
+    assert outcome.status == "submitted", outcome.message
+    assert site.submissions[before]["vorname"] == "Max"
+
+
+async def test_browser_restarts_after_the_window_was_closed(settings):
+    """Echttest: Wurde Chromium geschlossen, scheiterten alle weiteren Bewerbungen des Laufs sofort."""
+    async with BrowserSession(settings, headless=True) as browser:
+        await browser.context.close()  # wie: Fenster von Hand geschlossen
+        page = await browser.new_page()
+        await page.set_content("<p>wieder da</p>")
+        assert await page.inner_text("p") == "wieder da"
+
+
+async def test_upload_through_a_dropzone_that_ignores_the_hidden_input(settings, site, profile):
+    """Echttest JOIN: Die Drop-Zone übernimmt nur Dateien aus ihrer eigenen Dateiauswahl – das direkt gesetzte versteckte
+    Feld lief ins Leere, „Continue“ blieb grau und jobslop lud viermal hoch."""
+    session, page = await _page(settings)
+    try:
+        await page.goto(f"{site.base_url}/dropzone.html")
+        state = await extract_state(page)
+        upload = next(f for f in state.fields if f["kind"] == "file")
+        action = FieldAction(
+            field_id=upload["id"],
+            action="upload",
+            value="@cv",
+            confidence="high",
+            source="profile",
+            reason="t",
+        )
+        results = await Executor(page, Files(cv=profile.cv_path(settings.home))).run(state, [action])
+        assert results[0].ok, results[0].detail
+        assert await page.inner_text("#label") == "Max_Mustermann_CV.pdf"
+        assert await page.is_visible("#confirm")  # jetzt muss nur noch bestätigt werden
+    finally:
+        await session.__aexit__(None, None, None)
+
+
+class _JoinLikePlanner:
+    """Plant wie Claude im JOIN-Echttest: hochladen + warten, dann „Confirm“ klicken und weiter, dann Ende."""
+
+    cv_text = ""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def remember(self, *_args) -> None:
+        pass
+
+    async def plan(self, inp) -> PagePlan:
+        self.calls += 1
+        st = inp.state
+
+        def act(fid: str, action: str, value: str = "") -> FieldAction:
+            return FieldAction(
+                field_id=fid, action=action, value=value, confidence="high", source="policy", reason="t"
+            )
+
+        if self.calls == 1:
+            upload = next(f for f in st.fields if f["kind"] == "file")
+            return PagePlan(
+                page_kind="application_form",
+                actions=[act(upload["id"], "upload", "@cover_letter_pdf")],
+                open_questions=[],
+                next_step="wait_for_user",
+                next_target_id="",
+                summary="hochladen, dann bestätigen",
+            )
+        if self.calls == 2:
+            confirm = next(b for b in st.buttons if b["text"] == "Confirm")
+            nxt = next(b for b in st.buttons if b["text"] == "Continue")
+            return PagePlan(
+                page_kind="application_form",
+                actions=[act(confirm["id"], "click")],
+                open_questions=[],
+                next_step="click_next",
+                next_target_id=nxt["id"],
+                summary="bestätigen, weiter",
+            )
+        return PagePlan(
+            page_kind="closed_or_error",
+            actions=[],
+            open_questions=[],
+            next_step="abort",
+            next_target_id="",
+            summary="Ende des Tests",
+        )
+
+
+class _CountingInteractor(ScriptedInteractor):
+    def __init__(self) -> None:
+        super().__init__({})
+        self.handoffs: list[str] = []
+
+    async def handoff(self, app_id, title, message, check=None) -> bool:
+        self.handoffs.append(message)
+        return True
+
+
+async def test_wait_with_actions_runs_them_before_handing_off(settings, site, profile, config):
+    """Echttest JOIN: Der Plan „Anschreiben hochladen, dann warten“ führte zur Übergabe, ohne hochzuladen. Jetzt wird
+    erst hochgeladen, danach „Confirm“ geklickt – ganz ohne Übergabe. Anschreiben aus: der Lebenslauf geht hoch."""
+    job_id = add_job(settings, f"{site.base_url}/dropzone.html", "Join GmbH", "Infrastructure Engineer")
+    profile.documents.cover_letter = "none"
+    interactor = _CountingInteractor()
+    async with BrowserSession(settings, headless=True) as browser:
+        engine = ApplyEngine(
+            settings=settings,
+            config=config,
+            profile=profile,
+            planner=_JoinLikePlanner(),
+            interactor=interactor,
+            browser=browser,
+            mode="review",
+        )
+        outcome = await engine.apply(job_id)
+    assert interactor.handoffs == []
+    assert outcome.status == "failed" and "Ende des Tests" in outcome.message
+    with session_scope(settings.db_path) as s:
+        filled = s.get(Application, outcome.application_id).filled
+    assert [(r["action"], r["ok"]) for r in filled] == [("upload", True), ("click", True)]
+
+
+async def test_visible_file_input_keeps_its_file_and_google_consent_is_dismissed(settings, site, profile):
+    """Echttest Arbeitnow: Googles Consent-Dialog („Einwilligen“) blieb offen, und das sichtbare Datei-Feld wurde von der
+    Drop-Zonen-Rückfallebene geleert. Das versteckte JOIN-Feld (test_upload_through_a_dropzone…) bleibt unberührt."""
+    session, page = await _page(settings)
+    try:
+        await page.goto(f"{site.base_url}/consent_upload.html")
+        state = await extract_state(page)
+        upload = next(f for f in state.fields if f["kind"] == "file")
+        action = FieldAction(
+            field_id=upload["id"],
+            action="upload",
+            value="@cv",
+            confidence="high",
+            source="profile",
+            reason="t",
+        )
+        results = await Executor(page, Files(cv=profile.cv_path(settings.home))).run(state, [action])
+        assert results[0].ok, results[0].detail
+        assert (
+            await page.evaluate("document.getElementById('resume').files.length") == 1
+        )  # trotz Overlay gesetzt
+        assert await dismiss_cookie_banners(page) == ["Einwilligen"]
+        assert await page.locator("#consent").count() == 0
+    finally:
+        await session.__aexit__(None, None, None)
+
+
+class _HumanSolvesCaptcha(ScriptedInteractor):
+    """Spielt den Menschen: löst das CAPTCHA im Fenster und prüft, dass jobslop das ohne Dashboard-Klick erkennt."""
+
+    def __init__(self, page_getter) -> None:
+        super().__init__({})
+        self.page_getter = page_getter
+        self.checks: list[bool] = []
+
+    async def handoff(self, app_id, title, message, check=None) -> bool:
+        assert check is not None, "CAPTCHA-Übergabe ohne Erkennung, ob es gelöst ist"
+        self.checks.append(await check())  # noch ungelöst
+        page = self.page_getter()
+        await (
+            page.frame_locator('iframe[title="reCAPTCHA"]')
+            .first.locator("#recaptcha-anchor")
+            .click(timeout=20_000)
+        )
+        for _ in range(20):
+            if await check():
+                self.checks.append(True)
+                return True
+            await page.wait_for_timeout(500)
+        self.checks.append(False)
+        return False
+
+
+async def _apply_with_captcha(settings, site, profile, config, fixture: str):
+    job_id = add_job(settings, f"{site.base_url}/{fixture}", "Captcha GmbH", "Platform Engineer")
+    before = len(site.submissions)
+    async with BrowserSession(settings, headless=True) as browser:
+        human = _HumanSolvesCaptcha(lambda: browser.context.pages[-1])
+        outcome = await _engine(settings, config, profile, browser, human).apply(job_id)
+    return outcome, human, site.submissions[before:]
+
+
+async def test_captcha_handoff_continues_by_itself_once_solved(settings, site, profile, config):
+    """jobslop löst nie selbst ein CAPTCHA: es übergibt, erkennt das Token des Menschen und macht ohne weiteren Klick
+    weiter bis zur Bestätigung (offline, nachgebautes reCAPTCHA-Kästchen)."""
+    outcome, human, sent = await _apply_with_captcha(settings, site, profile, config, "captcha_form.html")
+    assert human.checks == [False, True]
+    assert outcome.status == "submitted", outcome.message
+    assert sent and sent[0]["first_name"] == "Max"
+
+
+async def test_captcha_solved_detection(settings, site):
+    session, page = await _page(settings)
+    try:
+        await page.goto(f"{site.base_url}/captcha_form.html")
+        assert not await captcha_solved(page)
+        await page.frame_locator('iframe[title="reCAPTCHA"]').locator("#recaptcha-anchor").click()
+        assert await captcha_solved(page)
+    finally:
+        await session.__aexit__(None, None, None)
+
+
+@pytest.mark.network
+@pytest.mark.skipif(
+    os.environ.get("JOBSLOP_NETWORK") != "1", reason="nur mit JOBSLOP_NETWORK=1 (lädt Googles Widget)"
+)
+async def test_real_recaptcha_widget_with_googles_test_key(settings, site, profile, config):
+    """Derselbe Ablauf mit dem echten reCAPTCHA-Widget und Googles offiziellem Test-Schlüssel (besteht immer)."""
+    outcome, human, sent = await _apply_with_captcha(settings, site, profile, config, "recaptcha_google.html")
+    assert human.checks == [False, True]
+    assert outcome.status == "submitted", outcome.message
+    assert sent and sent[0]["email"] == "max.mustermann@example.com"
+
+
+class _LimitAfterSubmitPlanner(_JoinLikePlanner):
+    """Erst Absenden planen, beim nächsten Schritt ist das Claude-Limit erreicht."""
+
+    async def plan(self, inp) -> PagePlan:
+        self.calls += 1
+        if self.calls > 1:
+            raise LLMLimitReached("Claude-Nutzungslimit erreicht: resets 4:40pm")
+        submit = next(b for b in inp.state.buttons if b["text"] == "Apply")
+        return PagePlan(
+            page_kind="application_form",
+            actions=[],
+            open_questions=[],
+            next_step="click_submit",
+            next_target_id=submit["id"],
+            summary="absenden",
+        )
+
+
+async def test_usage_limit_after_submit_never_requeues(settings, site, profile, config):
+    """Echttest Arbeitnow: Nach dem Absende-Klick kam das Claude-Limit – die Stelle wurde wieder eingereiht und ein neuer
+    Lauf hätte sich doppelt beworben. Jetzt: zur Prüfung, nicht eingereiht."""
+    job_id = add_job(
+        settings, f"{site.base_url}/silent_submit.html", "Limit GmbH", "Site Reliability Engineer"
+    )
+    with session_scope(settings.db_path) as s:
+        s.get(Job, job_id).queued = True
+    async with BrowserSession(settings, headless=True) as browser:
+        engine = ApplyEngine(
+            settings=settings,
+            config=config,
+            profile=profile,
+            planner=_LimitAfterSubmitPlanner(),
+            interactor=ScriptedInteractor({}),
+            browser=browser,
+            mode="review",
+        )
+        outcome = await engine.apply(job_id)
+    assert outcome.status == "needs_review" and "Claude-Limit" in outcome.message
+    with session_scope(settings.db_path) as s:
+        assert s.get(Job, job_id).queued is False
