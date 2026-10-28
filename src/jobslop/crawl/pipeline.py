@@ -10,7 +10,7 @@ from datetime import timedelta
 from typing import Any, Literal
 
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import exists, select, update
 from sqlalchemy.orm import Session
 
 from ..classify import classify, content_hash, fingerprint, job_score, match_key, title_allowed, where_of
@@ -226,30 +226,45 @@ async def run_crawl(
 
         # Stellen, die in einer vollständig abgefragten Quelle nicht mehr auftauchen, gelten als geschlossen.
         # Aus gedeckelten Börsen-Suchen erst, wenn sie STALE_DAYS lang nicht mehr gesehen wurden.
-        stale_before = utcnow() - timedelta(days=STALE_DAYS)
-        open_jobs = s.execute(select(Job).where(Job.status == "open", Job.origin == "crawl")).scalars().all()
-        for job in open_jobs:
-            if job.id in seen_ids:
+        # Schlichte Zeilen statt ORM-Objekte: Bei Tausenden offenen Stellen wäre das jede Beschreibung (MB pro Crawl).
+        now = utcnow()
+        stale_before = now - timedelta(days=STALE_DAYS)
+        still_listed: list[int] = []
+        to_close: list[int] = []
+        for row in s.execute(
+            select(Job.id, Job.fingerprint, Job.source, Job.last_seen).where(
+                Job.status == "open", Job.origin == "crawl"
+            )
+        ):
+            if row.id in seen_ids:
                 continue
-            if job.fingerprint in listed:
-                job.last_seen = utcnow()  # noch online, passt nur nicht mehr zum Filter
-                continue
-            if job.source in ok_sources or (
-                job.source in partial_sources and job.last_seen and job.last_seen < stale_before
+            if row.fingerprint in listed:
+                still_listed.append(row.id)  # noch online, passt nur nicht mehr zum Filter
+            elif row.source in ok_sources or (
+                row.source in partial_sources and row.last_seen and row.last_seen < stale_before
             ):
-                job.status = "closed"
-                job.closed_at = utcnow()
-                s.add(
-                    JobSnapshot(
-                        job=job,
-                        crawl_run=run,
-                        change="closed",
-                        title=job.title,
-                        location=job.location,
-                        content_hash=job.content_hash,
-                    )
+                to_close.append(row.id)
+        for i in range(0, len(still_listed), 500):  # SQLite begrenzt die Parameter pro Abfrage
+            s.execute(update(Job).where(Job.id.in_(still_listed[i : i + 500])).values(last_seen=now))
+        closing: dict[int, Job] = {}
+        for i in range(0, len(to_close), 500):
+            chunk = to_close[i : i + 500]
+            closing |= {j.id: j for j in s.execute(select(Job).where(Job.id.in_(chunk))).scalars()}
+        for job_id in to_close:
+            job = closing[job_id]
+            job.status = "closed"
+            job.closed_at = now
+            s.add(
+                JobSnapshot(
+                    job=job,
+                    crawl_run=run,
+                    change="closed",
+                    title=job.title,
+                    location=job.location,
+                    content_hash=job.content_hash,
                 )
-                report.closed.append(job.id)
+            )
+            report.closed.append(job.id)
 
         run.sources = [src.name for src in sources]
         run.errors = report.errors
@@ -295,42 +310,19 @@ def _upsert(
     change = "unchanged"
 
     if job is None:
+        # Nur über match_key suchen (Index) und den Rest hier prüfen: Mit „status = open“ in derselben Abfrage nahm
+        # SQLite ix_jobs_state und las jede offene Stelle samt Beschreibung – 14 ms statt 0,1 ms pro neuer Stelle.
+        same = s.execute(select(Job).where(Job.match_key == mk)).scalars().all() if mk else []
         # Gleiche Stelle aus der Startliste (z. B. LinkedIn-Link)? Dann übernehmen und auf die direkte URL umstellen.
-        twin = (
-            s.execute(select(Job).where(Job.match_key == mk, Job.origin == "seed")).scalars().first()
-            if mk
-            else None
-        )
+        twin = next((j for j in same if j.origin == "seed"), None)
         if twin is None and mk:
             # Dieselbe Stelle aus einer anderen Quelle: Jobbörse und Firmen-Board nicht doppelt führen.
-            other = (
-                s.execute(
-                    select(Job).where(
-                        Job.match_key == mk,
-                        Job.origin == "crawl",
-                        Job.source != p.source,
-                        Job.status == "open",
-                    )
-                )
-                .scalars()
-                .first()
-            )
+            crawled = [j for j in same if j.origin == "crawl" and j.status == "open"]
+            other = next((j for j in crawled if j.source != p.source), None)
             if other is None and _is_aggregator(p.source):
                 # Jobbörsen führen dieselbe Stelle oft mehrfach (neu eingestellt, neue ID, Echttest: Indeed) – gleicher
                 # Ort heißt Dublette. Firmen-Boards bleiben außen vor: dort kann derselbe Titel an mehreren Orten stehen.
-                other = (
-                    s.execute(
-                        select(Job).where(
-                            Job.match_key == mk,
-                            Job.origin == "crawl",
-                            Job.source == p.source,
-                            Job.status == "open",
-                            Job.location == p.location,
-                        )
-                    )
-                    .scalars()
-                    .first()
-                )
+                other = next((j for j in crawled if j.source == p.source and j.location == p.location), None)
             if other is not None and _is_aggregator(p.source):
                 report.rejected["Dublette"] += 1
                 return other.id, "duplicate"
@@ -406,7 +398,9 @@ def _upsert(
     job.score = job_score(job, config.role_names)
     s.flush()
 
-    if change != "unchanged" or not job.snapshots:
+    # Unveränderte Stellen brauchen nur dann einen Eintrag, wenn sie noch keinen haben (Startliste, Import) – geprüft
+    # per EXISTS statt die ganze Historie jeder Stelle zu laden
+    if change != "unchanged" or not s.scalar(select(exists().where(JobSnapshot.job_id == job.id))):
         s.add(
             JobSnapshot(
                 job=job,
