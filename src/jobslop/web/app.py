@@ -17,6 +17,7 @@ import os
 import re
 from collections import Counter
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,7 @@ from ..db import (
     Answer,
     Application,
     ApplicationEvent,
+    ChangeCounter,
     CrawlRun,
     Exclusion,
     InboxMessage,
@@ -173,26 +175,46 @@ def inbox_json(m: InboxMessage) -> dict[str, Any]:
 
 
 JOB_VIEWS = ("triage", "starred", "queued", "all", "dismissed")
+# Stelle zur Bewerbung gleich mitladen (eine Abfrage statt einer pro Bewerbung), ohne die Beschreibung
+WITH_JOB = selectinload(Application.job).defer(Job.description)
+WITH_APP_JOB = selectinload(InboxMessage.application).selectinload(Application.job).defer(Job.description)
 
 
-def _in_view(view: str, j: Job, excluded: set[int]) -> bool:
+@dataclass(slots=True)
+class ListRow:
+    """Was Ansichten, Zähler und Sortierung der Stellenliste von einer Stelle brauchen – ohne ORM-Objekt."""
+
+    id: int
+    company: str
+    title: str
+    url: str
+    category: str
+    level: str
+    score: float
+    status: str
+    queued: bool
+    starred: bool
+    last_status: str | None  # Stand der letzten Bewerbung, None = keine
+
+
+def _in_view(view: str, j: ListRow, excluded: set[int]) -> bool:
     """Gehört die Stelle in diese Ansicht? Aussortiertes verlässt alle Arbeitslisten."""
-    last = j.applications[-1] if j.applications else None
+    last = j.last_status
     if view == "all":
         return True
     if view == "dismissed":
         return j.id in excluded
     if view == "applied":
-        return last is not None and last.status in DONE_STATES
+        return last in DONE_STATES
     if j.id in excluded:
         return False
     if view == "triage":  # zu sichten: weder gemerkt, vorgemerkt noch beworben
-        return not (j.applications or j.queued or j.starred)
+        return not (last is not None or j.queued or j.starred)
     if view == "starred":
         return j.starred
     if view == "queued":
         return j.queued
-    return last is None or last.status not in DONE_STATES  # todo: offen, ohne abgeschlossene Bewerbung
+    return last not in DONE_STATES  # todo: offen, ohne abgeschlossene Bewerbung
 
 
 def host_name(header: str) -> str:
@@ -346,6 +368,9 @@ class Context:
         self.inbox_running = False
         self.inbox_checked_at: datetime | None = None
         self.inbox_error = ""
+        # Zähler „zu sichten“ (Ausschlussregeln über Tausende Stellen) – neu berechnet, sobald jemand schreibt
+        self.changes = ChangeCounter(self.settings.db_path)
+        self.to_review: tuple[int, int] | None = None  # (data_version, Anzahl)
 
     @property
     def db(self) -> Path:
@@ -598,6 +623,7 @@ def create_app(runtime: Runtime) -> FastAPI:
         finally:
             watcher.cancel()
             await ctx.scheduler.stop()
+            ctx.changes.close()
 
     app = FastAPI(title="jobslop", version=__version__, docs_url=None, redoc_url=None, lifespan=lifespan)
     app.state.ctx = ctx
@@ -653,6 +679,9 @@ def create_app(runtime: Runtime) -> FastAPI:
     @app.get("/api/status")
     def status() -> dict[str, Any]:
         s = ctx.settings
+        # vor der ersten Abfrage lesen: Ein Commit danach ist im Ergebnis enthalten oder löst beim nächsten Abruf
+        # eine Neuberechnung aus – ein veralteter Wert kann nie unter einer neueren Version landen
+        version = ctx.changes.value()
         with session_scope(ctx.db) as db:
             prompts = [
                 prompt_json(p)
@@ -674,16 +703,21 @@ def create_app(runtime: Runtime) -> FastAPI:
                     select(InboxMessage)
                     .where(InboxMessage.status == "open")
                     .order_by(InboxMessage.received_at)
+                    .options(WITH_APP_JOB)
                 )
             ]
             # Zähler für die Navigation: Stellen zu sichten (wie die Standardansicht, ohne Stretch-Level) …
-            # (schlichte Zeilen statt ORM-Objekte – der Abruf läuft alle paar Sekunden, auch bei Tausenden Stellen)
-            undecided = db.execute(
-                select(Job.id, Job.company, Job.title, Job.url)
-                .where(Job.status == "open", ~Job.queued, ~Job.starred, Job.level != "S")
-                .where(~Job.applications.any())
-            ).all()
-            to_review = len(undecided) - len(excluded_job_ids(db, undecided))
+            # Der Abruf läuft alle paar Sekunden; neu gezählt wird nur, wenn seitdem jemand geschrieben hat.
+            if ctx.to_review is not None and ctx.to_review[0] == version:
+                to_review = ctx.to_review[1]
+            else:
+                undecided = db.execute(
+                    select(Job.id, Job.company, Job.title, Job.url)
+                    .where(Job.status == "open", ~Job.queued, ~Job.starred, Job.level != "S")
+                    .where(~Job.applications.any())
+                ).all()
+                to_review = len(undecided) - len(excluded_job_ids(db, undecided))
+                ctx.to_review = (version, to_review)
             # … und fällige Nachfass-Termine (letzte Bewerbung je Stelle, wie in der Pipeline)
             latest = select(func.max(Application.id)).group_by(Application.job_id)
             follow_ups_due = (
@@ -1015,7 +1049,10 @@ def create_app(runtime: Runtime) -> FastAPI:
         offset: int = 0,
     ) -> dict[str, Any]:
         with session_scope(ctx.db) as s:
-            stmt = select(Job)
+            # Ansichten und Zähler brauchen jede Stelle, die Liste nur eine Seite: schlichte Zeilen für alle, ORM-Objekte
+            # nur für die Seite. status/queued/starred und first_seen liegen in der Tabelle hinter der Beschreibung
+            # (Überlaufseiten) – sie kommen aus ihren Indizes, die SQLite ohne die Tabelle liest.
+            stmt = select(Job.id, Job.company, Job.title, Job.url, Job.category, Job.level, Job.score)
             if where in ("B", "R"):
                 stmt = stmt.where(Job.where.in_([where, "BR"]))
             if level and level != "noS":
@@ -1030,21 +1067,27 @@ def create_app(runtime: Runtime) -> FastAPI:
                     | Job.location.ilike(like)
                     | Job.notes.ilike(like)
                 )
-            order = {
-                "new": (Job.first_seen.desc(),),
-                "company": (Job.company, Job.score.desc()),
-            }.get(sort, (Job.starred.desc(), Job.score.desc(), Job.company))
-            # Bewerbungen gleich mitladen – sonst eine Abfrage pro Stelle (Ansichten und Zähler brauchen sie)
-            # Die Beschreibung braucht die Liste nicht – bei Tausenden Stellen wären das viele MB pro Abruf
-            rows = list(
-                s.execute(
-                    stmt.options(defer(Job.description), selectinload(Job.applications)).order_by(*order)
-                ).scalars()
-            )
+            listed = s.execute(stmt).all()
+            # Erst danach lesen: Die Abfragen sehen keinen gemeinsamen Stand, und eine Stelle, die ein Crawl gerade
+            # eingefügt hat, braucht hier ihren Zustand (Stellen werden nie gelöscht).
+            state = {r[0]: r[1:] for r in s.execute(select(Job.id, Job.status, Job.queued, Job.starred))}
+            last_status: dict[int, str] = {}
+            for job_id, app_status in s.execute(
+                select(Application.job_id, Application.status).order_by(Application.id)
+            ):
+                last_status[job_id] = app_status  # die letzte Bewerbung je Stelle zählt
+            rows = [ListRow(*r, *state[r[0]], last_status.get(r[0])) for r in listed]
+            if sort == "new":
+                seen = dict(s.execute(select(Job.id, Job.first_seen)).all())
+                rows.sort(key=lambda j: seen[j.id], reverse=True)
+            elif sort == "company":
+                rows.sort(key=lambda j: (j.company, -j.score))
+            else:
+                rows.sort(key=lambda j: (not j.starred, -j.score, j.company))
             excluded = excluded_job_ids(s, rows)
             cats = set(category.split(",")) if category else set()
 
-            def shown(v: str, j: Job) -> bool:
+            def shown(v: str, j: ListRow) -> bool:
                 # „Ohne Stretch“ gilt beim Sichten. Was du schon entschieden hast (vorgemerkt, gemerkt, aussortiert),
                 # bleibt sichtbar – auch wenn Claude die Stelle später als Stretch einstuft.
                 return _in_view(v, j, excluded) and not (
@@ -1067,7 +1110,18 @@ def create_app(runtime: Runtime) -> FastAPI:
             if cats:
                 rows = [j for j in rows if j.category in cats]
             total = len(rows)
-            items = [job_summary(j, excluded=j.id in excluded) for j in rows[offset : offset + limit]]
+            page = [j.id for j in rows[offset : offset + limit]]
+            loaded: dict[int, Job] = {}
+            for i in range(0, len(page), 500):  # SQLite begrenzt die Parameter pro Abfrage
+                loaded |= {
+                    j.id: j
+                    for j in s.execute(
+                        select(Job)
+                        .where(Job.id.in_(page[i : i + 500]))
+                        .options(defer(Job.description), selectinload(Job.applications))
+                    ).scalars()
+                }
+            items = [job_summary(loaded[job_id], excluded=job_id in excluded) for job_id in page]
         return {"items": items, "total": total, "facets": {"category": dict(facets)}, "counts": counts}
 
     @app.post("/api/jobs")
@@ -1094,6 +1148,7 @@ def create_app(runtime: Runtime) -> FastAPI:
             parts = job_score_parts(j, config.role_names)
             if abs(rest := round(j.score - sum(p for _, p in parts), 2)) >= 0.1:
                 parts.append(("other", rest))  # z. B. Import mit eigener Einordnung
+            waiting = waiting_for_you(s)  # einmal, nicht pro Bewerbung
             return job_summary(j, excluded=bool(excluded_job_ids(s, [j]))) | {
                 "description": j.description,
                 "apply_url": j.apply_url,
@@ -1113,7 +1168,7 @@ def create_app(runtime: Runtime) -> FastAPI:
                 "history": [
                     {"seen_at": _iso(sn.seen_at), "change": sn.change, "diff": sn.diff} for sn in j.snapshots
                 ],
-                "applications": [app_summary(a, waiting_for_you(s)) for a in j.applications],
+                "applications": [app_summary(a, waiting) for a in j.applications],
             }
 
     # ------------------------------------------------------------------ Lebenslauf je Stelle
@@ -1374,7 +1429,7 @@ def create_app(runtime: Runtime) -> FastAPI:
     @app.get("/api/applications")
     def applications(status: str = "", limit: int = 300) -> list[dict[str, Any]]:
         with session_scope(ctx.db) as s:
-            stmt = select(Application).order_by(Application.id.desc()).limit(limit)
+            stmt = select(Application).order_by(Application.id.desc()).limit(limit).options(WITH_JOB)
             if status:
                 stmt = stmt.where(Application.status.in_(status.split(",")))
             waiting = waiting_for_you(s)
@@ -1385,7 +1440,13 @@ def create_app(runtime: Runtime) -> FastAPI:
         now = utcnow()
         with session_scope(ctx.db) as s:
             latest: dict[int, Application] = {}
-            for a in s.execute(select(Application).order_by(Application.id)).scalars():
+            last_ids = select(func.max(Application.id)).group_by(Application.job_id)
+            for a in s.execute(
+                select(Application)
+                .where(Application.id.in_(last_ids))
+                .order_by(Application.id)
+                .options(WITH_JOB)
+            ).scalars():
                 latest[a.job_id] = a  # pro Stelle zählt der letzte Stand
             stages: dict[str, list[dict[str, Any]]] = {k: [] for k in STAGES}
             due = []
@@ -1629,7 +1690,9 @@ def create_app(runtime: Runtime) -> FastAPI:
                     select(Job.category, func.count()).where(Job.status == "open").group_by(Job.category)
                 ).all()
             )
-            apps = list(s.execute(select(Application)).scalars())
+            apps = s.execute(
+                select(Application.status, Application.submitted_at, Application.started_at)
+            ).all()
         by_status = Counter(a.status for a in apps)
         sent = [a for a in apps if a.status in DONE_STATES]
         weeks: list[dict[str, Any]] = []
@@ -1667,11 +1730,12 @@ def create_app(runtime: Runtime) -> FastAPI:
             ["id", "company", "title", "location", "category", "score", "status", "application", "url"]
         )
         with session_scope(ctx.db) as s:
-            for j in s.execute(select(Job).order_by(Job.score.desc())).scalars():
-                last = j.applications[-1].status if j.applications else ""
-                writer.writerow(
-                    [j.id, j.company, j.title, j.location, j.category, j.score, j.status, last, j.url]
-                )
+            last = dict(
+                s.execute(select(Application.job_id, Application.status).order_by(Application.id)).all()
+            )
+            columns = (Job.id, Job.company, Job.title, Job.location, Job.category, Job.score, Job.status)
+            for j in s.execute(select(*columns, Job.url).order_by(Job.score.desc())):
+                writer.writerow([*j[:7], last.get(j.id, ""), j.url])
         return Response(
             "﻿" + buf.getvalue(),
             media_type="text/csv; charset=utf-8",
