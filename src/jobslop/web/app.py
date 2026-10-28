@@ -2,7 +2,8 @@
 
 Sicherheit: Der Server lauscht nur lokal. Zusätzlich werden fremde Host-Header abgewiesen (DNS-Rebinding)
 und ändernde Anfragen brauchen den Header ``X-Jobslop: 1`` – den kann eine fremde Webseite ohne CORS-Freigabe
-nicht setzen (CSRF-Schutz).
+nicht setzen (CSRF-Schutz). Einbetten in fremde Seiten ist verboten (Clickjacking: eine Seite legt das Dashboard
+unsichtbar über einen Köder und lässt dich „Absenden“ klicken), die Oberfläche lädt nur eigene Skripte (CSP).
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import asyncio
 import csv
 import io
 import logging
+import mimetypes
 import os
 import re
 from collections import Counter
@@ -22,8 +24,8 @@ from typing import Any
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import func, select
-from sqlalchemy.orm import load_only, selectinload
+from sqlalchemy import func, select, update
+from sqlalchemy.orm import defer, selectinload
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .. import __version__, assist
@@ -71,7 +73,24 @@ from ..system import BrowserInstaller, open_claude_install, open_claude_login, o
 log = logging.getLogger(__name__)
 
 DIST = Path(__file__).parent / "dist"
-LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]", "testserver"}
+# Windows liest Dateitypen aus der Registry, dort steht für .js manchmal text/plain – mit „nosniff“ (und für
+# Module ohnehin) führt der Browser die Oberfläche dann nicht aus.
+for _type, _ext in (("text/javascript", ".js"), ("text/css", ".css"), ("image/svg+xml", ".svg")):
+    mimetypes.add_type(_type, _ext)
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Cross-Origin-Opener-Policy": "same-origin",
+}
+# Nur für HTML: Chromes PDF-Ansicht (Lebenslauf-Vorschau) verträgt object-src 'none' nicht. Inline-Styles braucht
+# Radix für die Position von Menüs und Tooltips.
+CSP = (
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+    "font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; "
+    "frame-ancestors 'none'"
+)
 STAGES = {
     "applied": ("submitted", "manual"),
     "interview": ("interview",),
@@ -174,6 +193,14 @@ def _in_view(view: str, j: Job, excluded: set[int]) -> bool:
     if view == "queued":
         return j.queued
     return last is None or last.status not in DONE_STATES  # todo: offen, ohne abgeschlossene Bewerbung
+
+
+def host_name(header: str) -> str:
+    """Host-Header ohne Port: „127.0.0.1:8765“ → „127.0.0.1“, „[::1]:8765“ und „[::1]“ → „[::1]“."""
+    header = header.strip().lower()
+    if header.startswith("["):
+        return header[: header.find("]") + 1]
+    return header.partition(":")[0]
 
 
 def waiting_for_you(session: Any) -> dict[int, str]:
@@ -607,7 +634,7 @@ def create_app(runtime: Runtime) -> FastAPI:
 
     @app.middleware("http")
     async def local_only(request: Request, call_next):
-        host = (request.headers.get("host") or "").rsplit(":", 1)[0].lower()
+        host = host_name(request.headers.get("host") or "")
         if host not in LOCAL_HOSTS and host != ctx.settings.dashboard_host:
             return JSONResponse({"detail": "Nur lokal erreichbar"}, status_code=403)
         if (
@@ -616,7 +643,11 @@ def create_app(runtime: Runtime) -> FastAPI:
             and request.headers.get("x-jobslop") != "1"
         ):
             return JSONResponse({"detail": "Fehlender X-Jobslop-Header"}, status_code=403)
-        return await call_next(request)
+        response = await call_next(request)
+        response.headers.update(SECURITY_HEADERS)
+        if response.headers.get("content-type", "").startswith("text/html"):
+            response.headers["Content-Security-Policy"] = CSP
+        return response
 
     # ------------------------------------------------------------------ Status & System
     @app.get("/api/status")
@@ -646,14 +677,12 @@ def create_app(runtime: Runtime) -> FastAPI:
                 )
             ]
             # Zähler für die Navigation: Stellen zu sichten (wie die Standardansicht, ohne Stretch-Level) …
-            undecided = list(
-                db.execute(
-                    select(Job)
-                    .options(load_only(Job.id, Job.company, Job.title, Job.url))
-                    .where(Job.status == "open", ~Job.queued, ~Job.starred, Job.level != "S")
-                    .where(~Job.applications.any())
-                ).scalars()
-            )
+            # (schlichte Zeilen statt ORM-Objekte – der Abruf läuft alle paar Sekunden, auch bei Tausenden Stellen)
+            undecided = db.execute(
+                select(Job.id, Job.company, Job.title, Job.url)
+                .where(Job.status == "open", ~Job.queued, ~Job.starred, Job.level != "S")
+                .where(~Job.applications.any())
+            ).all()
             to_review = len(undecided) - len(excluded_job_ids(db, undecided))
             # … und fällige Nachfass-Termine (letzte Bewerbung je Stelle, wie in der Pipeline)
             latest = select(func.max(Application.id)).group_by(Application.job_id)
@@ -1006,7 +1035,12 @@ def create_app(runtime: Runtime) -> FastAPI:
                 "company": (Job.company, Job.score.desc()),
             }.get(sort, (Job.starred.desc(), Job.score.desc(), Job.company))
             # Bewerbungen gleich mitladen – sonst eine Abfrage pro Stelle (Ansichten und Zähler brauchen sie)
-            rows = list(s.execute(stmt.options(selectinload(Job.applications)).order_by(*order)).scalars())
+            # Die Beschreibung braucht die Liste nicht – bei Tausenden Stellen wären das viele MB pro Abruf
+            rows = list(
+                s.execute(
+                    stmt.options(defer(Job.description), selectinload(Job.applications)).order_by(*order)
+                ).scalars()
+            )
             excluded = excluded_job_ids(s, rows)
             cats = set(category.split(",")) if category else set()
 
@@ -1477,15 +1511,25 @@ def create_app(runtime: Runtime) -> FastAPI:
             p = s.get(Prompt, prompt_id)
             if p is None or p.status != "open":
                 raise Problem(409, "api.prompt_closed", "Die Rückfrage ist nicht mehr offen")
+            response: dict[str, Any]
             if p.kind == "questions":
-                p.response = {"skip": True} if body.skip else {"answers": body.answers}
+                response = {"skip": True} if body.skip else {"answers": body.answers}
             elif p.kind == "confirm":
                 if body.decision not in ("submit", "manual", "reject"):
                     raise HTTPException(400, "decision muss submit, manual oder reject sein")
-                p.response = {"decision": body.decision}
+                response = {"decision": body.decision}
             else:
-                p.response = {"abort": True} if body.abort else {"done": True}
-            p.status, p.answered_at = "answered", utcnow()
+                response = {"abort": True} if body.abort else {"done": True}
+            # Nur solange offen: läuft die Wartezeit des Laufs gerade ab, gewinnt genau einer – sonst stünde hier
+            # „beantwortet“, während der Lauf schon aufgegeben hat
+            done = s.connection().execute(
+                update(Prompt)
+                .where(Prompt.id == prompt_id, Prompt.status == "open")
+                .values(status="answered", answered_at=utcnow(), response=response)
+            )
+            if not done.rowcount:
+                raise Problem(409, "api.prompt_closed", "Die Rückfrage ist nicht mehr offen")
+            s.refresh(p)
             return prompt_json(p)
 
     # ------------------------------------------------------------------ Antwortbank & Ausschlüsse

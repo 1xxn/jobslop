@@ -38,6 +38,25 @@
 - Python 3.14 is supported. CI tests Ubuntu (3.12, 3.14), Windows and macOS, checks the workflows with zizmor, runs
   CodeQL and a dependency review on pull requests, pins all actions to commit SHAs and caches Chromium; releases
   carry build provenance attestations; a weekly job checks that the real job sources still work.
+- CI checks Python types with mypy (Linux, Windows and macOS branches are clean); new tests cover approvals,
+  questions and handoffs through the dashboard, the CV import and the security headers.
+
+### Security
+- The dashboard cannot be embedded in other websites (clickjacking: a page could lay it invisibly over a decoy and
+  make you click "Submit"); it loads only its own scripts (Content-Security-Policy), sends no referrer and never lets
+  the browser guess file types. The theme script moved out of `index.html` for that.
+- `Host` headers are parsed exactly (`[::1]` without a port); the test-only host name is no longer accepted.
+- Job sources that deliver `javascript:` or `file:` links instead of web addresses are skipped, and the browser only
+  opens http(s) addresses.
+- On Linux and macOS the jobslop folder (profile, CV, inbox password, extension token, browser logins) is readable
+  only by you.
+- A stopped run or a closing dashboard no longer leaves Claude running in the background (it used up your quota).
+
+### Performance
+- With thousands of jobs the dashboard stays fast: indexes for the job state and first-seen date (added to existing
+  databases on start), the job list no longer loads job descriptions, exclusion rules are prepared once per request
+  instead of once per job, and the status poll reads only the end of the run log. Measured with 5,000 jobs: status
+  124 → 29 ms (polled every 3 s), job list 300 → 177 ms, statistics 92 → 21 ms.
 
 ### Fixed
 - Found in a live test with real job boards: reposted job-board listings (same company, title and place) are merged;
@@ -66,6 +85,9 @@
 - "Stop" ends the whole application run including browser processes; LinkedIn/Indeed are detected at every step,
   not only on the first page; a dry-run batch keeps only the last filled page open.
 - Claude Code tests now also run on Windows.
+- An approval clicked in the last second of the waiting time is no longer lost (the dashboard said "answered" while
+  the run had given up); a run whose question was closed by the dashboard stops waiting at once, and the waiting
+  time includes the time spent checking the page.
 - The rule planner recognises "Send" as a submit button (Recruitee).
 
 ## 1.0.0 – jobslop

@@ -193,9 +193,15 @@ def fetch_mails(settings: Settings, state: dict[str, Any]) -> tuple[list[Mail], 
         validity = str((imap.response("UIDVALIDITY")[1] or [b""])[0] or b"", "ascii", "replace")
         last = int(state.get("last_uid") or 0) if state.get("uidvalidity") == validity else 0
         if last:
-            typ, data = imap.uid("SEARCH", None, f"UID {last + 1}:*")
+            # charset None = ohne CHARSET-Angabe (manche Server lehnen sie ab); typeshed kennt nur str
+            typ, data = imap.uid("SEARCH", None, f"UID {last + 1}:*")  # type: ignore[arg-type]
         else:
-            typ, data = imap.uid("SEARCH", None, "SINCE", _since(settings.inbox_lookback_days))
+            typ, data = imap.uid(
+                "SEARCH",
+                None,  # type: ignore[arg-type]
+                "SINCE",
+                _since(settings.inbox_lookback_days),
+            )
         if typ != "OK":
             raise InboxError("Suche fehlgeschlagen")
         uids = sorted(u for u in (int(x) for x in (data[0] or b"").split()) if u > last)[-MAX_MAILS:]

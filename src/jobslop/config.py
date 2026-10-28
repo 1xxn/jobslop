@@ -110,6 +110,12 @@ class Settings(BaseSettings):
     def ensure_dirs(self) -> None:
         for path in (self.home, self.artifacts_dir, self.documents_dir, self.browser_profile_dir):
             path.mkdir(parents=True, exist_ok=True)
+        if os.name == "posix":
+            # Profil, Lebenslauf, Postfach-Passwort, Token der Erweiterung, Browser-Logins: nur für dich lesbar
+            try:
+                self.home.chmod(0o700)
+            except OSError as exc:
+                log.warning("Rechte für %s nicht gesetzt: %s", self.home, exc)
 
 
 class DemoModeError(RuntimeError):
@@ -332,7 +338,7 @@ class SourceConfig(BaseModel):
     arbeitsagentur_radius_km: int = 30
     arbeitsagentur_skip_agencies: bool = True  # Zeitarbeit und private Arbeitsvermittlung auslassen
     # Große Portale über JobSpy (öffentliche Suche ohne Login; Nutzungsbedingungen der Portale beachten)
-    portals: list[Portal] = Field(default_factory=lambda: ["linkedin", "indeed"])
+    portals: list[Portal] = Field(default_factory=lambda: list[Portal](["linkedin", "indeed"]))
     portal_country: str = "germany"
     portal_results: int = 25  # pro Suchbegriff, Ort und Portal
     portal_hours_old: int = 336  # nur Anzeigen der letzten zwei Wochen

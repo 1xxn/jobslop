@@ -11,6 +11,7 @@ import respx
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from conftest import LOCAL
 from jobslop.apply.engine import ApplyEngine
 from jobslop.apply.extract import PageState
 from jobslop.apply.planner import JobContext, LLMPlanner, PagePlan, PlanInput
@@ -22,8 +23,9 @@ from jobslop.importer import import_jobs
 from jobslop.jobpage import parse_html
 from jobslop.llm import DYNAMIC_BOUNDARY, Usage
 from jobslop.notify import notify
+from jobslop.runner import Runner
 from jobslop.runtime import Runtime
-from jobslop.web.app import create_app
+from jobslop.web.app import DIST, create_app, host_name
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -31,14 +33,53 @@ FIXTURES = Path(__file__).parent / "fixtures"
 def _client(settings, config, profile) -> TestClient:
     import_jobs(settings.db_path, FIXTURES / "jobs_import.json", config)
     app = create_app(Runtime(settings=settings, config=config, profile=profile))
-    return TestClient(app, headers={"X-Jobslop": "1"})
+    return TestClient(app, base_url=LOCAL, headers={"X-Jobslop": "1"})
 
 
 def test_api_rejects_foreign_sites(settings, config, profile):
     client = _client(settings, config, profile)
     assert client.post("/api/crawl", headers={"X-Jobslop": ""}).status_code == 403  # CSRF
     assert client.get("/api/status", headers={"Host": "evil.example"}).status_code == 403  # DNS-Rebinding
+    assert client.get("/api/status", headers={"Host": "testserver"}).status_code == 403
+    assert client.get("/api/status", headers={"Host": "[::1]"}).status_code == 200
     assert client.get("/api/status").status_code == 200
+
+
+def test_runner_log_tail_reads_only_the_end(settings):
+    """Der Status-Abruf alle paar Sekunden liest nicht das ganze Protokoll eines langen Laufs."""
+    runner = Runner(settings)
+    runner.log_path.write_bytes(b"Start\nzweite Zeile\n")
+    assert runner.tail(80) == "Start\nzweite Zeile"
+    runner.log_path.write_bytes("".join(f"Zeile {i} – ü\n" for i in range(20000)).encode())
+    assert runner.tail(0) == ""
+    assert runner.tail(3).splitlines() == ["Zeile 19997 – ü", "Zeile 19998 – ü", "Zeile 19999 – ü"]
+    assert "log" not in {k for k, v in runner.state(lines=0).items() if v}
+
+
+def test_host_name():
+    assert host_name("127.0.0.1:8765") == "127.0.0.1"
+    assert host_name("LOCALHOST") == "localhost"
+    assert host_name("[::1]:8765") == host_name("[::1]") == "[::1]"
+    assert host_name("evil.example:80") == "evil.example"
+
+
+def test_dashboard_cannot_be_framed_and_loads_only_own_scripts(settings, config, profile):
+    """Clickjacking: eine fremde Seite darf das Dashboard nicht unsichtbar einbetten und „Absenden“ klicken lassen."""
+    client = _client(settings, config, profile)
+    api = client.get("/api/status")
+    assert api.headers["x-frame-options"] == "DENY"
+    assert api.headers["x-content-type-options"] == "nosniff"
+    assert api.headers["referrer-policy"] == "no-referrer"
+    page = client.get("/")
+    if page.headers["content-type"].startswith("text/html"):
+        csp = page.headers["content-security-policy"]
+        assert "frame-ancestors 'none'" in csp and "script-src 'self';" in csp
+    if (DIST / "index.html").is_file():
+        # Kein Inline-Skript in der gebauten Oberfläche – die CSP würde es blockieren
+        html = (DIST / "index.html").read_text(encoding="utf-8")
+        assert "<script>" not in html and '<script src="/theme.js"></script>' in html
+        # „nosniff“: ein Skript als text/plain (Windows-Registry) führte der Browser nicht aus
+        assert client.get("/theme.js").headers["content-type"].startswith("text/javascript")
 
 
 async def test_demo_mode_blocks_real_actions(settings, config, profile):
@@ -206,7 +247,7 @@ def test_api_errors_carry_codes(settings, config, profile, monkeypatch):
         raise RuntimeError("kaputt")
 
     monkeypatch.setattr("jobslop.web.app.system_report", boom)
-    r = TestClient(client.app, raise_server_exceptions=False).get("/api/system")
+    r = TestClient(client.app, base_url=LOCAL, raise_server_exceptions=False).get("/api/system")
     assert r.status_code == 500
     assert r.json()["code"] == "api.internal" and "RuntimeError: kaputt" in r.json()["detail"]
 
@@ -519,7 +560,7 @@ def test_extension_install_uses_the_running_address(settings, config, profile):
     info = client.post("/api/extension/install").json()
     assert info["installed"] and not info["outdated"]
     cfg = (Path(info["path"]) / "config.js").read_text(encoding="utf-8")
-    assert '"server": "http://testserver"' in cfg  # Adresse, unter der das Dashboard gerade läuft
+    assert '"server": "http://127.0.0.1"' in cfg  # Adresse, unter der das Dashboard gerade läuft
     assert (Path(info["path"]) / "extract.js").read_text(encoding="utf-8").startswith("// Aus jobslop")
     # Assistenz-API nur mit Kopplungs-Token
     assert client.get("/api/assist/status").status_code == 401
