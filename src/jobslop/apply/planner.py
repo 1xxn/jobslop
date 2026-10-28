@@ -287,8 +287,10 @@ _FINAL_SUBMIT_RX = re.compile(
 )
 _STEP_RX = re.compile(r"\b(weiter|next|continue|fortfahren|review|überprüfen|zurück|back)\b", re.I)
 _CONFIRM_RX = re.compile(
-    r"thank you for (your )?appl|application (has been )?(submitted|received)|we have received your application|"
-    r"vielen dank für (deine|ihre) bewerbung|bewerbung (ist )?(erfolgreich )?(eingegangen|versendet|übermittelt)|danke für deine bewerbung",
+    r"thank(s| you) for (your )?appl|application (has been |was )?(submitted|received|sent)|"
+    r"we have received your application|you['’]ve (successfully )?applied|successfully applied|"
+    r"vielen dank für (deine|ihre) bewerbung|bewerbung (ist |wurde )?(erfolgreich )?"
+    r"(eingegangen|versendet|übermittelt|gesendet|abgeschickt|verschickt)|danke für deine bewerbung",
     re.I,
 )
 

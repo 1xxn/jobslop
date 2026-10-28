@@ -40,6 +40,13 @@
   carry build provenance attestations; a weekly job checks that the real job sources still work.
 
 ### Fixed
+- Found in a live test with real job boards: reposted job-board listings (same company, title and place) are merged;
+  a company board that names its own country (e.g. "Krakow, Poland") is no longer turned into "remote Germany" by a
+  job-board guess; legal roles ("Legal Counsel … Platform Workers") are excluded by the templates; confirmation pages
+  such as "Thanks for applying" and "Application sent" are recognised; the approval shows real file names instead of
+  `@cv_en`; only required fields of the application form count (not a newsletter field in the footer); when the
+  Claude usage limit pauses a run, the browser window says so before it closes. JOIN, uploads into drop zones,
+  self-closing login popups, Google's consent dialog and approvals that time out are handled as well.
 - Errors are always visible and translated: failed actions show a toast, failed loads a retry instead of an endless
   placeholder, a crashed page an error page instead of a white screen, unexpected server errors a readable message.
 - A stopped or crashed application run no longer leaves the application on "running" (which blocked the job) or

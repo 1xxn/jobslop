@@ -10,6 +10,13 @@ from typing import Any
 
 # Gilt für alle Vorlagen: Praktika, Abschlussarbeiten, Ausbildung, Nebenjobs.
 COMMON_EXCLUDES = [
+    # Juristische Stellen tragen manchmal Tech-Wörter im Titel (Echttest: „Legal Counsel … (Platform Workers)“)
+    "counsel",
+    "lawyer",
+    "attorney",
+    "paralegal",
+    "jurist",
+    "rechtsanwalt",
     "intern",
     "internship",
     "praktik",

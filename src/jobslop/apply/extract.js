@@ -52,6 +52,12 @@
     return false;
   };
 
+  // Zu welchem Formular gehört ein Element? (Frame + Formular-Nummer; leer = keins)
+  const forms = Array.from(document.forms);
+  const formKey = (el) => {
+    const f = el.form || (el.closest && el.closest("form"));
+    return f ? `${frameIndex}:form${Math.max(0, forms.indexOf(f))}` : "";
+  };
   const tag = (el) => {
     let id = el.getAttribute("data-jp");
     if (!id || !id.startsWith(PREFIX)) {
@@ -270,7 +276,7 @@
     if (t === "A" && !ACTION_RX.test(text)) continue;
     const btn = { id: tag(el), text, kind: t === "A" ? "link" : (el.type === "submit" || /submit/i.test(el.getAttribute("type") || "") ? "submit" : "button"),
       href: t === "A" ? (el.href || "").slice(0, 300) : "", disabled: !!el.disabled || el.getAttribute("aria-disabled") === "true",
-      form: !!(el.closest && el.closest("form")), autofill: AUTOFILL_RX.test(text), cookie: inCookieBanner(el) };
+      form: formKey(el), autofill: AUTOFILL_RX.test(text), cookie: inCookieBanner(el) };
     // Wichtiges zuerst: Formular-Buttons, Autofill, Ablauf-Buttons; Navigation zuletzt.
     btn._rank = (btn.form ? 0 : 2) + (btn.autofill ? -2 : 0) + (ACTION_RX.test(text) ? 0 : 1) + (btn.cookie ? 1 : 0);
     found.push(btn);
@@ -304,6 +310,11 @@
     if (/size=invisible/.test(src) || (el.getAttribute && el.getAttribute("data-size") === "invisible")) continue;
     const challenge = /bframe|challenge|api2\/anchor|hcaptcha|turnstile/.test(src) || /h-captcha|cf-turnstile|g-recaptcha/.test(cls);
     captcha.push({ src: src.slice(0, 120), cls: cls.slice(0, 60), visible: visible(el) && r.width > 40 && r.height > 40, challenge });
+  }
+
+  for (const f of fields) {
+    const el = document.querySelector(`[data-jp="${f.id}"]`);
+    f.form = el ? formKey(el) : "";
   }
 
   const headings = Array.from(document.querySelectorAll("h1,h2,h3")).filter(visible).map(textOf).filter(Boolean).slice(0, 15);
