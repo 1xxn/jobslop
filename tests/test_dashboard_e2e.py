@@ -62,6 +62,9 @@ async def test_dashboard_end_to_end(dashboard):
             # ein Klick in „Danach“ holt die Rückfrage nach oben
             await page.get_by_role("button", name="Rückfrage").first.click()
             await page.get_by_text("Wie viele Jahre Erfahrung hast du mit Terraform?").wait_for()
+            # Antwort aus dem Postfach: Karte mit Vorschlag, übernehmen geht mit einem Klick
+            await page.get_by_role("button", name="Absage von").first.click()
+            await page.get_by_role("button", name="Als „Absage“ übernehmen").wait_for()
 
             # Demo-Modus: Suchen ist gesperrt und sagt das auch (Suche sitzt in der Lauf-Seitenleiste)
             await page.get_by_role("button", name="Lauf und Suche anzeigen").click()

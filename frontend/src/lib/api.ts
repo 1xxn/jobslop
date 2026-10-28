@@ -21,6 +21,7 @@ import type {
   Stats,
   Status,
   SystemReport,
+  TailoredCv,
 } from "./types";
 
 /** Fehler der API. `code` + `params` übersetzt das Dashboard über `be.<code>`, `message` ist der Klartext. */
@@ -142,6 +143,8 @@ export const api = {
   addJob: (url: string) => post<{ id: number; created: boolean; via: string }>("/api/jobs", { url }),
   patchJob: (id: number, body: Partial<Pick<JobSummary, "queued" | "starred">> & { notes?: string }) =>
     patch<JobSummary>(`/api/jobs/${id}`, body),
+  tailoredCv: (id: number) => get<TailoredCv>(`/api/jobs/${id}/cv`),
+  createTailoredCv: (id: number) => post<TailoredCv>(`/api/jobs/${id}/cv`),
   markJob: (id: number, status: "applied" | "interview" | "rejected" | "offer", note = "") =>
     post<JobSummary>(`/api/jobs/${id}/status`, { status, note }),
   bulk: (ids: number[], action: "queue" | "unqueue" | "star" | "unstar" | "exclude") =>
@@ -174,6 +177,11 @@ export const api = {
     id: number,
     body: { answers?: Record<string, string>; skip?: boolean; decision?: string; done?: boolean; abort?: boolean },
   ) => post<Prompt>(`/api/prompts/${id}`, body),
+
+  inboxTest: () => post<{ ok: boolean; messages: number }>("/api/inbox/test"),
+  inboxCheck: () => post<{ checked: number; related: number; suggested: number; logged: number }>("/api/inbox/check"),
+  inboxAction: (id: number, action: "apply" | "dismiss") =>
+    post<{ application_id: number; previous_status: string; status: string }>(`/api/inbox/${id}`, { action }),
 
   answers: () => get<Answer[]>("/api/answers"),
   createAnswer: (question: string, answer: string) => post<{ id: number }>("/api/answers", { question, answer }),

@@ -26,6 +26,7 @@ import { useI18n } from "@/lib/i18n";
 import type { Answer, ApplyMode, Exclusion, Settings } from "@/lib/types";
 import { cn, formatRelative } from "@/lib/utils";
 import { SaveBar } from "./SaveBar";
+import { useStatus } from "@/lib/hooks";
 
 function useSettingsForm() {
   const { t } = useI18n();
@@ -354,6 +355,93 @@ export function NotificationSettings() {
           <Button variant="secondary" size="sm" onClick={() => test.mutate()} loading={test.isPending}>
             {t("notify.test")}
           </Button>
+        </SectionBody>
+      </section>
+      {bar}
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------------- Postfach */
+
+/** Antworten aus dem Postfach: IMAP nur lesend, Vorschläge erscheinen unter „Heute“. */
+export function InboxSettings() {
+  const { t, lang } = useI18n();
+  const { data: status } = useStatus();
+  const { s, set, bar, pending } = useSettingsForm();
+  const test = useMutation({
+    mutationFn: api.inboxTest,
+    onSuccess: (r) => toast.success(t("inbox.test_ok", { n: r.messages })),
+  });
+  const qc = useQueryClient();
+  const check = useMutation({
+    mutationFn: api.inboxCheck,
+    onSuccess: (r) => {
+      toast(r.suggested ? t("inbox.check_found", { n: r.suggested }) : t("inbox.check_none", { n: r.checked }));
+      qc.invalidateQueries({ queryKey: ["status"] });
+    },
+  });
+  if (!s) return pending;
+  const inbox = status?.inbox;
+  return (
+    <div className="space-y-10">
+      <section>
+        <SectionHeader title={t("inbox.title")} description={t("inbox.hint")} />
+        <SectionBody className="space-y-4">
+          <SwitchRow
+            title={t("inbox.enabled")}
+            description={t("inbox.privacy")}
+            checked={s.inbox_enabled}
+            onCheckedChange={(v) => set("inbox_enabled", v)}
+          />
+          <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_7rem]">
+            <Field label={t("inbox.host")} hint={t("inbox.host_hint")}>
+              <Input
+                value={s.inbox_host}
+                placeholder="imap.gmail.com"
+                onChange={(e) => set("inbox_host", e.target.value.trim())}
+              />
+            </Field>
+            <Field label={t("inbox.port")}>
+              <Input
+                type="number"
+                value={s.inbox_port}
+                onChange={(e) => set("inbox_port", Number(e.target.value) || 993)}
+              />
+            </Field>
+          </div>
+          <Field label={t("inbox.user")}>
+            <Input
+              type="email"
+              autoComplete="off"
+              value={s.inbox_user}
+              onChange={(e) => set("inbox_user", e.target.value.trim())}
+            />
+          </Field>
+          <Field label={t("inbox.password")} hint={t("inbox.password_hint")}>
+            <Input
+              type="password"
+              autoComplete="new-password"
+              value={s.inbox_password}
+              placeholder={s.inbox_password_set ? t("inbox.password_saved") : ""}
+              onChange={(e) => set("inbox_password", e.target.value)}
+            />
+          </Field>
+          <Field label={t("inbox.folder")}>
+            <Input value={s.inbox_folder} onChange={(e) => set("inbox_folder", e.target.value)} />
+          </Field>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={() => test.mutate()} loading={test.isPending}>
+              {t("inbox.test")}
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => check.mutate()} loading={check.isPending}>
+              {t("inbox.check")}
+            </Button>
+            {inbox?.checked_at && !inbox.error && (
+              <span className="text-meta text-ink-3">{t("inbox.checked", { when: formatRelative(inbox.checked_at, lang) })}</span>
+            )}
+          </div>
+          {inbox?.error && <p className="text-meta text-danger [overflow-wrap:anywhere]">{inbox.error}</p>}
         </SectionBody>
       </section>
       {bar}
