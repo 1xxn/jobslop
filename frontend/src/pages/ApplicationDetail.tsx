@@ -9,11 +9,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/contro
 import { Dialog, DialogContent } from "@/components/ui/overlays";
 import { Button, EmptyState, Field, Input, Section, Select, Skeleton, Textarea } from "@/components/ui/primitives";
 import { api, artifactUrl } from "@/lib/api";
-import { effectiveStatus } from "@/lib/applications";
 import { useI18n } from "@/lib/i18n";
 import { hasMessage, type MessageKey } from "@/lib/messages";
 import type { ApplicationDetail as Detail } from "@/lib/types";
-import { cn, formatDate, formatDateTime, parseDate } from "@/lib/utils";
+import { cn, formatDate, formatDateTime, groupByDay, parseDate } from "@/lib/utils";
 
 // Stände, die du nach dem Absenden selbst pflegst (wie im Board)
 const PIPELINE = ["submitted", "manual", "interview", "offer", "rejected"];
@@ -240,7 +239,7 @@ function Rail({ app }: { app: Detail }) {
             {app.status === "manual" && <option value="manual">{t("status.manual")}</option>}
           </Select>
         ) : (
-          <StatusLabel status={effectiveStatus(app, app.prompts)} className="h-8" />
+          <StatusLabel status={app.status} className="h-8" />
         )}
       </Field>
       {editable && (
@@ -249,9 +248,11 @@ function Rail({ app }: { app: Detail }) {
             id="app-followup"
             type="date"
             value={date}
-            onChange={(e) => {
-              setDate(e.target.value);
-              patch.mutate(e.target.value ? { follow_up_at: `${e.target.value}T09:00:00` } : { clear_follow_up: true });
+            onChange={(e) => setDate(e.target.value)}
+            // erst beim Verlassen speichern: beim Tippen ist der Wert zwischendurch leer und würde den Termin löschen
+            onBlur={() => {
+              if (date === (app.follow_up_at?.slice(0, 10) ?? "")) return;
+              patch.mutate(date ? { follow_up_at: `${date}T09:00:00` } : { clear_follow_up: true });
             }}
           />
         </Field>
@@ -281,17 +282,12 @@ function Rail({ app }: { app: Detail }) {
 /** Verlauf nach Tagen gruppiert: Uhrzeit, Ereignis in Worten, Meldung. */
 function Timeline({ events }: { events: Detail["events"] }) {
   const { t, lang } = useI18n();
-  const days = new Map<string, Detail["events"]>();
-  for (const e of events) {
-    const day = parseDate(e.ts)?.toLocaleDateString(lang, { weekday: "long", day: "numeric", month: "long" }) ?? "";
-    days.set(day, [...(days.get(day) ?? []), e]);
-  }
   const kind = (k: string) => (hasMessage(`event.${k}`) ? t(`event.${k}` as MessageKey) : k);
   return (
     <div className="grid gap-4">
-      {[...days].map(([day, list]) => (
+      {groupByDay(events, (e) => e.ts, lang).map(([day, list]) => (
         <section key={day}>
-          <h3 className="pb-1 text-small font-semibold text-ink-2">{day}</h3>
+          <h2 className="pb-1 text-small font-semibold text-ink-2">{day}</h2>
           <ol className="grid gap-1.5 text-meta">
             {list.map((e, i) => (
               <li key={i} className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-4">

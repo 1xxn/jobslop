@@ -1,13 +1,13 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Search } from "lucide-react";
+import { Check } from "lucide-react";
 import { type KeyboardEvent, type MouseEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { AddJobDialog, ApplyDialog } from "@/components/actions";
 import { PageHeader, Score, StatusLabel } from "@/components/domain";
 import { type Decisions, DecisionButtons, JobDetail } from "@/components/JobDetail";
+import { nextSearchText } from "@/components/layout/run";
 import { QueueBar } from "@/components/QueueBar";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/controls";
 import {
   Menu,
   MenuCheckboxItem,
@@ -19,14 +19,14 @@ import {
   MenuTrigger,
   Sheet,
 } from "@/components/ui/overlays";
-import { Button, EmptyState, Input, Kbd, Skeleton } from "@/components/ui/primitives";
+import { Button, EmptyState, Kbd, SearchInput, Skeleton, StickyBar } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { useHotkeys } from "@/lib/hotkeys";
-import { useDebounced, useMediaQuery, useRoleNames, useStatus } from "@/lib/hooks";
+import { useCrawl, useDebounced, useMediaQuery, useRoleNames, useStatus } from "@/lib/hooks";
 import { useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
 import type { JobDetail as JobFull, JobSummary, JobView } from "@/lib/types";
-import { cn, formatRelative, formatWhen } from "@/lib/utils";
+import { cn, formatRelative } from "@/lib/utils";
 
 const VIEWS: { id: JobView; label: MessageKey }[] = [
   { id: "triage", label: "jobs.view_triage" },
@@ -51,6 +51,7 @@ export function JobsPage() {
   const { data: status } = useStatus();
   const split = useMediaQuery(SPLIT);
   const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
   const view = (VIEWS.some((v) => v.id === params.get("view")) ? params.get("view") : "triage") as JobView;
   const activeId = params.get("job") ? Number(params.get("job")) : null;
 
@@ -128,13 +129,13 @@ export function JobsPage() {
 
   /* ------------------------------------------------------------- Entscheiden, mit Rückgängig */
 
-  const lastAction = useRef<{ action: Action; ids: number[]; exclusions: number[] } | null>(null);
-  const undo = async () => {
-    const last = lastAction.current;
-    if (!last) return;
-    lastAction.current = null;
-    if (last.action === "exclude") await Promise.all(last.exclusions.map((id) => api.deleteExclusion(id)));
-    else if (INVERSE[last.action]) await api.bulk(last.ids, INVERSE[last.action] as Action);
+  type Done = { action: Action; ids: number[]; exclusions: number[] };
+  const lastAction = useRef<Done | null>(null);
+  const undo = async (done: Done | null) => {
+    if (!done) return;
+    if (lastAction.current === done) lastAction.current = null;
+    if (done.action === "exclude") await Promise.all(done.exclusions.map((id) => api.deleteExclusion(id)));
+    else if (INVERSE[done.action]) await api.bulk(done.ids, INVERSE[done.action] as Action);
     toast(t("decide.undone"));
     refresh();
   };
@@ -146,11 +147,12 @@ export function JobsPage() {
         toast(tp("bulk.skipped", r.skipped.length), { description: r.skipped.slice(0, 3).join("\n") });
         if (!r.changed.length) return;
       }
-      lastAction.current = { action, ids: r.changed.length ? r.changed : ids, exclusions: r.exclusions ?? [] };
+      const done: Done = { action, ids: r.changed.length ? r.changed : ids, exclusions: r.exclusions ?? [] };
+      lastAction.current = done;
       const n = r.changed.length;
       const message =
         n === 1 && title ? t(`decide.done_${action}`, { title }) : tp(`bulk.${action}` as MessageKey, n);
-      toast(message, { action: { label: t("common.undo"), onClick: undo } });
+      toast(message, { action: { label: t("common.undo"), onClick: () => void undo(done) } });
       setSelection(new Set());
     },
     onError: (e: Error) => toast.error(e.message),
@@ -164,7 +166,7 @@ export function JobsPage() {
   };
   const decide = async (kind: "queue" | "star" | "dismiss") => {
     const list = targets();
-    if (!list.length) return;
+    if (!list.length || act.isPending) return;
     const ids = list.map((j) => j.id);
     const title = list.length === 1 ? `${list[0].company} · ${list[0].title}` : undefined;
     if (kind === "dismiss" && list.length === 1 && list[0].excluded) return restore(list[0]);
@@ -182,9 +184,14 @@ export function JobsPage() {
     act.mutate({ action, ids, title });
   };
   const restore = async (job: JobSummary) => {
-    const ex = (await api.exclusions()).find((e) => e.kind === "job" && e.value === String(job.id));
-    if (!ex) return;
-    await api.deleteExclusion(ex.id);
+    const own = (await api.exclusions()).filter((e) => e.kind === "job" && e.value === String(job.id));
+    if (!own.length) {
+      toast(t("decide.rule_excluded"), {
+        action: { label: t("decide.edit_rules"), onClick: () => navigate("/settings/exclusions") },
+      });
+      return;
+    }
+    await Promise.all(own.map((e) => api.deleteExclusion(e.id)));
     toast(t("decide.restored", { title: job.title }));
     refresh();
   };
@@ -211,8 +218,9 @@ export function JobsPage() {
     return next.id;
   };
   const onRowClick = (e: MouseEvent, id: number) => {
-    if (e.shiftKey && anchor !== null) {
-      const [a, b] = [items.findIndex((j) => j.id === anchor), items.findIndex((j) => j.id === id)].sort((x, y) => x - y);
+    const from = anchor === null ? -1 : items.findIndex((j) => j.id === anchor);
+    if (e.shiftKey && from >= 0) {
+      const [a, b] = [from, items.findIndex((j) => j.id === id)].sort((x, y) => x - y);
       setSelection(new Set(items.slice(a, b + 1).map((j) => j.id)));
     } else if (e.ctrlKey || e.metaKey) {
       const next = new Set(selection.size ? selection : activeId !== null ? [activeId] : []);
@@ -265,7 +273,7 @@ export function JobsPage() {
     a: () => decide("queue"),
     s: () => decide("star"),
     x: () => decide("dismiss"),
-    z: () => void undo(),
+    z: () => void undo(lastAction.current),
     o: () => {
       const job = items.find((j) => j.id === activeId);
       if (job) window.open(job.url, "_blank", "noopener");
@@ -276,14 +284,7 @@ export function JobsPage() {
 
   /* ------------------------------------------------------------- Kopf: Suche, Link, beste 10 */
 
-  const crawl = useMutation({
-    mutationFn: api.crawl,
-    onSuccess: (r) => {
-      toast(r.started ? t("crawl.started") : t("crawl.running"));
-      qc.invalidateQueries({ queryKey: ["status"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
+  const crawl = useCrawl();
   const queueTop = useMutation({
     mutationFn: () => api.queueTop(10),
     onSuccess: (r) => {
@@ -324,29 +325,36 @@ export function JobsPage() {
         }
       />
 
-      <Tabs value={view} onValueChange={(v) => setView(v as JobView)}>
-        <TabsList>
-          {VIEWS.map((v) => (
-            <TabsTrigger key={v.id} value={v.id} count={counts?.[v.id]}>
-              {t(v.label)}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+      <div
+        role="group"
+        aria-label={t("apps.view")}
+        className="flex gap-5 overflow-x-auto border-b border-line [scrollbar-width:none]"
+      >
+        {VIEWS.map((v) => (
+          <button
+            key={v.id}
+            type="button"
+            aria-pressed={view === v.id}
+            onClick={() => setView(v.id)}
+            className="flex items-center gap-1.5 py-2 whitespace-nowrap text-body text-ink-2 transition-colors hover:text-ink aria-pressed:font-semibold aria-pressed:text-ink aria-pressed:shadow-[inset_0_-2px_0_var(--ink)]"
+          >
+            {t(v.label)}
+            {!!counts?.[v.id] && <span className="tabular font-normal text-ink-3">{counts[v.id]}</span>}
+          </button>
+        ))}
+      </div>
 
         <div className="flex flex-wrap items-center gap-1 py-3">
-          <div className="relative min-w-48 flex-1">
-            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-ink-3" aria-hidden />
-            <Input
-              ref={searchRef}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => e.key === "Escape" && (e.currentTarget.blur(), setQ(""))}
-              placeholder={t("jobs.search")}
-              aria-label={t("jobs.search")}
-              className="pr-8 pl-8"
-            />
-            <Kbd className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2">/</Kbd>
-          </div>
+          <SearchInput
+            ref={searchRef}
+            hint="/"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && (e.currentTarget.blur(), setQ(""))}
+            placeholder={t("jobs.search")}
+            aria-label={t("jobs.search")}
+            className="min-w-48 flex-1"
+          />
           <Picker label={t("jobs.role")} value={category.length ? category.join(", ") : t("common.all")}>
             <MenuLabel>{t("jobs.role")}</MenuLabel>
             {roleNames.map((r) => (
@@ -381,7 +389,6 @@ export function JobsPage() {
           </Picker>
         </div>
 
-        <TabsContent value={view} tabIndex={-1} className="focus:outline-none">
           <div className={cn("grid min-[1180px]:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]", split && "border-t border-line")}>
             <div className={cn("min-w-0", split && "border-r border-line pr-4")}>
               {jobs.isLoading && <ListSkeleton />}
@@ -445,11 +452,9 @@ export function JobsPage() {
               </div>
             )}
           </div>
-        </TabsContent>
-      </Tabs>
 
       {multi ? (
-        <div className="sticky bottom-[calc(3.25rem+env(safe-area-inset-bottom))] z-20 -mx-4 mt-4 flex flex-wrap items-center gap-2 border-t border-line bg-paper px-4 py-3 sm:-mx-6 sm:px-6 lg:bottom-0 lg:-mx-8 lg:px-8">
+        <StickyBar>
           <span className="mr-auto text-meta font-semibold" aria-live="polite">
             {t("bulk.selected", { n: selection.size })}
           </span>
@@ -468,7 +473,7 @@ export function JobsPage() {
           <Button size="sm" variant="quiet" onClick={() => setSelection(new Set())}>
             {t("bulk.clear")}
           </Button>
-        </div>
+        </StickyBar>
       ) : (
         <QueueBar />
       )}
@@ -610,9 +615,7 @@ function ViewEmpty({ view, filtered, onReset }: { view: JobView; filtered: boole
       />
     );
   }
-  const next = status?.autopilot.enabled
-    ? t("today.next_search", { when: formatWhen(status.autopilot.next_run, lang) })
-    : t("today.autopilot_off");
+  const next = nextSearchText(status, t, lang);
   const text: Record<JobView, [MessageKey, string]> = {
     triage: ["today.all_reviewed", next],
     starred: ["jobs.empty_starred", t("jobs.empty_starred_hint")],

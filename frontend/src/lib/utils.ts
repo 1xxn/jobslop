@@ -58,6 +58,23 @@ export function formatDate(value: string | null | undefined, lang: string): stri
   return d ? d.toLocaleDateString(lang, { day: "numeric", month: "short", year: "numeric" }) : "";
 }
 
+/** Einträge nach Kalendertag gruppieren (Tagesname in der Sprache der Oberfläche), optional neueste zuerst. */
+export function groupByDay<T>(
+  items: T[],
+  ts: (item: T) => string | null | undefined,
+  lang: string,
+  newestFirst = false,
+): [string, T[]][] {
+  const time = (item: T) => parseDate(ts(item))?.getTime() ?? 0;
+  const sorted = newestFirst ? [...items].sort((a, b) => time(b) - time(a)) : items;
+  const days = new Map<string, T[]>();
+  for (const item of sorted) {
+    const day = parseDate(ts(item))?.toLocaleDateString(lang, { weekday: "long", day: "numeric", month: "long" }) ?? "";
+    days.set(day, [...(days.get(day) ?? []), item]);
+  }
+  return [...days];
+}
+
 export function percent(value: number, lang: string): string {
   return new Intl.NumberFormat(lang, { style: "percent", maximumFractionDigits: 0 }).format(value);
 }

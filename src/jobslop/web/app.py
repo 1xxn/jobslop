@@ -22,7 +22,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
-from sqlalchemy.orm import load_only
+from sqlalchemy.orm import load_only, selectinload
 
 from .. import __version__, assist
 from ..autopilot import Scheduler, activity, crawl_and_queue, next_run, record
@@ -143,14 +143,26 @@ def _in_view(view: str, j: Job, excluded: set[int]) -> bool:
     return last is None or last.status not in DONE_STATES  # todo: offen, ohne abgeschlossene Bewerbung
 
 
-def app_summary(a: Application) -> dict[str, Any]:
+def waiting_for_you(session: Any) -> dict[int, str]:
+    """Bewerbungen mit offener Rückfrage: Der Lauf steht technisch auf „running“, wartet aber auf dich –
+    Freigabe vor dem Absenden (needs_review) oder Antworten/Übergabe (needs_input)."""
+    waiting: dict[int, str] = {}
+    for app_id, kind in session.execute(
+        select(Prompt.application_id, Prompt.kind).where(Prompt.status == "open")
+    ):
+        if kind == "confirm" or app_id not in waiting:
+            waiting[app_id] = "needs_review" if kind == "confirm" else "needs_input"
+    return waiting
+
+
+def app_summary(a: Application, waiting: dict[int, str] | None = None) -> dict[str, Any]:
     return {
         "id": a.id,
         "job_id": a.job_id,
         "company": a.job.company,
         "title": a.job.title,
         "job_url": a.job.url,
-        "status": a.status,
+        "status": (waiting or {}).get(a.id, a.status),
         "mode": a.mode,
         "origin": a.origin,
         "started_at": _iso(a.started_at),
@@ -467,14 +479,12 @@ def create_app(runtime: Runtime) -> FastAPI:
             ]
             open_jobs = db.scalar(select(func.count(Job.id)).where(Job.status == "open")) or 0
             queued = db.scalar(select(func.count(Job.id)).where(Job.queued)) or 0
-            attention = (
-                db.scalar(
-                    select(func.count(Application.id)).where(
-                        Application.status.in_(["needs_input", "needs_review"])
-                    )
+            waiting_ids = set(
+                db.scalars(
+                    select(Application.id).where(Application.status.in_(["needs_input", "needs_review"]))
                 )
-                or 0
             )
+            attention = len(waiting_ids | set(waiting_for_you(db)))
             # Zähler für die Navigation: Stellen zu sichten (wie die Standardansicht, ohne Stretch-Level) …
             undecided = list(
                 db.execute(
@@ -576,7 +586,8 @@ def create_app(runtime: Runtime) -> FastAPI:
     def paired(request: Request) -> None:
         if not assist.token_ok(ctx.settings, request.headers.get("x-jobslop-token", "")):
             raise HTTPException(
-                401, "Erweiterung nicht gekoppelt – in jobslop unter Einstellungen → Bewerben neu einrichten"
+                401,
+                "Erweiterung nicht gekoppelt – in jobslop unter Einstellungen → Browser-Erweiterung neu einrichten",
             )
 
     @app.get("/api/assist/status")
@@ -784,7 +795,8 @@ def create_app(runtime: Runtime) -> FastAPI:
                 "new": (Job.first_seen.desc(),),
                 "company": (Job.company, Job.score.desc()),
             }.get(sort, (Job.starred.desc(), Job.score.desc(), Job.company))
-            rows = list(s.execute(stmt.order_by(*order)).scalars())
+            # Bewerbungen gleich mitladen – sonst eine Abfrage pro Stelle (Ansichten und Zähler brauchen sie)
+            rows = list(s.execute(stmt.options(selectinload(Job.applications)).order_by(*order)).scalars())
             excluded = excluded_job_ids(s, rows)
             cats = set(category.split(",")) if category else set()
             # Zähler für die Reiter: offene Stellen, bei „Alle“ und „Aussortiert“ auch geschlossene
@@ -851,7 +863,7 @@ def create_app(runtime: Runtime) -> FastAPI:
                 "history": [
                     {"seen_at": _iso(sn.seen_at), "change": sn.change, "diff": sn.diff} for sn in j.snapshots
                 ],
-                "applications": [app_summary(a) for a in j.applications],
+                "applications": [app_summary(a, waiting_for_you(s)) for a in j.applications],
             }
 
     @app.patch("/api/jobs/{job_id}")
@@ -925,9 +937,14 @@ def create_app(runtime: Runtime) -> FastAPI:
                 elif body.action in ("star", "unstar"):
                     j.starred = body.action == "star"
                 elif body.action == "exclude":
-                    ex = Exclusion(kind="job", value=str(jid), reason="im Dashboard ausgeschlossen")
-                    s.add(ex)
-                    exclusions.append(ex)
+                    # schon aussortiert: keinen zweiten Ausschluss anlegen (Rückgängig löscht nur die neuen)
+                    known = s.scalar(
+                        select(Exclusion.id).where(Exclusion.kind == "job", Exclusion.value == str(jid))
+                    )
+                    if known is None:
+                        ex = Exclusion(kind="job", value=str(jid), reason="im Dashboard ausgeschlossen")
+                        s.add(ex)
+                        exclusions.append(ex)
                     j.queued = False
                 else:
                     raise HTTPException(400, "Unbekannte Aktion")
@@ -1057,7 +1074,8 @@ def create_app(runtime: Runtime) -> FastAPI:
             stmt = select(Application).order_by(Application.id.desc()).limit(limit)
             if status:
                 stmt = stmt.where(Application.status.in_(status.split(",")))
-            return [app_summary(a) for a in s.execute(stmt).scalars()]
+            waiting = waiting_for_you(s)
+            return [app_summary(a, waiting) for a in s.execute(stmt).scalars()]
 
     @app.get("/api/pipeline")
     def pipeline() -> dict[str, Any]:
@@ -1091,7 +1109,7 @@ def create_app(runtime: Runtime) -> FastAPI:
             prompts = s.execute(
                 select(Prompt).where(Prompt.application_id == app_id, Prompt.status == "open")
             ).scalars()
-            return app_summary(a) | {
+            return app_summary(a, waiting_for_you(s)) | {
                 "events": [
                     {"ts": _iso(e.ts), "kind": e.kind, "message": e.message}
                     for e in s.execute(
@@ -1255,6 +1273,11 @@ def create_app(runtime: Runtime) -> FastAPI:
     def exclusion_create(body: ExclusionIn) -> dict[str, Any]:
         if body.kind not in ("company", "job", "title", "url") or not body.value.strip():
             raise HTTPException(400, "kind muss company, job, title oder url sein")
+        if body.kind == "title":
+            try:
+                re.compile(body.value.strip())
+            except re.error as exc:
+                raise HTTPException(400, f"Ungültiger regulärer Ausdruck: {exc}") from exc
         with session_scope(ctx.db) as s:
             e = Exclusion(kind=body.kind, value=body.value.strip(), reason=body.reason)
             s.add(e)

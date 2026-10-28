@@ -7,7 +7,7 @@ import { StatusGlyph } from "@/components/domain";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/overlays";
 import { EmptyState, Kbd, Skeleton } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
-import { followUpDue } from "@/lib/applications";
+import { canFollowUp, followUpDue } from "@/lib/applications";
 import { useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
 import type { ApplicationSummary } from "@/lib/types";
@@ -32,15 +32,15 @@ export function PipelineBoard() {
   const pipeline = useQuery({ queryKey: ["pipeline"], queryFn: api.pipeline });
   const [dragOver, setDragOver] = useState<Stage | null>(null);
   const move = useMutation({
-    mutationFn: ({ id, stage }: { id: number; stage: Stage; from: Stage }) =>
-      api.patchApplication(id, { status: STAGE_STATUS[stage] }),
-    onSuccess: (_r, { id, stage, from }) => {
+    mutationFn: ({ app, stage }: { app: ApplicationSummary; stage: Stage }) =>
+      api.patchApplication(app.id, { status: STAGE_STATUS[stage] }),
+    onSuccess: (_r, { app, stage }) => {
+      // Rückgängig: genau der vorige Stand (auch „selbst gesendet“) und der Termin, den Angebot/Absage löschen
+      const before = { status: app.status, ...(app.follow_up_at ? { follow_up_at: app.follow_up_at } : {}) };
       toast(t("pipeline.moved", { stage: t(`pipeline.${stage}` as MessageKey) }), {
-        action: {
-          label: t("common.undo"),
-          onClick: () => api.patchApplication(id, { status: STAGE_STATUS[from] }).then(refresh),
-        },
+        action: { label: t("common.undo"), onClick: () => api.patchApplication(app.id, before).then(refresh) },
       });
+      const id = app.id;
       refresh();
       // Fokus folgt der Karte in die neue Spalte
       requestAnimationFrame(() => document.getElementById(`card-${id}`)?.focus());
@@ -52,10 +52,10 @@ export function PipelineBoard() {
     qc.invalidateQueries({ queryKey: ["applications"] });
     qc.invalidateQueries({ queryKey: ["stats"] });
   };
-  const stageOf = (id: number) => STAGES.find((s) => pipeline.data?.stages[s].some((a) => a.id === id));
   const moveTo = (id: number, stage: Stage) => {
-    const from = stageOf(id);
-    if (from && from !== stage) move.mutate({ id, stage, from });
+    const from = STAGES.find((s) => pipeline.data?.stages[s].some((a) => a.id === id));
+    const app = from && pipeline.data?.stages[from].find((a) => a.id === id);
+    if (app && from !== stage) move.mutate({ app, stage });
   };
   const onDrop = (e: DragEvent, stage: Stage) => {
     e.preventDefault();
@@ -195,7 +195,7 @@ function BoardCard({
       {app.notes && <p className="mt-2 line-clamp-2 text-small text-ink-2">{app.notes}</p>}
       <div className="mt-2 flex items-center justify-between gap-2 text-small text-ink-3">
         <span className="tabular">{formatDate(app.submitted_at ?? app.started_at, lang)}</span>
-        {app.follow_up_at && ["submitted", "manual", "interview"].includes(app.status) && (
+        {app.follow_up_at && canFollowUp(app.status) && (
           <span className={cn(due && "font-medium text-accent")}>
             {t(due ? "apps.followup_due" : "apps.followup_at", { when: formatRelative(app.follow_up_at, lang) })}
           </span>

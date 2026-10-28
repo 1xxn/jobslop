@@ -94,7 +94,7 @@ export function StatusGlyph({ status, className }: { status: string; className?:
 }
 
 /** Wartet der Status auf dich? (Rückfrage, Freigabe, ausgefüllt) */
-export function waitsForYou(status: string): boolean {
+function waitsForYou(status: string): boolean {
   return GLYPH[status] === "you";
 }
 

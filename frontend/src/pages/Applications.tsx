@@ -1,13 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { Search } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { ApplicationsSummary, PageHeader, StatusGlyph } from "@/components/domain";
 import { Segmented } from "@/components/ui/controls";
-import { Button, EmptyState, Input, Skeleton } from "@/components/ui/primitives";
+import { Button, EmptyState, rowHover, SearchInput, Skeleton } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { useStatus } from "@/lib/hooks";
-import { type AppGroup, followUpDue, GROUPS, groupApplications } from "@/lib/applications";
+import { type AppGroup, canFollowUp, followUpDue, GROUPS, groupApplications } from "@/lib/applications";
 import { useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
 import type { ApplicationSummary, JobSummary, Prompt } from "@/lib/types";
@@ -57,7 +56,7 @@ function ApplicationList() {
   const apps = useQuery({ queryKey: ["applications", "all"], queryFn: () => api.applications(), refetchInterval: 10_000 });
   const queued = useQuery({ queryKey: ["jobs", "queued", "apps"], queryFn: () => api.jobs({ view: "queued", limit: 100 }) });
   const { data: status } = useStatus();
-  const groups = useMemo(() => groupApplications(apps.data ?? [], q, Date.now(), status?.prompts), [apps.data, q, status?.prompts]);
+  const groups = useMemo(() => groupApplications(apps.data ?? [], q), [apps.data, q]);
   const upNext = (queued.data?.items ?? []).filter(
     (j) => !q || `${j.company} ${j.title}`.toLowerCase().includes(q.trim().toLowerCase()),
   );
@@ -96,16 +95,13 @@ function ApplicationList() {
 
   return (
     <div className="grid gap-6">
-      <div className="relative max-w-sm">
-        <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-ink-3" aria-hidden />
-        <Input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder={t("apps.search")}
-          aria-label={t("apps.search")}
-          className="pl-8"
-        />
-      </div>
+      <SearchInput
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder={t("apps.search")}
+        aria-label={t("apps.search")}
+        className="max-w-sm"
+      />
       {GROUPS.map((g) => {
         const list = groups[g];
         const extra = g === "running" ? upNext : [];
@@ -165,8 +161,10 @@ function Group({
   );
 }
 
-const rowClass =
-  "-mx-2 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-md px-2 py-2.5 transition-colors hover:bg-sunken sm:grid-cols-[auto_minmax(0,1.2fr)_minmax(0,1fr)_auto]";
+const rowClass = cn(
+  rowHover,
+  "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-2.5 sm:grid-cols-[auto_minmax(0,1.2fr)_minmax(0,1fr)_auto]",
+);
 
 function AppRow({ app, prompt }: { app: ApplicationSummary; prompt?: Prompt }) {
   const { t, tp, lang } = useI18n();
@@ -188,7 +186,7 @@ function AppRow({ app, prompt }: { app: ApplicationSummary; prompt?: Prompt }) {
   } else if (due) {
     info = t("apps.followup_due", { when: formatRelative(app.follow_up_at, lang) });
     tone = "font-medium text-accent";
-  } else if (app.follow_up_at && ["submitted", "manual", "interview"].includes(app.status)) {
+  } else if (app.follow_up_at && canFollowUp(app.status)) {
     info = t("apps.followup_at", { when: formatRelative(app.follow_up_at, lang) });
   } else if (app.notes) {
     info = app.notes.split("\n")[0];

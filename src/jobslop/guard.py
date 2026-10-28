@@ -41,13 +41,22 @@ def company_key(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", n).strip()
 
 
+def title_matches(pattern: str, title: str) -> bool:
+    """Titel-Ausschluss als regulärer Ausdruck – ein ungültiger (z. B. „senior (“) gilt als einfacher Text, statt die
+    Status- und Stellenabfragen des Dashboards mit einem Fehler zu blockieren."""
+    try:
+        return re.search(pattern, title, re.I) is not None
+    except re.error:
+        return pattern.lower() in title.lower()
+
+
 def _exclusion_verdict(ex: Exclusion, job: Job) -> Verdict | None:
     v = ex.value
     if ex.kind == "company" and company_key(v) and company_key(v) in company_key(job.company):
         return _no(f"Firma ausgeschlossen ({v})", "excluded_company", value=v)
     if ex.kind == "job" and v == str(job.id):
         return _no("Stelle ausgeschlossen", "excluded_job")
-    if ex.kind == "title" and re.search(v, job.title, re.I):
+    if ex.kind == "title" and title_matches(v, job.title):
         return _no(f"Titel-Ausschluss ({v})", "excluded_title", value=v)
     if ex.kind == "url" and v.lower() in job.url.lower():
         return _no(f"URL-Ausschluss ({v})", "excluded_url", value=v)

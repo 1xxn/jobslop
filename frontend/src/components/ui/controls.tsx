@@ -1,6 +1,6 @@
 import { Check, X } from "lucide-react";
 import { Checkbox as C, Switch as S, Tabs as T, ToggleGroup as TG } from "radix-ui";
-import { type KeyboardEvent, type ReactNode, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useRef, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -171,6 +171,7 @@ export function ChipsInput({
   tone = "neutral",
   id,
   "aria-describedby": describedBy,
+  label,
 }: {
   value: string[];
   onChange: (v: string[]) => void;
@@ -180,9 +181,12 @@ export function ChipsInput({
   /** landet am Texteingabefeld, damit ein umgebendes Field-Label es beschriftet */
   id?: string;
   "aria-describedby"?: string;
+  /** Name für Screenreader, wenn kein Field-Label drumherum steht */
+  label?: string;
 }) {
   const { t } = useI18n();
   const [draft, setDraft] = useState("");
+  const input = useRef<HTMLInputElement>(null);
   const add = (raw: string) => {
     const items = raw
       .split(/[,;\n]/)
@@ -201,9 +205,11 @@ export function ChipsInput({
     }
   };
   return (
+    // Klick auf die Fläche neben den Begriffen setzt den Cursor ins Eingabefeld
     <div
+      onClick={(e) => e.target === e.currentTarget && input.current?.focus()}
       className={cn(
-        "flex min-h-8 w-full flex-wrap items-center gap-1 rounded-md border border-line-input bg-raised px-1.5 py-1 focus-within:border-accent focus-within:shadow-[0_0_0_1px_var(--accent)]",
+        "flex min-h-8 w-full cursor-text flex-wrap items-center gap-1 rounded-md border border-line-input bg-raised px-1.5 py-1 focus-within:border-accent focus-within:shadow-[0_0_0_1px_var(--accent)]",
         className,
       )}
     >
@@ -219,7 +225,7 @@ export function ChipsInput({
           <button
             type="button"
             onClick={() => onChange(value.filter((x) => x !== v))}
-            className="grid size-4 place-items-center rounded-sm text-ink-3 hover:bg-line hover:text-ink"
+            className="relative grid size-4 place-items-center rounded-sm text-ink-3 before:absolute before:-inset-1 hover:bg-line hover:text-ink"
             aria-label={t("common.remove_item", { item: v })}
           >
             <X className="size-3" />
@@ -227,7 +233,9 @@ export function ChipsInput({
         </span>
       ))}
       <input
+        ref={input}
         id={id}
+        aria-label={label}
         aria-describedby={describedBy}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
