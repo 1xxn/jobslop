@@ -15,6 +15,7 @@ import {
   AutopilotSettings,
   ExclusionSettings,
   ExtensionSettings,
+  InboxSettings,
   NotificationSettings,
   SystemSettings,
 } from "./sections";
@@ -45,6 +46,7 @@ const GROUPS: { label: MessageKey; tabs: Tab[] }[] = [
       { id: "limits", label: "settings.limits", render: () => <SearchForm part="limits" /> },
       { id: "autopilot", label: "settings.autopilot", render: () => <AutopilotSettings /> },
       { id: "extension", label: "settings.extension", render: () => <ExtensionSettings /> },
+      { id: "inbox", label: "settings.inbox", render: () => <InboxSettings /> },
       { id: "notifications", label: "settings.notifications", render: () => <NotificationSettings /> },
     ],
   },

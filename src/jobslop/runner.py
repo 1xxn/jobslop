@@ -59,6 +59,7 @@ class Runner:
         self.label = ""
         self.mode = ""
         self.returncode: int | None = None
+        self.stopped = False  # per „Stopp“ beendet – ein Exit-Code ungleich 0 ist dann kein Absturz
 
     @property
     def log_path(self) -> Path:
@@ -105,7 +106,7 @@ class Runner:
         log = self.log_path.open("wb")
         self.proc = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT, env=env, **process_group())
         log.close()  # der Kindprozess hat das Handle geerbt
-        self.started_at, self.finished_at, self.returncode = utcnow(), None, None
+        self.started_at, self.finished_at, self.returncode, self.stopped = utcnow(), None, None, False
         self.label = label or (f"{len(job_ids)} Stelle(n)" if job_ids else "Warteschlange")
         self.mode = mode
         return True
@@ -113,6 +114,7 @@ class Runner:
     def stop(self) -> bool:
         if not self.active or self.proc is None:
             return False
+        self.stopped = True
         kill_tree(self.proc)
         return True
 
@@ -130,5 +132,6 @@ class Runner:
             "started_at": self.started_at.isoformat() + "Z" if self.started_at else None,
             "finished_at": self.finished_at.isoformat() + "Z" if self.finished_at else None,
             "returncode": self.returncode,
+            "stopped": self.stopped,
             "log": self.tail(lines),
         }

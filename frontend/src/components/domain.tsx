@@ -1,9 +1,11 @@
 import type { ReactNode } from "react";
+import { useErrorText } from "@/lib/backendText";
 import { useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
 import type { AppStatus, Stats } from "@/lib/types";
 import { cn, percent } from "@/lib/utils";
 import { Tooltip } from "./ui/overlays";
+import { Button, Skeleton } from "./ui/primitives";
 
 /** Wortmarke: einfarbiges Zeichen in Petrol – der Tropfen im Logo ist die Herkunft der Akzentfarbe. */
 export function Logo({ className, withText = true }: { className?: string; withText?: boolean }) {
@@ -208,4 +210,42 @@ export function ApplicationsSummary({ stats, className }: { stats: Stats; classN
       </span>
     </div>
   );
+}
+
+/** Eine Abfrage ist fehlgeschlagen: was und warum, mit „Erneut versuchen“ – statt ewigem Platzhalter oder einem
+ * Leerzustand, der „nichts da“ behauptet. */
+export function LoadError({
+  error,
+  onRetry,
+  title,
+  className,
+}: {
+  error: unknown;
+  onRetry: () => void;
+  title?: ReactNode;
+  className?: string;
+}) {
+  const { t } = useI18n();
+  const errorText = useErrorText();
+  return (
+    <div role="alert" className={cn("py-6", className)}>
+      <p className="font-semibold">{title ?? t("error.load")}</p>
+      <p className="mt-1 max-w-prose text-meta text-danger [overflow-wrap:anywhere]">{errorText(error)}</p>
+      <Button size="sm" variant="secondary" className="mt-3" onClick={onRetry}>
+        {t("common.retry")}
+      </Button>
+    </div>
+  );
+}
+
+/** Platzhalter, solange eine Abfrage lädt – schlägt sie fehl, ihr Fehler. */
+export function Pending({
+  query,
+  className,
+}: {
+  query: { isError: boolean; error: unknown; refetch: () => unknown };
+  className?: string;
+}) {
+  if (query.isError) return <LoadError error={query.error} onRetry={() => void query.refetch()} />;
+  return <Skeleton className={className} />;
 }

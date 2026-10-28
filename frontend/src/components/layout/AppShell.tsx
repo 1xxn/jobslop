@@ -35,7 +35,8 @@ export function AppShell() {
   const [help, setHelp] = useState(false);
   useDesktopNotifications(status, { prompt: t("notify.prompt"), done: t("notify.done") });
   // Heute zählt, was auf dich wartet (Rückfragen, Freigaben, fälliges Nachfassen); Stellen, was zu sichten ist
-  const waiting = (status?.prompts.length ?? 0) + (status?.counts.follow_ups_due ?? 0);
+  const waiting =
+    (status?.prompts.length ?? 0) + (status?.counts.replies ?? 0) + (status?.counts.follow_ups_due ?? 0);
   const toReview = status?.counts.to_review ?? 0;
 
   const go = GO_KEYS[lang];

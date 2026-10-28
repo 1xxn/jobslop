@@ -22,6 +22,7 @@ from jobslop.db import (
     Application,
     ApplicationEvent,
     CrawlRun,
+    InboxMessage,
     Job,
     JobSnapshot,
     Prompt,
@@ -260,6 +261,18 @@ def build(home: Path, *, seed: int = 7) -> None:
                 ("status", "submitted: Bestätigung erkannt"),
             ):
                 s.add(ApplicationEvent(application=a, kind=kind, message=msg, ts=a.started_at))
+            if i == 9:  # Antwort aus dem Postfach, die unter „Heute“ auf Bestätigung wartet
+                s.add(
+                    InboxMessage(
+                        message_id=f"<demo-{a.id}@example.com>",
+                        received_at=now - timedelta(hours=3),
+                        sender=f"Recruiting <jobs@{job.company.split()[0].lower()}.example>",
+                        subject=f"Ihre Bewerbung als {job.title}",
+                        kind="rejection",
+                        summary="Leider haben wir uns für andere Kandidatinnen und Kandidaten entschieden.",
+                        application=a,
+                    )
+                )
         failed = app(jobs[22], "failed", 1, error="TimeoutError: Seite hat nicht geantwortet", mode="auto")
         review = app(jobs[23], "running", 0, mode="review")
         question = app(jobs[24], "running", 0, mode="review")

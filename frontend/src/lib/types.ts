@@ -57,6 +57,8 @@ export interface RunnerState {
   started_at: string | null;
   finished_at: string | null;
   returncode: number | null;
+  /** per „Stopp“ beendet – ein Exit-Code ungleich 0 ist dann kein Absturz */
+  stopped?: boolean;
   log?: string;
 }
 
@@ -68,7 +70,17 @@ export interface Status {
   runner: RunnerState;
   crawl: { running: boolean; started_at: string | null; last: CrawlSummary | null };
   autopilot: { enabled: boolean; running: boolean; next_run: string | null };
-  counts: { open_jobs: number; queued: number; attention: number; to_review: number; follow_ups_due: number };
+  counts: {
+    open_jobs: number;
+    queued: number;
+    attention: number;
+    to_review: number;
+    follow_ups_due: number;
+    replies: number;
+  };
+  /** Antworten aus dem Postfach, die auf deine Bestätigung warten */
+  replies: Reply[];
+  inbox: { enabled: boolean; error: string; checked_at: string | null };
   notify_desktop: boolean;
 }
 
@@ -302,6 +314,16 @@ export interface Settings {
   setup_completed: boolean;
   extension_portals: boolean;
   extension_portal_daily_limit: number;
+  inbox_enabled: boolean;
+  inbox_host: string;
+  inbox_port: number;
+  inbox_user: string;
+  /** immer leer vom Server; nur zum Ändern mitschicken */
+  inbox_password: string;
+  inbox_password_set?: boolean;
+  inbox_folder: string;
+  inbox_interval_min: number;
+  inbox_lookback_days: number;
 }
 
 export interface ExtensionInfo {
@@ -361,7 +383,7 @@ export interface Profile {
   experience: Experience[];
   education: { institution: string; degree: string; start: string; end: string; location: string; grade: string }[];
   certifications: string[];
-  documents: { cv: string; cv_en: string; certificates: string[]; cover_letter: string };
+  documents: { cv: string; cv_en: string; certificates: string[]; cover_letter: string; tailor_cv: boolean };
   preferences: {
     cover_letter_language: "auto" | "de" | "en";
     diversity_questions: "decline" | "answer";
@@ -413,4 +435,25 @@ export interface Exclusion {
   value: string;
   reason: string;
   created_at: string;
+}
+
+/** Lebenslauf für eine Stelle – genau die Datei, die jobslop beim Bewerben hochlädt. */
+export interface TailoredCv {
+  enabled: boolean;
+  file: string | null;
+  url: string | null;
+  matched_keywords: string[];
+}
+
+export interface Reply {
+  id: number;
+  kind: "rejection" | "interview" | "offer";
+  summary: string;
+  subject: string;
+  sender: string;
+  received_at: string | null;
+  application_id: number;
+  company: string;
+  title: string;
+  app_status: AppStatus;
 }

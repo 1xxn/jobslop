@@ -4,52 +4,100 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
   workflow_call: # vom Release-Workflow vor dem Veröffentlichen aufgerufen
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # In Pull Requests ersetzt ein neuer Push den alten Lauf; main und Releases laufen immer zu Ende
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  FORCE_COLOR: "1"
+
+# Actions sind auf Commit-SHAs festgelegt (Dependabot hält sie aktuell, siehe .github/dependabot.yml)
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Ruff
+        run: |
+          uv run ruff check --output-format=github .
+          uv run ruff format --check .
+      - name: Workflow security (zizmor)
+        run: uvx zizmor==1.30.1 --offline --format=github .github/workflows
+
   python:
     name: Python ${{ matrix.python }} · ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
           - { os: ubuntu-latest, python: "3.12" }
-          - { os: ubuntu-latest, python: "3.13" }
+          - { os: ubuntu-latest, python: "3.14" }
           - { os: windows-latest, python: "3.12" }
+          - { os: macos-latest, python: "3.13" }
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: ${{ matrix.python }}
           enable-cache: true
       - name: Install dependencies
         run: uv sync --locked
-      - name: Lint
-        run: |
-          uv run ruff check .
-          uv run ruff format --check .
+      - name: Playwright version
+        id: playwright
+        shell: bash
+        run: echo "version=$(uv run python -c 'import importlib.metadata as m; print(m.version("playwright"))')" >> "$GITHUB_OUTPUT"
+      # Chromium nur neu laden, wenn sich die Playwright-Version ändert (spart pro Lauf rund 150 MB Download)
+      - name: Cache Chromium
+        id: chromium
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/Library/Caches/ms-playwright
+            ~/AppData/Local/ms-playwright
+          key: chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
       - name: Install Chromium
+        if: steps.chromium.outputs.cache-hit != 'true'
         run: uv run playwright install --with-deps chromium
+      - name: Install Chromium system libraries
+        if: steps.chromium.outputs.cache-hit == 'true' && runner.os == 'Linux'
+        run: uv run playwright install-deps chromium
       - name: Tests
         run: uv run pytest -m "not live"
 
   frontend:
     name: Dashboard
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -65,3 +113,18 @@ jobs:
             echo "::error::src/jobslop/web/dist is outdated – run 'npm run build' in frontend/ and commit the result"
             exit 1
           fi
+
+  dependencies:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Neue Abhängigkeiten mit bekannter Sicherheitslücke (ab „hoch“) oder unfreier Lizenz blockieren den PR
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          deny-licenses: AGPL-3.0-only, AGPL-3.0-or-later, SSPL-1.0
