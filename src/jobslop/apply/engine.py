@@ -10,7 +10,7 @@ import random
 import re
 import shutil
 import traceback
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -213,8 +213,14 @@ class ApplyEngine:
         except Park as park:
             status, message, questions = park.status, park.message, park.questions
         except LLMLimitReached as exc:
-            # Abo-Limit: nichts abgesendet, Stelle bleibt in der Warteschlange und kann später neu starten.
-            status, message = "paused", str(exc)[:300]
+            if run.submit_clicked:
+                # Echttest: Limit kam erst nach dem Absende-Klick. Die Bewerbung ist vermutlich raus – nie neu einreihen,
+                # sonst bewirbt der nächste Lauf ein zweites Mal.
+                status = "needs_review"
+                message = f"Abgesendet, Bestätigung wegen Claude-Limit nicht geprüft – bitte prüfen ({str(exc)[:160]})"
+            else:
+                # Abo-Limit vor dem Absenden: nichts abgeschickt, Stelle bleibt eingereiht und startet später neu.
+                status, message = "paused", str(exc)[:300]
         except Exception as exc:
             status, message = "failed", f"{type(exc).__name__}: {exc}"
             if page is not None and live_page(page) is None:  # das ganze Fenster ist zu
@@ -297,7 +303,11 @@ class ApplyEngine:
             if state.captcha_visible and state.url not in run.captcha_ack:
                 run.captcha_ack.add(state.url)
                 page = await self._handoff(
-                    run, page, title, "Bitte löse das CAPTCHA im Browserfenster. Danach mache ich weiter."
+                    run,
+                    page,
+                    title,
+                    "Bitte löse das CAPTCHA im Browserfenster – danach geht es von selbst weiter.",
+                    lambda p=page: captcha_solved(p),
                 )
                 continue
 
@@ -637,10 +647,17 @@ class ApplyEngine:
             return f"({run.tailored_cv.name})"
         return value
 
-    async def _handoff(self, run: _Run, page: Any, title: str, message: str) -> Any:
+    async def _handoff(
+        self,
+        run: _Run,
+        page: Any,
+        title: str,
+        message: str,
+        check: Callable[[], Awaitable[bool]] | None = None,
+    ) -> Any:
         self._event(run.app_id, "handoff", message)
         await page.bring_to_front()
-        ok = await self.interactor.handoff(run.app_id, title, message, None)
+        ok = await self.interactor.handoff(run.app_id, title, message, check)
         if not ok:
             raise Park("needs_review", f"Übergabe nicht abgeschlossen: {message}")
         pages = page.context.pages
@@ -762,6 +779,28 @@ def artifacts_dir(settings: Settings, app_id: int, job: Job) -> Path:
 
 
 _LETTER_TOKENS = ("@cover_letter", "@cover_letter_pdf")
+
+
+# Antwort-Token der gängigen CAPTCHA-Widgets: steht hier etwas, hat der Mensch die Abfrage gelöst
+_CAPTCHA_TOKEN_JS = """() => [...document.querySelectorAll(
+  'textarea[name="g-recaptcha-response"], textarea[name="h-captcha-response"], input[name="cf-turnstile-response"]'
+)].some((e) => e.value)"""
+
+
+async def captcha_solved(page: Any) -> bool:
+    """Ist das CAPTCHA erledigt? Ja, sobald ein Antwort-Token im Formular steht, keine Abfrage mehr zu sehen ist oder
+    schon die Bestätigung erscheint. Gelöst wird es nie von jobslop – das hier erkennt nur, wann es weitergehen kann."""
+    if page.is_closed():
+        return False
+    for frame in list(page.frames):
+        with contextlib.suppress(Exception):
+            if await frame.evaluate(_CAPTCHA_TOKEN_JS):
+                return True
+    try:
+        state = await extract_state(page)
+    except Exception:
+        return False
+    return not state.captcha_visible or bool(_CONFIRM_RX.search(state.text))
 
 
 def wants_cover_letter(plan: PagePlan, profile: Profile, state: PageState | None = None) -> bool:
