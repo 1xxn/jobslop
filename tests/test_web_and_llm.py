@@ -357,7 +357,17 @@ def test_job_page_parsing_stays_fast_on_hostile_html():
     """CodeQL py/polynomial-redos: fremdes HTML (Stelle per Link) darf das Parsen nicht ausbremsen."""
     import time
 
-    hostile = "<script " * 20_000 + "<meta " * 20_000 + "<title" * 20_000 + "x" + " " * 50_000 + "| y"
+    hostile = (
+        "<script " * 20_000
+        + '<script type="application/ld+json">' * 20_000  # viele offene Blöcke, ein Abschluss ganz hinten
+        + "<meta " * 20_000
+        + "<meta name"
+        + " " * 50_000
+        + "<title" * 20_000
+        + "x"
+        + " " * 50_000
+        + "| y</script>"
+    )
     start = time.perf_counter()
     parse_html("https://x/evil", hostile)
     assert time.perf_counter() - start < 2.0
