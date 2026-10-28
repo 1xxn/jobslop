@@ -17,7 +17,7 @@ from jobslop.apply.planner import JobContext, LLMPlanner, PagePlan, PlanInput
 from jobslop.autopilot import next_run, record
 from jobslop.config import DemoModeError
 from jobslop.crawl.pipeline import run_crawl
-from jobslop.db import Answer, Application, Job, Prompt, session_scope
+from jobslop.db import Answer, Application, Exclusion, Job, Prompt, session_scope
 from jobslop.importer import import_jobs
 from jobslop.jobpage import parse_html
 from jobslop.llm import DYNAMIC_BOUNDARY, Usage
@@ -108,6 +108,50 @@ def test_jobs_pipeline_and_stats(settings, config, profile):
     assert any("interview" in a["message"] for a in client.get("/api/activity").json())
 
 
+def test_triage_dismissed_and_counts(settings, config, profile):
+    client = _client(settings, config, profile)
+    # Import: die SRE-Stelle ist beworben, Platform gemerkt – zu sichten bleibt nur Cloud
+    triage = client.get("/api/jobs", params={"view": "triage"}).json()
+    assert [j["title"] for j in triage["items"]] == ["Cloud Engineer (m/w/d)"]
+    counts = client.get("/api/status").json()["counts"]
+    assert counts["to_review"] == 1
+    assert triage["counts"] == {"triage": 1, "starred": 1, "queued": 0, "all": 3, "dismissed": 0}
+    # der Rollenfilter wirkt auf Liste und Zähler, das Rollenmenü (facets) zeigt weiter alle Rollen
+    sre = client.get("/api/jobs", params={"view": "all", "status": "all", "category": "SRE"}).json()
+    assert sre["total"] == 1 and sre["counts"]["all"] == 1 and len(sre["facets"]["category"]) == 3
+    cloud = triage["items"][0]
+    assert cloud["excluded"] is False
+
+    # Aussortieren nimmt die Stelle aus allen Arbeitslisten und liefert die ID für „Rückgängig“
+    r = client.post("/api/jobs/bulk", json={"ids": [cloud["id"]], "action": "exclude"}).json()
+    assert r["changed"] == [cloud["id"]] and len(r["exclusions"]) == 1
+    assert client.get("/api/jobs", params={"view": "triage"}).json()["total"] == 0
+    assert cloud["id"] not in [j["id"] for j in client.get("/api/jobs").json()["items"]]
+    dismissed = client.get("/api/jobs", params={"view": "dismissed"}).json()["items"]
+    assert [j["id"] for j in dismissed] == [cloud["id"]] and dismissed[0]["excluded"]
+    assert client.get(f"/api/jobs/{cloud['id']}").json()["excluded"]
+    assert client.get("/api/status").json()["counts"]["to_review"] == 0
+
+    # schon aussortiert: kein zweiter Ausschluss, also nichts zum Rückgängigmachen
+    again = client.post("/api/jobs/bulk", json={"ids": [cloud["id"]], "action": "exclude"}).json()
+    assert again["changed"] == [cloud["id"]] and again["exclusions"] == []
+    client.delete(f"/api/exclusions/{r['exclusions'][0]}")
+    assert client.get("/api/jobs", params={"view": "triage"}).json()["total"] == 1
+
+    # ungültige Titel-Regex: beim Anlegen abgelehnt, ein alter Eintrag blockiert die Abfragen nicht
+    assert client.post("/api/exclusions", json={"kind": "title", "value": "senior ("}).status_code == 400
+    with session_scope(settings.db_path) as s:
+        s.add(Exclusion(kind="title", value="senior ("))
+    assert client.get("/api/status").status_code == 200
+    assert client.get("/api/jobs", params={"view": "triage"}).json()["total"] == 1
+
+    # fälliges Nachfassen zählt nur die letzte Bewerbung je Stelle mit Termin in der Vergangenheit
+    due_before = client.get("/api/status").json()["counts"]["follow_ups_due"]
+    with session_scope(settings.db_path) as s:
+        s.add(Application(job_id=cloud["id"], status="submitted", follow_up_at=datetime(2020, 1, 1)))
+    assert client.get("/api/status").json()["counts"]["follow_ups_due"] == due_before + 1
+
+
 def test_prompt_roundtrip(settings, config, profile):
     client = _client(settings, config, profile)
     with session_scope(settings.db_path) as s:
@@ -123,8 +167,11 @@ def test_prompt_roundtrip(settings, config, profile):
         )
         s.add_all([p, c])
         s.flush()
-        pid, cid = p.id, c.id
+        pid, cid, aid = p.id, c.id, app.id
     assert [x["kind"] for x in client.get("/api/status").json()["prompts"]] == ["questions", "confirm"]
+    # der Lauf steht technisch auf „running“, wartet aber auf deine Freigabe – so zeigt ihn die API auch
+    assert {a["id"]: a["status"] for a in client.get("/api/applications").json()}[aid] == "needs_review"
+    assert client.get("/api/status").json()["counts"]["attention"] == 1
     client.post(f"/api/prompts/{pid}", json={"answers": {"0-7": "70000"}})
     assert client.post(f"/api/prompts/{cid}", json={"decision": "nope"}).status_code == 400
     client.post(f"/api/prompts/{cid}", json={"decision": "submit"})
