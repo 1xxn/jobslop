@@ -284,7 +284,7 @@ class LLM:
         workdir = self.workroot / uuid.uuid4().hex[:12]
         workdir.mkdir(parents=True, exist_ok=True)
         try:
-            prompt, files = self._materialize(blocks, workdir)
+            prompt, files = self._materialize(blocks, workdir, self.settings.home)
             system_file = workdir / "system.txt"
             system_file.write_text(system, encoding="utf-8")
             cmd = [
@@ -333,7 +333,10 @@ class LLM:
                 shutil.rmtree(workdir, ignore_errors=True)
 
     @staticmethod
-    def _materialize(blocks: list[dict[str, Any]], workdir: Path) -> tuple[str, list[str]]:
+    def _materialize(blocks: list[dict[str, Any]], workdir: Path, home: Path) -> tuple[str, list[str]]:
+        """Texte, Screenshots und Dateien in den Arbeitsordner legen. Dateien nur aus ``home`` (JOBSLOP_HOME: Lebenslauf
+        in documents/, Belege in artifacts/) – ein manipuliertes Profil soll Claude keine beliebigen Dateien zeigen."""
+        root = os.path.realpath(home)
         texts: list[str] = []
         files: list[str] = []
         for i, block in enumerate(blocks, start=1):
@@ -347,10 +350,12 @@ class LLM:
                 files.append(name)
             elif kind == "file":
                 src = os.path.realpath(block["path"])
+                if not src.startswith(root + os.sep) or not os.path.isfile(src):
+                    log.warning("Datei für Claude übersprungen (nicht im jobslop-Ordner oder fehlt): %s", src)
+                    continue
                 suffix = os.path.splitext(src)[1].lower()
-                # Nur Dokumente und Bilder – ein manipuliertes Profil soll Claude keine beliebigen Dateien zeigen
-                if suffix not in _FILE_SUFFIXES or not os.path.isfile(src):
-                    log.warning("Datei für Claude übersprungen (Art nicht erlaubt oder fehlt): %s", src)
+                if suffix not in _FILE_SUFFIXES:
+                    log.warning("Datei für Claude übersprungen (Dateiart nicht erlaubt): %s", src)
                     continue
                 name = f"datei-{i}{suffix}"
                 shutil.copyfile(src, workdir / name)
