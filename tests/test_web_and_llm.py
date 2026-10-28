@@ -345,6 +345,41 @@ def test_job_page_parsing():
         "https://x/2", '<meta property="og:title" content="DevOps Engineer | Acme"><title>t</title>'
     )
     assert meta.via == "meta" and meta.title == "DevOps Engineer"
+    # Attribut-Reihenfolge egal, Titel aus <title> mit Seitenname
+    flipped = parse_html(
+        "https://x/3",
+        '<meta content="Acme Careers" property="og:site_name"><title> SRE   –  Acme Careers </title>',
+    )
+    assert flipped.title == "SRE" and flipped.company == "Acme Careers"
+
+
+def test_job_page_parsing_stays_fast_on_hostile_html():
+    """CodeQL py/polynomial-redos: fremdes HTML (Stelle per Link) darf das Parsen nicht ausbremsen."""
+    import time
+
+    hostile = "<script " * 20_000 + "<meta " * 20_000 + "<title" * 20_000 + "x" + " " * 50_000 + "| y"
+    start = time.perf_counter()
+    parse_html("https://x/evil", hostile)
+    assert time.perf_counter() - start < 2.0
+
+
+def test_artifacts_never_leave_their_folder(settings, config, profile):
+    client = _client(settings, config, profile)
+    folder = settings.artifacts_dir / "0001-x"
+    folder.mkdir(parents=True)
+    (folder / "final.jpg").write_bytes(b"jpg")
+    with session_scope(settings.db_path) as s:
+        app = Application(job_id=1, status="submitted", artifacts_dir=str(folder))
+        s.add(app)
+        s.flush()
+        aid = app.id
+    (settings.home / "secret.txt").write_text("geheim-123", encoding="utf-8")
+    (folder / ".hidden").write_text("versteckt", encoding="utf-8")
+    assert client.get(f"/artifacts/{aid}/final.jpg").content == b"jpg"
+    for bad in ("..%2F..%2Fsecret.txt", "..%5C..%5Csecret.txt", "%2E%2E%2F%2E%2E%2Fsecret.txt", ".hidden"):
+        r = client.get(f"/artifacts/{aid}/{bad}")
+        # entweder 404 oder die Oberfläche (Pfad mit / passt nicht zur Route) – nie der Dateiinhalt
+        assert "geheim-123" not in r.text and "versteckt" not in r.text, bad
 
 
 def test_add_job_by_link(settings, config, profile):

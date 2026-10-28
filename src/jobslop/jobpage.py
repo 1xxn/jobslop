@@ -11,6 +11,7 @@ import logging
 import re
 from dataclasses import dataclass
 from html import unescape
+from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import urlparse
 
@@ -24,11 +25,53 @@ from .db import Job, JobSnapshot, session_scope
 
 log = logging.getLogger(__name__)
 
-_LD_RX = re.compile(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', re.I | re.S)
-_META_RX = re.compile(
-    r'<meta[^>]+(?:property|name)=["\']([^"\']+)["\'][^>]+content=["\']([^"\']*)["\']', re.I
-)
-_TITLE_RX = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+
+class _Head(HTMLParser):
+    """JSON-LD-Blöcke, Meta-Angaben und den Titel einer Seite einsammeln – in einem Durchgang und in linearer Zeit
+    (die früheren Regexes ließen sich mit präpariertem HTML ausbremsen, CodeQL py/polynomial-redos)."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.ld: list[str] = []
+        self.meta: dict[str, str] = {}
+        self.title = ""
+        self._open: str | None = None
+        self._buf: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        a = {k.lower(): v or "" for k, v in attrs}
+        if tag == "script" and a.get("type", "").strip().lower() == "application/ld+json":
+            self._open, self._buf = "ld", []
+        elif tag == "title" and not self.title:
+            self._open, self._buf = "title", []
+        elif tag == "meta" and "content" in a and (key := (a.get("property") or a.get("name") or "").lower()):
+            self.meta.setdefault(key, a["content"])
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._open == "ld" and tag == "script":
+            self.ld.append("".join(self._buf))
+            self._open = None
+        elif self._open == "title" and tag == "title":
+            self.title = " ".join("".join(self._buf).split())
+            self._open = None
+
+    def handle_data(self, data: str) -> None:
+        if self._open:
+            self._buf.append(data)
+
+
+def _head(html: str) -> _Head:
+    parser = _Head()
+    parser.feed(html)
+    parser.close()
+    return parser
+
+
+def _site_title(title: str) -> str:
+    """„Platform Engineer | Acme – Karriere“ → „Platform Engineer“ (ohne Regex)."""
+    title = " ".join(title.split())
+    cuts = [i for sep in (" | ", " – ", " - ") if (i := title.find(sep)) > 0]
+    return title[: min(cuts)].strip() if cuts else title
 
 
 @dataclass
@@ -86,7 +129,8 @@ def _location(posting: dict[str, Any]) -> str:
 
 def parse_html(url: str, html: str) -> FetchedJob:
     job = FetchedJob(url=url)
-    for raw in _LD_RX.findall(html):
+    head = _head(html)
+    for raw in head.ld:
         try:
             data = json.loads(raw.strip())
         except json.JSONDecodeError:
@@ -107,9 +151,9 @@ def parse_html(url: str, html: str) -> FetchedJob:
         job.via = "jsonld"
         if job.title:
             return job
-    meta = {k.lower(): unescape(v) for k, v in _META_RX.findall(html)}
-    title = meta.get("og:title") or (unescape(m.group(1)).strip() if (m := _TITLE_RX.search(html)) else "")
-    job.title = re.split(r"\s+[|–-]\s+", title)[0].strip() if title else ""
+    meta = head.meta
+    title = meta.get("og:title") or head.title
+    job.title = _site_title(title) if title else ""
     job.company = meta.get("og:site_name", "")
     job.description = meta.get("og:description") or meta.get("description", "")
     job.via = "meta"

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 import httpx
 import respx
 from sqlalchemy import select
@@ -466,7 +468,9 @@ async def test_company_board_replaces_job_board_entry(settings, config):
     with session_scope(settings.db_path) as db:
         sres = [j for j in db.execute(select(Job)).scalars() if j.title == "Site Reliability Engineer"]
     assert len(sres) == 1
-    assert sres[0].source == "greenhouse:acme" and sres[0].url.startswith("https://job-boards.greenhouse.io")
+    assert (
+        sres[0].source == "greenhouse:acme" and urlparse(sres[0].url).hostname == "job-boards.greenhouse.io"
+    )
     assert sres[0].alt_urls == ["https://www.arbeitnow.com/jobs/acme/sre"]
 
 

@@ -92,6 +92,9 @@ def image_block(data: bytes, media_type: str = "image/jpeg") -> dict[str, Any]:
     return {"type": "image", "data": data, "media_type": media_type}
 
 
+_FILE_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".txt", ".md"}
+
+
 def file_block(path: Path) -> dict[str, Any]:
     return {"type": "file", "path": Path(path)}
 
@@ -343,8 +346,13 @@ class LLM:
                 (workdir / name).write_bytes(block["data"])
                 files.append(name)
             elif kind == "file":
-                src = Path(block["path"])
-                name = f"datei-{i}{src.suffix.lower()}"
+                src = os.path.realpath(block["path"])
+                suffix = os.path.splitext(src)[1].lower()
+                # Nur Dokumente und Bilder – ein manipuliertes Profil soll Claude keine beliebigen Dateien zeigen
+                if suffix not in _FILE_SUFFIXES or not os.path.isfile(src):
+                    log.warning("Datei für Claude übersprungen (Art nicht erlaubt oder fehlt): %s", src)
+                    continue
+                name = f"datei-{i}{suffix}"
                 shutil.copyfile(src, workdir / name)
                 files.append(name)
         if files:
