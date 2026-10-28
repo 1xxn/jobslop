@@ -68,7 +68,7 @@ export interface Status {
   runner: RunnerState;
   crawl: { running: boolean; started_at: string | null; last: CrawlSummary | null };
   autopilot: { enabled: boolean; running: boolean; next_run: string | null };
-  counts: { open_jobs: number; queued: number; attention: number };
+  counts: { open_jobs: number; queued: number; attention: number; to_review: number; follow_ups_due: number };
   notify_desktop: boolean;
 }
 
@@ -105,6 +105,7 @@ export interface JobSummary {
   summary: string;
   app_status: AppStatus;
   app_id: number | null;
+  excluded: boolean;
 }
 
 export interface JobDetail extends JobSummary {
@@ -130,10 +131,13 @@ export interface JobDetail extends JobSummary {
   applications: ApplicationSummary[];
 }
 
+export type JobView = "triage" | "starred" | "queued" | "all" | "dismissed";
+
 export interface JobList {
   items: JobSummary[];
   total: number;
   facets: { category: Record<string, number> };
+  counts: Record<JobView, number>;
 }
 
 export interface ApplicationSummary {

@@ -100,7 +100,9 @@ on every mutating request (CSRF). Apply runs are separate processes managed by `
 
 **Frontend** (`frontend/src`): React 19 + TS + Vite + Tailwind 4 + Radix + TanStack Query + React Router.
 API client and types in `lib/api.ts` / `lib/types.ts`; all UI strings live in `lib/messages.ts` in German and
-English and the type checker enforces both languages exist. Backend texts that reach the UI carry a code + params
+English and the type checker enforces both languages exist. Design tokens are in `styles.css` (paper/ink neutrals, one
+petrol accent for "your turn"); build pages from `components/ui` (`Section`, `StickyBar`, `Field`, …) and status as
+`StatusLabel` – no cards for layout, no coloured pills. Shortcuts go through `lib/hotkeys.ts`. Backend texts that reach the UI carry a code + params
 (`record(..., code=..., **params)`, `guard.Verdict.code/params`) translated via `be.<code>` keys in
 `lib/backendText.ts`; plain German text is only the fallback. Pages are lazy-loaded in `App.tsx`.
 

@@ -1,281 +1,358 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CircleAlert, CircleCheck, ExternalLink, FileText, Image, ListTree, MessageCircleQuestion } from "lucide-react";
-import { useState } from "react";
+import { ArrowLeft } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
-import { CompanyAvatar, StatusBadge } from "@/components/domain";
+import { StatusLabel } from "@/components/domain";
 import { PromptCard } from "@/components/PromptCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/controls";
 import { Dialog, DialogContent } from "@/components/ui/overlays";
-import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Input, Select, Skeleton } from "@/components/ui/primitives";
+import { Button, EmptyState, Field, Input, Section, Select, Skeleton, Textarea } from "@/components/ui/primitives";
 import { api, artifactUrl } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
-import type { MessageKey } from "@/lib/messages";
-import { cn, formatDateTime } from "@/lib/utils";
+import { hasMessage, type MessageKey } from "@/lib/messages";
+import type { ApplicationDetail as Detail } from "@/lib/types";
+import { cn, formatDate, formatDateTime, groupByDay, parseDate } from "@/lib/utils";
 
+// Stände, die du nach dem Absenden selbst pflegst (wie im Board)
+const PIPELINE = ["submitted", "manual", "interview", "offer", "rejected"];
+
+/** Eine Bewerbung: was passiert ist (Verlauf, Felder, Screenshots, Dokumente) – und rechts, was du pflegst. */
 export function ApplicationDetailPage() {
   const { id } = useParams();
   const appId = Number(id);
   const { t, lang } = useI18n();
-  const qc = useQueryClient();
   const app = useQuery({ queryKey: ["application", appId], queryFn: () => api.application(appId), refetchInterval: 4000 });
-  const [answers, setAnswers] = useState<Record<string, string>>({});
   const [shot, setShot] = useState<string | null>(null);
-  const answer = useMutation({
-    mutationFn: () => api.answerApplication(appId, answers, true),
-    onSuccess: (r) => {
-      toast.success(t("detail.answers_saved", { n: r.saved }));
-      qc.invalidateQueries({ queryKey: ["application", appId] });
-      qc.invalidateQueries({ queryKey: ["status"] });
-    },
-  });
-  const setStatus = useMutation({
-    mutationFn: (status: string) => api.patchApplication(appId, { status }),
-    onSuccess: () => {
-      toast.success(t("common.saved"));
-      qc.invalidateQueries({ queryKey: ["application", appId] });
-      qc.invalidateQueries({ queryKey: ["pipeline"] });
-    },
-  });
 
+  if (app.isError) {
+    return (
+      <EmptyState
+        title={t("detail.load_error")}
+        action={
+          <Button asChild size="sm">
+            <Link to="/applications">{t("nav.applications")}</Link>
+          </Button>
+        }
+      />
+    );
+  }
   if (app.isLoading || !app.data) {
     return (
-      <div className="space-y-4">
-        <Skeleton className="h-10 w-1/2" />
-        <Skeleton className="h-64" />
+      <div className="grid gap-4" aria-busy="true">
+        <Skeleton className="h-6 w-1/2" />
+        <Skeleton className="h-48" />
       </div>
     );
   }
   const a = app.data;
-  const inPipeline = ["submitted", "manual", "interview", "offer", "rejected"].includes(a.status);
+  const sent = a.submitted_at ? t("detail.sent_on", { date: formatDateTime(a.submitted_at, lang) }) : null;
 
   return (
     <>
-      <Link to="/applications" className="mb-4 inline-flex items-center gap-1.5 text-footnote font-medium text-fg-muted hover:text-fg">
-        <ArrowLeft className="size-4" />
+      <Link to="/applications" className="mb-3 inline-flex items-center gap-1 text-meta font-medium text-ink-2 hover:text-ink">
+        <ArrowLeft className="size-4" aria-hidden />
         {t("nav.applications")}
       </Link>
-      <header className="mb-6 flex flex-wrap items-start gap-4 animate-slide-up">
-        <CompanyAvatar name={a.company} size={52} />
-        <div className="min-w-0 flex-1">
-          <h1 className="text-title1 font-bold tracking-[-0.025em] text-balance">{a.title}</h1>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-footnote text-fg-muted">
-            <span>{a.company}</span>
-            <span>·</span>
-            <span>
-              #{a.id} · {t(`mode.${a.mode}` as MessageKey)} · {formatDateTime(a.started_at, lang)}
-            </span>
-            <StatusBadge status={a.status} />
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {inPipeline && (
-            <Select value={a.status} onChange={(e) => setStatus.mutate(e.target.value)} className="w-44" aria-label={t("job.set_status")}>
-              {(["submitted", "interview", "offer", "rejected"] as const).map((s) => (
-                <option key={s} value={s}>
-                  {t(`status.${s}` as MessageKey)}
-                </option>
-              ))}
-            </Select>
-          )}
-          <Button asChild variant="outline">
-            <Link to={`/jobs?job=${a.job_id}`}>{t("detail.job")}</Link>
-          </Button>
-          {a.final_url && (
-            <Button asChild variant="ghost" size="icon" aria-label={t("detail.final_url")}>
-              <a href={a.final_url} target="_blank" rel="noreferrer">
-                <ExternalLink />
-              </a>
-            </Button>
-          )}
-        </div>
-      </header>
 
-      {a.error && (
-        <div className="mb-6 flex items-start gap-3 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-[0.875rem]">
-          <CircleAlert className="mt-0.5 size-4 shrink-0 text-danger" />
-          <span className="break-words">{a.error}</span>
-        </div>
-      )}
-      {!a.error && a.confirmation && (
-        <div className="mb-6 flex items-start gap-3 rounded-lg border border-border bg-surface-2 px-4 py-3 text-[0.875rem]">
-          <CircleCheck className="mt-0.5 size-4 shrink-0 text-success" />
-          <span className="break-words">{a.confirmation}</span>
-        </div>
-      )}
-
-      {a.prompts.length > 0 && (
-        <div className="mb-6 space-y-4">
-          {a.prompts.map((p) => (
-            <PromptCard key={p.id} prompt={p} />
-          ))}
-        </div>
-      )}
-
-      {a.questions.length > 0 && a.prompts.length === 0 && (
-        <Card className="mb-6">
-          <CardHeader title={t("detail.questions")} description={t("detail.questions_hint")} icon={<MessageCircleQuestion />} />
-          <CardBody>
-            <form
-              className="space-y-4"
-              onSubmit={(e) => {
-                e.preventDefault();
-                answer.mutate();
-              }}
-            >
-              {a.questions.map((q, i) => (
-                <div key={i} className="space-y-1.5">
-                  <label className="block text-[0.875rem] font-medium" htmlFor={`aq-${i}`}>
-                    {q.label || q.question}
-                  </label>
-                  {q.options?.length ? (
-                    <Select id={`aq-${i}`} value={answers[String(i)] ?? ""} onChange={(e) => setAnswers({ ...answers, [String(i)]: e.target.value })}>
-                      <option value="">{t("common.choose")}</option>
-                      {q.options.map((o) => (
-                        <option key={o}>{o}</option>
-                      ))}
-                    </Select>
-                  ) : (
-                    <Input id={`aq-${i}`} value={answers[String(i)] ?? ""} onChange={(e) => setAnswers({ ...answers, [String(i)]: e.target.value })} />
-                  )}
-                </div>
-              ))}
-              <div className="flex justify-end">
-                <Button type="submit" variant="primary" loading={answer.isPending} disabled={!Object.values(answers).some(Boolean)}>
-                  {t("detail.save_requeue")}
-                </Button>
-              </div>
-            </form>
-          </CardBody>
-        </Card>
-      )}
-
-      <Tabs defaultValue="timeline">
-        <TabsList>
-          <TabsTrigger value="timeline">
-            <ListTree className="size-4" />
-            {t("detail.timeline")}
-          </TabsTrigger>
-          <TabsTrigger value="shots" count={a.screenshots.length}>
-            <Image className="size-4" />
-            {t("detail.screenshots")}
-          </TabsTrigger>
-          <TabsTrigger value="filled" count={a.filled.length}>
-            <CircleCheck className="size-4" />
-            {t("detail.filled")}
-          </TabsTrigger>
-          <TabsTrigger value="docs" count={a.documents.length}>
-            <FileText className="size-4" />
-            {t("detail.documents")}
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="timeline" className="pt-5">
-          {a.events.length === 0 ? (
-            <EmptyState title={t("detail.no_events")} />
-          ) : (
-            <ol className="relative ml-2 border-l border-border">
-              {a.events.map((e, i) => (
-                <li key={i} className="relative pb-5 pl-6 last:pb-0">
-                  <span
-                    className={cn(
-                      "absolute top-1.5 -left-[5px] size-[9px] rounded-full border-2 border-bg",
-                      e.kind === "error" ? "bg-danger" : e.kind === "submit" ? "bg-success" : "bg-primary",
-                    )}
-                  />
-                  <div className="flex flex-wrap items-baseline gap-2">
-                    <Badge tone="outline">{e.kind}</Badge>
-                    <span className="tabular text-caption text-fg-subtle">{formatDateTime(e.ts, lang)}</span>
-                  </div>
-                  <p className="mt-1 text-[0.875rem] leading-relaxed break-words whitespace-pre-line">{e.message}</p>
-                </li>
-              ))}
-            </ol>
-          )}
-        </TabsContent>
-
-        <TabsContent value="shots" className="pt-5">
-          {a.screenshots.length === 0 ? (
-            <EmptyState title={t("detail.no_shots")} />
-          ) : (
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-              {a.screenshots.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setShot(s)}
-                  className="group overflow-hidden rounded-lg border border-border bg-surface-2 text-left"
-                >
-                  <img src={artifactUrl(a.id, s)} alt={s} loading="lazy" className="aspect-[4/3] w-full object-cover object-top transition-transform group-hover:scale-[1.02]" />
-                  <div className="truncate px-3 py-2 text-caption text-fg-muted">{s}</div>
-                </button>
-              ))}
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="filled" className="pt-5">
-          {a.filled.length === 0 ? (
-            <EmptyState title={t("detail.no_filled")} />
-          ) : (
-            <Card className="overflow-x-auto">
-              <table className="w-full text-footnote">
-                <thead className="border-b border-border text-left text-caption text-fg-subtle">
-                  <tr>
-                    <th className="px-4 py-2 font-medium">{t("detail.field")}</th>
-                    <th className="px-4 py-2 font-medium">{t("detail.value")}</th>
-                    <th className="px-4 py-2 font-medium">{t("detail.source")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {a.filled.map((r, i) => (
-                    <tr key={i} className="border-b border-border last:border-0">
-                      <td className="max-w-56 px-4 py-2 align-top text-fg-muted">{r.label}</td>
-                      <td className="px-4 py-2 align-top break-words">
-                        {r.ok === false ? (
-                          <span className="text-danger">
-                            {r.value} – {r.detail}
-                          </span>
-                        ) : (
-                          r.value
-                        )}
-                      </td>
-                      <td className="px-4 py-2 align-top whitespace-nowrap text-fg-subtle">
-                        {r.source} {r.confidence === "low" && <Badge tone="warning">{t("prompt.unsure")}</Badge>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </Card>
-          )}
-        </TabsContent>
-
-        <TabsContent value="docs" className="pt-5">
-          {a.documents.length === 0 ? (
-            <EmptyState title={t("detail.no_docs")} />
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {a.documents.map((d) => (
-                <Button key={d} asChild variant="outline">
-                  <a href={artifactUrl(a.id, d)} target="_blank" rel="noreferrer">
-                    <FileText />
-                    {d}
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_15rem]">
+        <div className="grid min-w-0 content-start gap-6">
+          <header className="grid gap-1">
+            <h1 className="text-title font-semibold tracking-[-0.01em] text-balance">{a.title}</h1>
+            <p className="text-meta text-ink-2">
+              {[a.company, sent ?? t("detail.started_on", { date: formatDateTime(a.started_at, lang) }), t(`mode.${a.mode}` as MessageKey)]
+                .filter(Boolean)
+                .join(" · ")}
+              {" · "}
+              <Link to={`/jobs?job=${a.job_id}`} className="font-medium text-accent hover:underline">
+                {t("detail.job")}
+              </Link>
+              {a.final_url && (
+                <>
+                  {" · "}
+                  <a href={a.final_url} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
+                    {t("detail.final_url")} ↗
                   </a>
-                </Button>
-              ))}
-            </div>
+                </>
+              )}
+            </p>
+          </header>
+
+          {a.error && <p className="text-body text-danger [overflow-wrap:anywhere]">{a.error}</p>}
+          {!a.error && a.confirmation && (
+            <blockquote className="border-l-2 border-line pl-3 text-meta text-ink-2 [overflow-wrap:anywhere]">
+              {a.confirmation}
+            </blockquote>
           )}
-        </TabsContent>
-      </Tabs>
+
+          {a.prompts.map((p) => (
+            <PromptCard key={p.id} prompt={p} showLink={false} />
+          ))}
+
+          {a.questions.length > 0 && a.prompts.length === 0 && <OpenQuestions app={a} />}
+
+          <Tabs defaultValue="timeline">
+            <TabsList>
+              <TabsTrigger value="timeline">{t("detail.timeline")}</TabsTrigger>
+              <TabsTrigger value="filled" count={a.filled.length}>
+                {t("detail.filled")}
+              </TabsTrigger>
+              <TabsTrigger value="shots" count={a.screenshots.length}>
+                {t("detail.screenshots")}
+              </TabsTrigger>
+              <TabsTrigger value="docs" count={a.documents.length}>
+                {t("detail.documents")}
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="timeline" className="pt-4 focus:outline-none">
+              {a.events.length === 0 ? (
+                <p className="text-meta text-ink-3">{t("detail.no_events")}</p>
+              ) : (
+                <Timeline events={a.events} />
+              )}
+            </TabsContent>
+
+            <TabsContent value="filled" className="pt-4 focus:outline-none">
+              {a.filled.length === 0 ? (
+                <p className="text-meta text-ink-3">{t("detail.no_filled")}</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-meta">
+                    <thead className="text-left text-small text-ink-3">
+                      <tr className="border-b border-line">
+                        <th className="py-2 pr-3 font-medium">{t("detail.field")}</th>
+                        <th className="py-2 pr-3 font-medium">{t("detail.value")}</th>
+                        <th className="py-2 font-medium">{t("detail.source")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {a.filled.map((r, i) => (
+                        <tr key={i} className="border-b border-line">
+                          <td className="max-w-56 py-2 pr-3 align-top text-ink-2">{r.label}</td>
+                          <td className="py-2 pr-3 align-top [overflow-wrap:anywhere]">
+                            {r.ok === false ? (
+                              <span className="text-danger">
+                                {r.value} – {r.detail}
+                              </span>
+                            ) : (
+                              r.value
+                            )}
+                          </td>
+                          <td className="py-2 align-top whitespace-nowrap text-ink-3">
+                            {r.source}
+                            {r.confidence === "low" && (
+                              <span className="ml-2 font-semibold text-amber">? {t("prompt.unsure")}</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="shots" className="pt-4 focus:outline-none">
+              {a.screenshots.length === 0 ? (
+                <p className="text-meta text-ink-3">{t("detail.no_shots")}</p>
+              ) : (
+                <ul className="grid grid-cols-2 gap-3 md:grid-cols-3">
+                  {a.screenshots.map((s) => (
+                    <li key={s}>
+                      <button
+                        type="button"
+                        onClick={() => setShot(s)}
+                        className="w-full overflow-hidden rounded-md border border-line bg-sunken text-left hover:border-line-input"
+                      >
+                        <img src={artifactUrl(a.id, s)} alt={s} loading="lazy" className="aspect-[4/3] w-full object-cover object-top" />
+                        <span className="block truncate px-2 py-1.5 text-small text-ink-2">{s}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </TabsContent>
+
+            <TabsContent value="docs" className="pt-4 focus:outline-none">
+              {a.documents.length === 0 ? (
+                <p className="text-meta text-ink-3">{t("detail.no_docs")}</p>
+              ) : (
+                <ul className="grid gap-1">
+                  {a.documents.map((d) => (
+                    <li key={d}>
+                      <a href={artifactUrl(a.id, d)} target="_blank" rel="noreferrer" className="text-body font-medium text-accent hover:underline">
+                        {d} ↗
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </TabsContent>
+          </Tabs>
+        </div>
+
+        <Rail app={a} />
+      </div>
 
       <Dialog open={shot !== null} onOpenChange={(v) => !v && setShot(null)}>
         {shot && (
           <DialogContent title={shot} wide>
-            <img src={artifactUrl(a.id, shot)} alt={shot} className="w-full rounded-md border border-border" />
+            <img src={artifactUrl(a.id, shot)} alt={shot} className="w-full rounded-md border border-line" />
           </DialogContent>
         )}
       </Dialog>
     </>
+  );
+}
+
+/** Rechte Spalte: Stand, Nachfassen und Notizen – das, was du nach dem Absenden pflegst. */
+function Rail({ app }: { app: Detail }) {
+  const { t, lang } = useI18n();
+  const qc = useQueryClient();
+  const [notes, setNotes] = useState(app.notes);
+  const [date, setDate] = useState(app.follow_up_at?.slice(0, 10) ?? "");
+  useEffect(() => setNotes(app.notes), [app.notes]);
+  useEffect(() => setDate(app.follow_up_at?.slice(0, 10) ?? ""), [app.follow_up_at]);
+  const patch = useMutation({
+    mutationFn: (body: Parameters<typeof api.patchApplication>[1]) => api.patchApplication(app.id, body),
+    onSuccess: () => {
+      toast.success(t("common.saved"));
+      qc.invalidateQueries({ queryKey: ["application", app.id] });
+      qc.invalidateQueries({ queryKey: ["applications"] });
+      qc.invalidateQueries({ queryKey: ["pipeline"] });
+      qc.invalidateQueries({ queryKey: ["status"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const editable = PIPELINE.includes(app.status);
+  return (
+    <aside className="grid content-start gap-4 lg:border-l lg:border-line lg:pl-6" aria-label={t("detail.rail")}>
+      <Field label={t("detail.stage")} htmlFor="app-stage">
+        {editable ? (
+          <Select id="app-stage" value={app.status} onChange={(e) => patch.mutate({ status: e.target.value })}>
+            {(["submitted", "interview", "offer", "rejected"] as const).map((s) => (
+              <option key={s} value={s}>
+                {t(`status.${s}`)}
+              </option>
+            ))}
+            {app.status === "manual" && <option value="manual">{t("status.manual")}</option>}
+          </Select>
+        ) : (
+          <StatusLabel status={app.status} className="h-8" />
+        )}
+      </Field>
+      {editable && (
+        <Field label={t("pipeline.followup")} hint={t("pipeline.followup_hint")} htmlFor="app-followup">
+          <Input
+            id="app-followup"
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            // erst beim Verlassen speichern: beim Tippen ist der Wert zwischendurch leer und würde den Termin löschen
+            onBlur={() => {
+              if (date === (app.follow_up_at?.slice(0, 10) ?? "")) return;
+              patch.mutate(date ? { follow_up_at: `${date}T09:00:00` } : { clear_follow_up: true });
+            }}
+          />
+        </Field>
+      )}
+      <Field label={t("job.notes")} htmlFor="app-notes">
+        <Textarea
+          id="app-notes"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          onBlur={() => notes !== app.notes && patch.mutate({ notes })}
+          placeholder={t("pipeline.notes_placeholder")}
+          className="min-h-28"
+        />
+      </Field>
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 border-t border-line pt-3 text-meta">
+        <dt className="text-ink-3">{t("detail.mode")}</dt>
+        <dd className="text-right">{t(`mode.${app.mode}` as MessageKey)}</dd>
+        <dt className="text-ink-3">{t("detail.run")}</dt>
+        <dd className="tabular text-right">#{app.id}</dd>
+        <dt className="text-ink-3">{t("detail.started")}</dt>
+        <dd className="tabular text-right">{formatDate(app.started_at, lang)}</dd>
+      </dl>
+    </aside>
+  );
+}
+
+/** Verlauf nach Tagen gruppiert: Uhrzeit, Ereignis in Worten, Meldung. */
+function Timeline({ events }: { events: Detail["events"] }) {
+  const { t, lang } = useI18n();
+  const kind = (k: string) => (hasMessage(`event.${k}`) ? t(`event.${k}` as MessageKey) : k);
+  return (
+    <div className="grid gap-4">
+      {groupByDay(events, (e) => e.ts, lang).map(([day, list]) => (
+        <section key={day}>
+          <h2 className="pb-1 text-small font-semibold text-ink-2">{day}</h2>
+          <ol className="grid gap-1.5 text-meta">
+            {list.map((e, i) => (
+              <li key={i} className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-4">
+                <span className="tabular text-ink-3">
+                  {parseDate(e.ts)?.toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit" })}
+                </span>
+                <span className="[overflow-wrap:anywhere] whitespace-pre-line">
+                  <span className={cn("font-medium", e.kind === "error" ? "text-danger" : e.kind === "submit" && "text-positive")}>
+                    {kind(e.kind)}
+                  </span>
+                  <span className="text-ink-2"> · {e.message}</span>
+                </span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+/** Fragen, die ein Lauf offen gelassen hat: Antworten wandern in die Antwortbank, die Stelle kommt wieder dran. */
+function OpenQuestions({ app }: { app: Detail }) {
+  const { t, tp } = useI18n();
+  const qc = useQueryClient();
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const save = useMutation({
+    mutationFn: () => api.answerApplication(app.id, answers, true),
+    onSuccess: (r) => {
+      toast.success(tp("detail.answers_saved", r.saved));
+      qc.invalidateQueries({ queryKey: ["application", app.id] });
+      qc.invalidateQueries({ queryKey: ["status"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  return (
+    <Section title={t("detail.questions")}>
+      <form
+        className="grid gap-4 pt-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate();
+        }}
+      >
+        <p className="text-meta text-ink-2">{t("detail.questions_hint")}</p>
+        {app.questions.map((q, i) => (
+          <Field key={i} label={q.label || q.question} htmlFor={`aq-${i}`}>
+            {q.options?.length ? (
+              <Select id={`aq-${i}`} value={answers[String(i)] ?? ""} onChange={(e) => setAnswers({ ...answers, [String(i)]: e.target.value })}>
+                <option value="">{t("common.choose")}</option>
+                {q.options.map((o) => (
+                  <option key={o}>{o}</option>
+                ))}
+              </Select>
+            ) : (
+              <Input id={`aq-${i}`} value={answers[String(i)] ?? ""} onChange={(e) => setAnswers({ ...answers, [String(i)]: e.target.value })} />
+            )}
+          </Field>
+        ))}
+        <div className="flex justify-end">
+          <Button type="submit" variant="primary" loading={save.isPending} disabled={!Object.values(answers).some(Boolean)}>
+            {t("detail.save_requeue")}
+          </Button>
+        </div>
+      </form>
+    </Section>
   );
 }
