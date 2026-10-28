@@ -1665,8 +1665,10 @@ def main() -> None:
     if args.json:
         args.json.write_bytes(json.dumps(out, ensure_ascii=False, indent=1).encode("utf-8"))
         print(f"\nJSON: {args.json}")
-    shutil.rmtree(Path(os.environ["JOBSLOP_HOME"]).parent, ignore_errors=True)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:  # auch nach „compare“ oder einem Fehler: den Wegwerf-Ordner für JOBSLOP_HOME entfernen
+        shutil.rmtree(Path(os.environ["JOBSLOP_HOME"]).parent, ignore_errors=True)
