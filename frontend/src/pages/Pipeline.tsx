@@ -3,7 +3,7 @@ import { Ellipsis } from "lucide-react";
 import { type DragEvent, type KeyboardEvent, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
-import { StatusGlyph } from "@/components/domain";
+import { LoadError, StatusGlyph } from "@/components/domain";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/overlays";
 import { EmptyState, Kbd, Skeleton } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
@@ -12,6 +12,7 @@ import { useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
 import type { ApplicationSummary } from "@/lib/types";
 import { cn, formatDate, formatRelative } from "@/lib/utils";
+import { useReportError } from "@/lib/backendText";
 
 type Stage = "applied" | "interview" | "offer" | "rejected";
 const STAGES: Stage[] = ["applied", "interview", "offer", "rejected"];
@@ -29,6 +30,7 @@ const STAGE_STATUS: Record<Stage, string> = {
 export function PipelineBoard() {
   const { t } = useI18n();
   const qc = useQueryClient();
+  const reportError = useReportError();
   const pipeline = useQuery({ queryKey: ["pipeline"], queryFn: api.pipeline });
   const [dragOver, setDragOver] = useState<Stage | null>(null);
   const move = useMutation({
@@ -38,14 +40,16 @@ export function PipelineBoard() {
       // Rückgängig: genau der vorige Stand (auch „selbst gesendet“) und der Termin, den Angebot/Absage löschen
       const before = { status: app.status, ...(app.follow_up_at ? { follow_up_at: app.follow_up_at } : {}) };
       toast(t("pipeline.moved", { stage: t(`pipeline.${stage}` as MessageKey) }), {
-        action: { label: t("common.undo"), onClick: () => api.patchApplication(app.id, before).then(refresh) },
+        action: {
+          label: t("common.undo"),
+          onClick: () => api.patchApplication(app.id, before).then(refresh, reportError),
+        },
       });
       const id = app.id;
       refresh();
       // Fokus folgt der Karte in die neue Spalte
       requestAnimationFrame(() => document.getElementById(`card-${id}`)?.focus());
     },
-    onError: (e: Error) => toast.error(e.message),
   });
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["pipeline"] });
@@ -73,6 +77,7 @@ export function PipelineBoard() {
       </div>
     );
   }
+  if (pipeline.isError) return <LoadError error={pipeline.error} onRetry={() => pipeline.refetch()} />;
   const total = pipeline.data ? STAGES.reduce((n, s) => n + pipeline.data.stages[s].length, 0) : 0;
   if (!total) return <EmptyState title={t("pipeline.empty")} description={t("pipeline.empty_hint")} />;
 

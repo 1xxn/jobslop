@@ -1,12 +1,19 @@
 version: 2
+# Neue Versionen erst nach 14 Tagen (cooldown): frisch veröffentlichte, später zurückgezogene oder kompromittierte
+# Pakete landen so nicht sofort im Projekt. Sicherheitsupdates sind davon ausgenommen.
 updates:
   - package-ecosystem: uv
     directory: /
     schedule: { interval: weekly }
+    cooldown: { default-days: 14 }
     open-pull-requests-limit: 5
+    groups:
+      python-minor:
+        update-types: [minor, patch]
   - package-ecosystem: npm
     directory: /frontend
     schedule: { interval: weekly }
+    cooldown: { default-days: 14 }
     open-pull-requests-limit: 5
     groups:
       frontend:
@@ -14,3 +21,7 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: monthly }
+    cooldown: { default-days: 14 }
+    groups:
+      actions:
+        patterns: ["*"]

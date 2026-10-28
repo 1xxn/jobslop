@@ -21,23 +21,37 @@ import type {
   Stats,
   Status,
   SystemReport,
+  TailoredCv,
 } from "./types";
 
+/** Fehler der API. `code` + `params` übersetzt das Dashboard über `be.<code>`, `message` ist der Klartext. */
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  code?: string;
+  params?: Record<string, unknown>;
+  constructor(status: number, message: string, code?: string, params?: Record<string, unknown>) {
     super(message);
     this.status = status;
+    this.code = code;
+    this.params = params;
   }
 }
 
-function detail(body: unknown, fallback: string): string {
-  if (body && typeof body === "object" && "detail" in body) {
-    const d = (body as { detail: unknown }).detail;
-    if (typeof d === "string") return d;
-    if (Array.isArray(d)) return d.map((e) => (e as { msg?: string }).msg ?? String(e)).join(", ");
-  }
-  return fallback;
+function fail(status: number, body: unknown, fallback: string): ApiError {
+  if (!body || typeof body !== "object") return new ApiError(status, fallback);
+  const { detail, code, params } = body as { detail?: unknown; code?: unknown; params?: unknown };
+  const message =
+    typeof detail === "string"
+      ? detail
+      : Array.isArray(detail)
+        ? detail.map((e) => (e as { msg?: string }).msg ?? String(e)).join(", ")
+        : fallback;
+  return new ApiError(
+    status,
+    message,
+    typeof code === "string" ? code : undefined,
+    params && typeof params === "object" ? (params as Record<string, unknown>) : undefined,
+  );
 }
 
 async function request<T>(method: string, path: string, body?: unknown, form?: FormData): Promise<T> {
@@ -52,7 +66,7 @@ async function request<T>(method: string, path: string, body?: unknown, form?: F
       body: form ?? (body !== undefined ? JSON.stringify(body) : undefined),
     });
   } catch {
-    throw new ApiError(0, "jobslop ist nicht erreichbar – läuft das Programm noch?");
+    throw new ApiError(0, "jobslop ist nicht erreichbar – läuft das Programm noch?", "api.offline");
   }
   const text = await res.text();
   let data: unknown = null;
@@ -62,7 +76,7 @@ async function request<T>(method: string, path: string, body?: unknown, form?: F
     // z. B. „Internal Server Error“ als Klartext – die Statuszeile ist dann die bessere Meldung
     if (res.ok) throw new ApiError(res.status, "Unerwartete Antwort von jobslop");
   }
-  if (!res.ok) throw new ApiError(res.status, detail(data, `${res.status} ${res.statusText}`));
+  if (!res.ok) throw fail(res.status, data, `${res.status} ${res.statusText}`);
   return data as T;
 }
 
@@ -129,6 +143,8 @@ export const api = {
   addJob: (url: string) => post<{ id: number; created: boolean; via: string }>("/api/jobs", { url }),
   patchJob: (id: number, body: Partial<Pick<JobSummary, "queued" | "starred">> & { notes?: string }) =>
     patch<JobSummary>(`/api/jobs/${id}`, body),
+  tailoredCv: (id: number) => get<TailoredCv>(`/api/jobs/${id}/cv`),
+  createTailoredCv: (id: number) => post<TailoredCv>(`/api/jobs/${id}/cv`),
   markJob: (id: number, status: "applied" | "interview" | "rejected" | "offer", note = "") =>
     post<JobSummary>(`/api/jobs/${id}/status`, { status, note }),
   bulk: (ids: number[], action: "queue" | "unqueue" | "star" | "unstar" | "exclude") =>
@@ -161,6 +177,11 @@ export const api = {
     id: number,
     body: { answers?: Record<string, string>; skip?: boolean; decision?: string; done?: boolean; abort?: boolean },
   ) => post<Prompt>(`/api/prompts/${id}`, body),
+
+  inboxTest: () => post<{ ok: boolean; messages: number }>("/api/inbox/test"),
+  inboxCheck: () => post<{ checked: number; related: number; suggested: number; logged: number }>("/api/inbox/check"),
+  inboxAction: (id: number, action: "apply" | "dismiss") =>
+    post<{ application_id: number; previous_status: string; status: string }>(`/api/inbox/${id}`, { action }),
 
   answers: () => get<Answer[]>("/api/answers"),
   createAnswer: (question: string, answer: string) => post<{ id: number }>("/api/answers", { question, answer }),

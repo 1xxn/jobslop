@@ -1,4 +1,6 @@
 import { useCallback } from "react";
+import { toast } from "sonner";
+import { ApiError } from "./api";
 import { useI18n } from "./i18n";
 import { hasMessage, type MessageKey } from "./messages";
 
@@ -30,6 +32,25 @@ export function useBackendText() {
     },
     [t],
   );
+}
+
+/** Ein Fehler als Satz in der gewählten Sprache: API-Fehler über ihren Code, sonst die Meldung selbst. */
+export function useErrorText() {
+  const { t } = useI18n();
+  const text = useBackendText();
+  return useCallback(
+    (error: unknown): string => {
+      if (error instanceof ApiError) return text(error.code, error.params, error.message);
+      return error instanceof Error && error.message ? error.message : t("error.unknown");
+    },
+    [t, text],
+  );
+}
+
+/** Für Aufrufe außerhalb von useMutation (Rückgängig im Toast …): Fehler erscheinen wie überall als Toast. */
+export function useReportError() {
+  const errorText = useErrorText();
+  return useCallback((error: unknown) => void toast.error(errorText(error)), [errorText]);
 }
 
 /** Code und Parameter, die das Backend in `data` eines Aktivitätseintrags ablegt. */

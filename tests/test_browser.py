@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from sqlalchemy import select
 
@@ -9,9 +11,10 @@ from conftest import ScriptedInteractor, add_job
 from jobslop.apply.engine import ApplyEngine, BrowserSession
 from jobslop.apply.executor import Executor, Files
 from jobslop.apply.extract import extract_state
-from jobslop.apply.planner import FieldAction, HeuristicPlanner
+from jobslop.apply.planner import FieldAction, HeuristicPlanner, JobContext
 from jobslop.apply.prepare import dismiss_cookie_banners, reveal_lazy_content, try_autofill
-from jobslop.db import Answer, Application, ApplicationEvent, session_scope
+from jobslop.apply.tailor import fingerprint, sources_for, tailored_dir
+from jobslop.db import Answer, Application, ApplicationEvent, Job, session_scope
 
 pytestmark = pytest.mark.browser
 
@@ -450,3 +453,32 @@ async def test_real_world_form_quirks(settings, site, profile, config, fixture, 
     assert outcome.status == "submitted", outcome.message
     sub = site.submissions[before]
     assert {k: sub.get(k) for k in expected} == expected
+
+
+async def test_engine_uploads_the_cv_tailored_for_the_job(settings, site, profile, config):
+    """Ist der Zuschnitt an, lädt die Engine genau die Datei hoch, die das Dashboard als Vorschau zeigt."""
+    job_id = add_job(
+        settings, f"{site.base_url}/greenhouse_like.html", "Acme Cloud", "Site Reliability Engineer"
+    )
+    profile.documents.tailor_cv = True
+    with session_scope(settings.db_path) as s:
+        job = JobContext.from_job(s.get(Job, job_id))
+    folder = tailored_dir(settings.home, job_id)
+    folder.mkdir(parents=True)
+    (folder / "Lebenslauf_Max_Mustermann.pdf").write_bytes(b"%PDF-1.4\n% zugeschnitten\n")
+    stamp = fingerprint(profile, job, sources_for(profile, settings.profile_path.parent))
+    (folder / "meta.json").write_text(
+        f'{{"file": "Lebenslauf_Max_Mustermann.pdf", "fingerprint": "{stamp}"}}', encoding="utf-8"
+    )
+    interactor = ScriptedInteractor({"visa": "No", "salary": "70000", "hear about": "Company website"})
+    before = len(site.submissions)
+    async with BrowserSession(settings, headless=True) as browser:
+        outcome = await _engine(settings, config, profile, browser, interactor).apply(job_id)
+    assert outcome.status == "submitted", outcome.message
+    assert site.submissions[before]["resume"] == "Lebenslauf_Max_Mustermann.pdf"
+    with session_scope(settings.db_path) as s:
+        app = s.get(Application, outcome.application_id)
+        kinds = [e.kind for e in app.events]
+        assert "tailored_cv" in kinds
+        assert (Path(app.artifacts_dir) / "Lebenslauf_Max_Mustermann.pdf").is_file()
+        assert any(r["value"] == "(Lebenslauf_Max_Mustermann.pdf)" for r in app.filled)
