@@ -53,6 +53,9 @@ def site():
     server.shutdown()
 
 
+LOCAL = "http://127.0.0.1"  # TestClient-Adresse: der Server nimmt nur lokale Host-Header an
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     s = Settings(home=tmp_path / "home", headless=True, vision="never", max_steps_per_application=12)

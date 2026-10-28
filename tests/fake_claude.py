@@ -64,6 +64,13 @@ if mode == "auth":
         )
     )
     sys.exit(1)
+if mode == "hang":  # rechnet bis zum Abbruch; der Herzschlag zeigt dem Test, ob der Prozess noch lebt
+    import time
+
+    while True:
+        with open(os.environ["FAKE_CLAUDE_BEAT"], "a", encoding="utf-8") as fh:
+            fh.write(".")
+        time.sleep(0.1)
 if mode == "crash":
     print("Segmentation fault", file=sys.stderr)
     sys.exit(139)

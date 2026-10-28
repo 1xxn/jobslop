@@ -179,6 +179,19 @@ def _config(config):
     return config
 
 
+async def test_crawl_skips_postings_without_web_address(settings, config):
+    """Fremde Daten: eine Quelle, die „javascript:“ statt einer Adresse liefert, kommt nicht ins Dashboard."""
+    config = _config(config)
+    evil = dict(GH_JOBS["jobs"][0], id=99, title="Platform Engineer", absolute_url="javascript:alert(1)")
+    with respx.mock(assert_all_called=False) as router:
+        _mock(router, gh={"jobs": [*GH_JOBS["jobs"], evil]})
+        await run_crawl(settings, config, enrich=False, use_browser=False)
+    with session_scope(settings.db_path) as s:
+        urls = list(s.execute(select(Job.url)).scalars())
+    assert urls and all(u.startswith("https://") for u in urls)
+    assert "javascript:alert(1)" not in urls
+
+
 async def test_crawl_filters_upserts_and_tracks_history(settings, config):
     config = _config(config)
     # Eintrag aus der Startliste (LinkedIn), der beim Crawl auf die direkte Firmen-URL umgestellt werden soll

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
@@ -35,19 +35,27 @@ def _no(reason: str, code: str, **params: Any) -> Verdict:
     return Verdict(False, reason, f"guard.{code}", params)
 
 
+_LEGAL_FORM_RX = re.compile(r"\b(gmbh|ag|se|kg|co|inc|ltd|llc|group|gruppe|deutschland|germany|tech)\b")
+_NON_ALNUM_RX = re.compile(r"[^a-z0-9]+")
+
+
 def company_key(name: str) -> str:
-    n = name.lower()
-    n = re.sub(r"\b(gmbh|ag|se|kg|co|inc|ltd|llc|group|gruppe|deutschland|germany|tech)\b", " ", n)
-    return re.sub(r"[^a-z0-9]+", " ", n).strip()
+    return _NON_ALNUM_RX.sub(" ", _LEGAL_FORM_RX.sub(" ", name.lower())).strip()
 
 
-def title_matches(pattern: str, title: str) -> bool:
+def _title_test(pattern: str) -> Callable[[str], bool]:
     """Titel-Ausschluss als regulärer Ausdruck – ein ungültiger (z. B. „senior (“) gilt als einfacher Text, statt die
     Status- und Stellenabfragen des Dashboards mit einem Fehler zu blockieren."""
     try:
-        return re.search(pattern, title, re.I) is not None
+        rx = re.compile(pattern, re.I)
     except re.error:
-        return pattern.lower() in title.lower()
+        low = pattern.lower()
+        return lambda title: low in title.lower()
+    return lambda title: rx.search(title) is not None
+
+
+def title_matches(pattern: str, title: str) -> bool:
+    return _title_test(pattern)(title)
 
 
 def _exclusion_verdict(ex: Exclusion, job: Job) -> Verdict | None:
@@ -70,12 +78,29 @@ def is_excluded(session: Session, job: Job) -> Verdict | None:
     return None
 
 
-def excluded_job_ids(session: Session, jobs: Iterable[Job]) -> set[int]:
-    """IDs der Stellen, die eine Ausschlussregel trifft – eine Abfrage der Regeln für die ganze Liste."""
+def excluded_job_ids(session: Session, jobs: Iterable[Any]) -> set[int]:
+    """IDs der Stellen (oder Zeilen mit id, company, title, url), die eine Ausschlussregel trifft – wie
+    ``_exclusion_verdict``, aber die Regeln werden einmal vorbereitet (der Status-Abruf alle paar Sekunden prüft
+    damit Tausende Stellen)."""
     rules = list(session.execute(select(Exclusion)).scalars())
     if not rules:
         return set()
-    return {j.id for j in jobs if any(_exclusion_verdict(ex, j) for ex in rules)}
+    companies = [key for ex in rules if ex.kind == "company" and (key := company_key(ex.value))]
+    job_ids = {ex.value for ex in rules if ex.kind == "job"}
+    titles = [_title_test(ex.value) for ex in rules if ex.kind == "title"]
+    urls = [ex.value.lower() for ex in rules if ex.kind == "url"]
+
+    def hit(job: Any) -> bool:
+        if str(job.id) in job_ids or any(test(job.title) for test in titles):
+            return True
+        if urls and any(u in job.url.lower() for u in urls):
+            return True
+        if companies:
+            key = company_key(job.company)
+            return any(c in key for c in companies)
+        return False
+
+    return {j.id for j in jobs if hit(j)}
 
 
 def already_applied(session: Session, job: Job) -> Verdict | None:
