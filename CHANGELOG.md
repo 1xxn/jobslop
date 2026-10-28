@@ -35,6 +35,9 @@
 - Keyboard shortcuts (G then a letter, `?` for help), skip link, labelled form fields, WCAG AA contrast in both themes.
 - The dashboard loads only the page you open (code splitting); libraries are cached separately across updates.
 - The job list and job details show where a job came from (LinkedIn, Indeed, Arbeitsagentur, Greenhouse …).
+- Python 3.14 is supported. CI tests Ubuntu (3.12, 3.14), Windows and macOS, checks the workflows with zizmor, runs
+  CodeQL and a dependency review on pull requests, pins all actions to commit SHAs and caches Chromium; releases
+  carry build provenance attestations; a weekly job checks that the real job sources still work.
 
 ### Fixed
 - Errors are always visible and translated: failed actions show a toast, failed loads a retry instead of an endless

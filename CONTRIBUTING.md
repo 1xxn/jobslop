@@ -54,7 +54,7 @@ Tests marked `live` call the real Claude Code and use your subscription; they on
 | Dashboard end to end (demo data, built UI) | `tests/test_dashboard_e2e.py` | CI |
 | Browser extension end to end | `tests/test_extension.py` | CI |
 | UI units and components | `frontend/src/**/*.test.ts(x)` (Vitest) | `npm test` (CI) |
-| Real job sites, read-only | `tests/test_real_sites.py` | `JOBSLOP_NETWORK=1` only |
+| Real job sites, read-only | `tests/test_real_sites.py` | `JOBSLOP_NETWORK=1` only; weekly in `sources.yml` |
 | Real Claude Code | `tests/test_claude_code.py::test_live_*` | `JOBSLOP_LIVE=1` only |
 
 ## Releasing
@@ -65,4 +65,16 @@ Tests marked `live` call the real Claude Code and use your subscription; they on
 3. Tag and push: `git tag vX.Y.Z && git push origin main vX.Y.Z`.
 
 `.github/workflows/release.yml` re-runs all CI checks, verifies that tag, `pyproject.toml` and
-`frontend/package.json` agree, builds wheel and sdist and publishes a GitHub release with the changelog section.
+`frontend/package.json` agree, builds wheel and sdist, attests their build provenance
+(`gh attestation verify <file> --repo 1xxn/jobslop`) and publishes a GitHub release with the changelog section.
+
+## CI
+
+| Workflow | When | What |
+|---|---|---|
+| `ci.yml` | every PR and push to `main` | Ruff, zizmor (workflow security), pytest on Ubuntu 3.12/3.14, Windows 3.12 and macOS 3.13, Vitest + build check, dependency review on PRs |
+| `codeql.yml` | PRs, `main`, weekly | CodeQL for Python, TypeScript/JavaScript and the workflows |
+| `sources.yml` | weekly, manual | Read-only smoke test against real job sites – notices when a source changes its format |
+| `release.yml` | tag `v*` | see above |
+
+Actions are pinned to commit SHAs; Dependabot updates them (and Python/npm packages) with a 14-day cooldown.
