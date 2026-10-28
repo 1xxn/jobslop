@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Protocol
@@ -11,6 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt as RichPrompt
 from rich.table import Table
+from sqlalchemy import update
 
 from ..db import Prompt, session_scope, utcnow
 from .planner import OpenQuestion
@@ -134,26 +136,38 @@ class DbInteractor:
             s.flush()
             return p.id
 
-    async def _wait(self, prompt_id: int, check: Check | None = None) -> dict[str, Any] | None:
-        waited = 0.0
-        while waited < self.timeout_s:
-            with session_scope(self.db_path) as s:
-                p = s.get(Prompt, prompt_id)
-                if p and p.status == "answered":
-                    return dict(p.response)
-            if check is not None and await check():
-                with session_scope(self.db_path) as s:
-                    p = s.get(Prompt, prompt_id)
-                    if p:
-                        p.status, p.answered_at, p.response = "answered", utcnow(), {"auto": True}
-                return {"auto": True}
-            await asyncio.sleep(self.poll_s)
-            waited += self.poll_s
+    def _state(self, prompt_id: int) -> tuple[str, dict[str, Any]]:
         with session_scope(self.db_path) as s:
             p = s.get(Prompt, prompt_id)
-            if p and p.status == "open":
-                p.status = "expired"
-        return None
+            return (p.status, dict(p.response or {})) if p else ("gone", {})
+
+    def _close(self, prompt_id: int, status: str, response: dict[str, Any] | None = None) -> bool:
+        """Schließt die Rückfrage nur, solange sie offen ist. Dashboard und Lauf schreiben gleichzeitig – genau einer
+        gewinnt, sonst ginge z. B. eine Freigabe in der letzten Sekunde der Wartezeit verloren."""
+        values: dict[str, Any] = {"status": status}
+        if response is not None:
+            values |= {"response": response, "answered_at": utcnow()}
+        with session_scope(self.db_path) as s:
+            done = s.connection().execute(
+                update(Prompt).where(Prompt.id == prompt_id, Prompt.status == "open").values(**values)
+            )
+            return bool(done.rowcount)
+
+    async def _wait(self, prompt_id: int, check: Check | None = None) -> dict[str, Any] | None:
+        deadline = time.monotonic() + self.timeout_s  # inklusive der Zeit für check() und die Datenbank
+        while True:
+            status, response = self._state(prompt_id)
+            if status == "answered":
+                return response
+            if status != "open":  # vom Dashboard geschlossen (Lauf gestoppt oder abgestürzt)
+                return None
+            if check is not None and await check() and self._close(prompt_id, "answered", {"auto": True}):
+                return {"auto": True}
+            if time.monotonic() >= deadline:
+                if self._close(prompt_id, "expired"):
+                    return None
+                continue  # gerade eben beantwortet – die Antwort gilt
+            await asyncio.sleep(self.poll_s)
 
     async def ask(self, app_id: int, title: str, questions: list[OpenQuestion]) -> dict[str, str] | None:
         pid = self._create(

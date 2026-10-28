@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sys
@@ -117,6 +118,27 @@ async def test_text_only_result_fallback(fake, monkeypatch):
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "text_only")
     result = await LLM(settings).parse(Answer, system="s", content="x")
     assert result.items[0].title == "a"
+
+
+async def test_cancel_stops_claude(fake, monkeypatch, tmp_path):
+    """Gestoppter Lauf oder beendetes Dashboard: Claude rechnet nicht verwaist weiter (kostet Kontingent)."""
+    settings, _calls = fake
+    beat = tmp_path / "beat"
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "hang")
+    monkeypatch.setenv("FAKE_CLAUDE_BEAT", str(beat))
+    task = asyncio.create_task(LLM(settings).parse(Answer, system="s", content="x"))
+    for _ in range(150):
+        if beat.exists():
+            break
+        await asyncio.sleep(0.1)
+    assert beat.exists()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await asyncio.sleep(0.5)
+    size = beat.stat().st_size
+    await asyncio.sleep(1)
+    assert beat.stat().st_size == size
 
 
 @pytest.mark.parametrize(
