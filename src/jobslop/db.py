@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -22,6 +23,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
+from sqlalchemy.schema import CreateIndex
 
 
 def utcnow() -> datetime:
@@ -48,6 +50,12 @@ class CrawlRun(Base):
 
 class Job(Base):
     __tablename__ = "jobs"
+    # Die Beschreibung (mehrere KB) liegt vor status/queued/first_seen – ohne Index liest SQLite für jeden Filter
+    # die Überlaufseiten aller Zeilen. Mit Index beantworten Zähler und Ansichten das aus dem Index.
+    __table_args__ = (
+        Index("ix_jobs_state", "status", "queued", "starred"),
+        Index("ix_jobs_first_seen", "first_seen"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     fingerprint: Mapped[str] = mapped_column(String(64), unique=True, index=True)
@@ -253,6 +261,7 @@ def get_engine(db_path: Path) -> Engine:
 
         Base.metadata.create_all(engine)
         _add_missing_columns(engine)
+        _add_missing_indexes(engine)
         _engines[db_path] = engine
     return _engines[db_path]
 
@@ -267,7 +276,9 @@ def _add_missing_columns(engine: Engine) -> None:
                     continue
                 ddl_type = column.type.compile(dialect=engine.dialect)
                 default = (
-                    column.default.arg if column.default is not None and column.default.is_scalar else None
+                    getattr(column.default, "arg", None)
+                    if column.default is not None and column.default.is_scalar
+                    else None
                 )
                 clause = ""
                 if isinstance(default, bool):
@@ -284,6 +295,17 @@ def _add_missing_columns(engine: Engine) -> None:
             "UPDATE applications SET artifacts_dir = REPLACE(artifacts_dir, '.jobpilot', '.jobslop') "
             "WHERE artifacts_dir LIKE '%.jobpilot%'"
         )
+
+
+def _add_missing_indexes(engine: Engine) -> None:
+    """``create_all`` legt Indizes nur mit neuen Tabellen an – bestehende Datenbanken bekommen sie hier. Nur
+    Indizes für Tempo: ein nachträglicher UNIQUE-Index scheiterte an alten Dubletten und verhinderte den Start.
+    ``IF NOT EXISTS``, weil Dashboard und Bewerbungslauf gleichzeitig starten können."""
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            for index in table.indexes:
+                if not index.unique:
+                    conn.execute(CreateIndex(index, if_not_exists=True))
 
 
 @contextmanager

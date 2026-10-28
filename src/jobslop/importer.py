@@ -54,7 +54,7 @@ def import_jobs(db_path: Path, path: Path, config: SearchConfig) -> tuple[int, i
             category = str(item.get("category") or meta["category"])
             level = str(item.get("level") or meta["level"])
             segment = str(item.get("segment") or meta["segment"])
-            fit = int(item.get("fit") or meta["fit"])  # type: ignore[call-overload]
+            fit = int(str(item.get("fit") or meta["fit"]))
             label = str(item.get("source_label", "") or "import").lower()
             job = Job(
                 fingerprint=fp,

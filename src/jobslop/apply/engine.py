@@ -13,6 +13,7 @@ import traceback
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -254,8 +255,9 @@ class ApplyEngine:
                 json.dumps(run.filled, ensure_ascii=False, indent=2), encoding="utf-8"
             )
             with session_scope(self.settings.db_path) as s:
-                app = s.get(Application, app_id)
-                assert app is not None
+                stored = s.get(Application, app_id)
+                assert stored is not None
+                app = stored
                 app.status = status
                 app.finished_at = utcnow()
                 app.final_url = final_url
@@ -277,6 +279,8 @@ class ApplyEngine:
     # ------------------------------------------------------------------ main loop
     async def _run(self, run: _Run, page: Any) -> tuple[str, str, Any]:
         title = f"{run.job.company} – {run.job.title}"
+        if not run.job.url.startswith(("https://", "http://")):
+            raise Park("failed", f"Keine Web-Adresse: {run.job.url[:80]}")
         self._event(run.app_id, "navigate", run.job.url)
         await page.goto(run.job.url, wait_until="domcontentloaded")
 
@@ -314,7 +318,7 @@ class ApplyEngine:
                     page,
                     title,
                     "Bitte löse das CAPTCHA im Browserfenster – danach geht es von selbst weiter.",
-                    lambda p=page: captcha_solved(p),
+                    partial(captcha_solved, page),
                 )
                 continue
 

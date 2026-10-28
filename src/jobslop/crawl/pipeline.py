@@ -26,6 +26,7 @@ from .render import PageRenderer
 from .sources import AGGREGATOR_SOURCES, build_sources, gather_limited
 
 log = logging.getLogger(__name__)
+WEB_SCHEMES = ("https://", "http://")
 
 STALE_DAYS = 21  # Börsen-Stellen gelten als geschlossen, wenn sie so lange nicht mehr auftauchen
 
@@ -136,6 +137,10 @@ async def run_crawl(
             report.fetched += len(result)
             for posting in result:
                 listed.add(fingerprint(posting.source, posting.external_id))
+                if not posting.url.startswith(WEB_SCHEMES):
+                    # Fremde Daten: „javascript:“ oder „file:“ gehört weder ins Dashboard noch in den Browser
+                    log.warning("%s: Stelle ohne Web-Adresse übersprungen: %.80s", src.name, posting.url)
+                    continue
                 if not _is_aggregator(posting.source):
                     with_board.add(company_key(posting.company))
                 allowed, _why = title_allowed(posting.title, config)
@@ -207,8 +212,9 @@ async def run_crawl(
     report.kept = len(kept)
     touched: list[int] = []
     with session_scope(settings.db_path) as s:
-        run = s.get(CrawlRun, run_id)
-        assert run is not None
+        crawl_row = s.get(CrawlRun, run_id)
+        assert crawl_row is not None
+        run = crawl_row
         seen_ids: set[int] = set()
         for _src, posting, where in kept:
             job_id, change = _upsert(s, run, posting, where, config, report)
@@ -394,7 +400,7 @@ def _upsert(
     job.category = str(meta["category"])
     if not job.enrichment:  # LLM-Bewertung hat Vorrang vor Regeln
         job.level = str(meta["level"])
-        job.fit = int(meta["fit"])  # type: ignore[arg-type]
+        job.fit = int(str(meta["fit"]))
     job.segment = str(meta["segment"])
     job.language = str(meta["language"])
     job.score = job_score(job, config.role_names)

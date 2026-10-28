@@ -387,6 +387,10 @@ class LLM:
             raise RuntimeError(
                 f"Claude Code hat nach {self.settings.claude_timeout_s}s nicht geantwortet"
             ) from None
+        except asyncio.CancelledError:
+            # Lauf gestoppt oder Dashboard beendet: Claude nicht verwaist weiterrechnen lassen (kostet Kontingent)
+            proc.kill()
+            raise
         seconds = time.monotonic() - started
         stdout = out.decode("utf-8", errors="replace").strip()
         stderr = err.decode("utf-8", errors="replace").strip()

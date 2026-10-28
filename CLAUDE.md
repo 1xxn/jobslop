@@ -12,6 +12,7 @@ application forms in a real Playwright browser. Claude is called through the loc
 uv sync                                   # Python deps (Python 3.12+)
 uv run jobslop install-browser            # Playwright Chromium, needed by browser tests
 uv run ruff check . && uv run ruff format --check .
+uv run mypy                               # types (default mode, config in pyproject.toml)
 uv run pytest -m "not live"               # full suite, ~2 min (real headless Chromium against tests/fixtures/site)
 uv run pytest tests/test_browser.py::test_name -m "not live"   # single test
 uv run pytest -m "not browser and not live"                    # fast subset without Chromium
@@ -23,8 +24,8 @@ npm run build                             # tsc + vite → writes ../src/jobslop
 npm run dev                               # :5173, proxies /api and /artifacts to :8765
 ```
 
-Before finishing any change, run all of: `ruff check`, `ruff format --check`, `pytest -m "not live"`,
-`npm run typecheck`, `npm test`, `npm run build`. CI (`.github/workflows/ci.yml`: lint incl. zizmor, tests on Ubuntu 3.12/3.14, Windows 3.12, macOS 3.13) fails if
+Before finishing any change, run all of: `ruff check`, `ruff format --check`, `mypy`, `pytest -m "not live"`,
+`npm run typecheck`, `npm test`, `npm run build`. CI (`.github/workflows/ci.yml`: lint incl. mypy and zizmor, tests on Ubuntu 3.12/3.14, Windows 3.12, macOS 3.13) fails if
 `src/jobslop/web/dist` differs from a fresh build – always commit the build output with frontend changes.
 
 `live` tests call the real Claude Code and spend the user's quota; they only run with `JOBSLOP_LIVE=1`.
