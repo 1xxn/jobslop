@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import math
+from urllib.parse import urlparse
 
 import respx
 from sqlalchemy import select
@@ -175,7 +176,7 @@ async def test_indeed_prefers_the_employer_link():
         postings = await source.fetch(client)
     assert len(fake.calls) == 2  # Indeed drosselt nicht: ein Suchbegriff pro Abfrage
     assert postings[0].url == "https://join.com/companies/beta/1-devops"
-    assert postings[0].extra["portal_url"].startswith("https://de.indeed.com")
+    assert urlparse(postings[0].extra["portal_url"]).hostname == "de.indeed.com"
     assert postings[0].remote and postings[0].posted == ""
 
 
