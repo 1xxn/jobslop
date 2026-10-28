@@ -85,19 +85,30 @@ async def test_parse_uses_subscription_cli(fake):
 
 async def test_parse_with_files_enables_read(fake, tmp_path):
     settings, calls = fake
-    cv = tmp_path / "Lebenslauf.pdf"
+    settings.ensure_dirs()
+    cv = settings.documents_dir / "Lebenslauf.pdf"
     cv.write_bytes(b"%PDF-1.4")
+    outside = (
+        tmp_path / "id_rsa.pdf"
+    )  # außerhalb des jobslop-Ordners: geht nie an Claude (CodeQL py/path-injection)
+    outside.write_bytes(b"geheim")
     llm = LLM(settings)
     await llm.parse(
         Answer,
         system="s",
-        content=[file_block(cv), {"type": "text", "text": "Seite"}, image_block(b"\xff\xd8jpeg")],
+        content=[
+            file_block(cv),
+            {"type": "text", "text": "Seite"},
+            image_block(b"\xff\xd8jpeg"),
+            file_block(outside),
+        ],
     )
     call = calls()[0]
     args = call["args"]
     assert args[args.index("--tools") + 1] == "Read"
     assert args[args.index("--allowedTools") + 1] == "Read(./**)"  # nur der Arbeitsordner, nie ~/.ssh & Co.
     assert "datei-1.pdf" in call["files"] and "screenshot-3.jpg" in call["files"]
+    assert "datei-4.pdf" not in call["files"]
     assert "datei-1.pdf" in call["stdin"] and "screenshot-3.jpg" in call["stdin"]
 
 
