@@ -34,6 +34,25 @@ def _is_aggregator(source: str) -> bool:
     return source.split(":", 1)[0] in AGGREGATOR_SOURCES
 
 
+_VAGUE_WORDS = {
+    "remote",
+    "anywhere",
+    "worldwide",
+    "global",
+    "home",
+    "office",
+    "homeoffice",
+    "flexible",
+    "various",
+}
+
+
+def _vague_location(location: str) -> bool:
+    """„Remote“, „Anywhere“, leer – kein Ort, der der Einordnung einer Jobbörse widersprechen könnte."""
+    words = [w for w in "".join(c if c.isalnum() else " " for c in location.lower()).split() if w]
+    return all(w in _VAGUE_WORDS for w in words)
+
+
 @dataclass
 class CrawlReport:
     run_id: int
@@ -160,6 +179,10 @@ async def run_crawl(
                 match_key(p.company, p.title): where for _src, p, where in kept if _is_aggregator(p.source)
             }
             for src, posting in off_location:
+                # Nennt das Board selbst ein Land (Echttest Recruitee: „Krakow, Poland“), gilt das – nur ein vages
+                # „Remote“ ohne Ort übernimmt die Einordnung der Jobbörse.
+                if not _vague_location(posting.location):
+                    continue
                 if (where := board_where.get(match_key(posting.company, posting.title))) is not None:
                     kept.append((src, posting, where))
                     report.rejected["Ort"] -= 1
@@ -286,6 +309,22 @@ def _upsert(
                 .scalars()
                 .first()
             )
+            if other is None and _is_aggregator(p.source):
+                # Jobbörsen führen dieselbe Stelle oft mehrfach (neu eingestellt, neue ID, Echttest: Indeed) – gleicher
+                # Ort heißt Dublette. Firmen-Boards bleiben außen vor: dort kann derselbe Titel an mehreren Orten stehen.
+                other = (
+                    s.execute(
+                        select(Job).where(
+                            Job.match_key == mk,
+                            Job.origin == "crawl",
+                            Job.source == p.source,
+                            Job.status == "open",
+                            Job.location == p.location,
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
             if other is not None and _is_aggregator(p.source):
                 report.rejected["Dublette"] += 1
                 return other.id, "duplicate"

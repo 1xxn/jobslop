@@ -523,3 +523,42 @@ async def test_enrich_batches_and_stops_at_limit(settings, config, profile):
     with session_scope(settings.db_path) as s:
         rated = [j for j in s.execute(select(Job)).scalars() if j.enrichment]
         assert len(rated) == ENRICH_BATCH and all(j.fit == 3 and j.workplace == "Hybrid" for j in rated)
+
+
+async def test_reposted_job_board_listing_is_a_duplicate(settings, config):
+    """Echttest: Indeed führte dieselbe Cosonic-Stelle zweimal (neue ID). Gleiche Börse, gleiche Firma, gleicher Titel
+    und Ort = eine Stelle; an einem anderen Ort bleibt es eine eigene."""
+    config = _config(config)
+    s = config.sources
+    s.greenhouse = s.ashby = s.lever = s.smartrecruiters = s.personio = s.workday = s.amazon_queries = []
+    s.arbeitnow, s.portals, s.arbeitsagentur, s.discover_boards = True, [], False, False
+    config.filters.onsite_locations = ["berlin", "hamburg"]
+    sre = ARBEITNOW["data"][0]
+    data = {
+        "data": [
+            sre,
+            sre | {"slug": "sre-acme-1-repost", "url": "https://www.arbeitnow.com/jobs/acme/sre-repost"},
+            sre
+            | {
+                "slug": "sre-acme-hh",
+                "url": "https://www.arbeitnow.com/jobs/acme/sre-hh",
+                "location": "Hamburg",
+            },
+        ],
+        "links": {},
+    }
+    with respx.mock(assert_all_called=False) as router:
+        router.get("https://www.arbeitnow.com/api/job-board-api").respond(json=data)
+        report = await run_crawl(settings, config, enrich=False, use_browser=False)
+    assert report.rejected["Dublette"] == 1
+    with session_scope(settings.db_path) as db:
+        places = sorted(j.location for j in db.execute(select(Job)).scalars() if j.title == sre["title"])
+    assert places == ["Berlin, Germany", "Hamburg, Germany"]
+
+
+def test_board_keeps_its_own_country_over_a_job_board_guess():
+    """Echttest Recruitee: „Krakow, Poland“ wurde über einen Himalayas-Eintrag („Remote, Worldwide“) zu Remote-DE."""
+    from jobslop.crawl.pipeline import _vague_location
+
+    assert _vague_location("") and _vague_location("Remote") and _vague_location("Anywhere / Remote")
+    assert not _vague_location("Krakow, Poland") and not _vague_location("Canada, Canada")

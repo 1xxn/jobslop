@@ -347,3 +347,52 @@ def test_cover_letter_upload_falls_back_to_the_cv_when_letters_are_off(profile):
     ]
     profile.documents.cover_letter = "auto"
     assert wants_cover_letter(plan(), profile, state) is True  # eingeschaltet: Anschreiben wird erzeugt
+
+
+def test_legal_roles_are_not_platform_jobs():
+    """Echttest: „Legal Counsel, EU Employment Law (Platform Workers)“ landete als Platform-Stelle in der Liste."""
+    cfg = search_config_from_preset(["cloud"], cities=["Berlin"])
+    assert not title_allowed("Legal Counsel, EU Employment Law (Platform Workers)", cfg)[0]
+    assert title_allowed("Platform Engineer (m/w/d)", cfg)[0]
+
+
+def test_confirmation_texts_from_the_live_test():
+    from jobslop.apply.planner import _CONFIRM_RX, confirmation_excerpt
+
+    for text in (
+        "Thanks for applying, we'll keep you on track.",  # Flix
+        "Application sent. You've applied to Zentso S GmbH.",  # JOIN
+        "Ihre Bewerbung wurde erfolgreich gesendet.",
+    ):
+        assert _CONFIRM_RX.search(text), text
+    page = "About Flix Locations Departments FlixBus Jobs Thanks for applying, we'll keep you on track. Back home"
+    assert confirmation_excerpt(page).startswith("Thanks for applying")
+
+
+def test_required_fields_count_only_in_the_submit_form():
+    """Echttest Arbeitnow: das Newsletter-Feld im Seitenfuß zählte als leeres Pflichtfeld der Bewerbung."""
+    from jobslop.apply.engine import missing_in_form
+    from jobslop.apply.extract import PageState
+
+    state = PageState(url="https://x", title="t")
+    state.fields = [
+        {
+            "id": "0-1",
+            "kind": "text",
+            "label": "First name",
+            "required": True,
+            "value": "Leon",
+            "form": "0:form0",
+        },
+        {
+            "id": "0-6",
+            "kind": "email",
+            "label": "Newsletter",
+            "required": True,
+            "value": "",
+            "form": "0:form1",
+        },
+    ]
+    state.buttons = [{"id": "0-17", "text": "Apply", "kind": "submit", "form": "0:form0"}]
+    assert missing_in_form(state, "0-17") == []
+    assert [f["id"] for f in missing_in_form(state, "")] == ["0-6"]  # ohne Formular-Bezug: alle wie bisher
