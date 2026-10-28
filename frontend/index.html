@@ -8,14 +8,7 @@
     <meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>jobslop</title>
-    <script>
-      // Theme vor dem ersten Paint setzen (kein Aufblitzen)
-      try {
-        const t = localStorage.getItem("jobslop.theme") || "system";
-        const dark = t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
-        document.documentElement.classList.toggle("dark", dark);
-      } catch {}
-    </script>
+    <script src="/theme.js"></script>
   </head>
   <body>
     <div id="root"></div>

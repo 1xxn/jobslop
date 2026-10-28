@@ -181,7 +181,7 @@ def open_claude_install() -> dict[str, Any]:
 def open_folder(path: Path) -> bool:
     with contextlib.suppress(OSError):
         if sys.platform == "win32":
-            os.startfile(str(path))  # type: ignore[attr-defined]
+            os.startfile(str(path))
             return True
         subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(path)])
         return True

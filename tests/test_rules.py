@@ -18,7 +18,7 @@ from jobslop.config import (
     search_config_from_preset,
 )
 from jobslop.db import Application, Exclusion, Job, get_engine, session_scope
-from jobslop.guard import check_job
+from jobslop.guard import check_job, excluded_job_ids, is_excluded
 from jobslop.importer import import_jobs
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -186,6 +186,58 @@ def test_settings_file_and_env_precedence(tmp_path, monkeypatch):
         assert "home" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("home darf nicht über das Dashboard änderbar sein")
+
+
+def test_existing_database_gets_new_indexes(tmp_path):
+    """Indizes kommen auch in Datenbanken an, deren Tabellen schon existieren (create_all legt sie dort nicht an) –
+    alte Dubletten verhindern den Start nicht (kein nachträglicher UNIQUE-Index)."""
+    db = tmp_path / "old.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY, fingerprint VARCHAR(64), match_key VARCHAR(300))")
+    con.execute("INSERT INTO jobs (fingerprint, match_key) VALUES ('fp', 'a'), ('fp', 'b')")
+    con.commit()
+    con.close()
+    get_engine(db)
+    con = sqlite3.connect(db)
+    names = {row[1] for row in con.execute("PRAGMA index_list(jobs)")}
+    con.close()
+    assert {"ix_jobs_state", "ix_jobs_first_seen"} <= names
+
+
+def test_bulk_exclusions_match_single_check(settings):
+    """Die schnelle Massenprüfung (Status-Abruf, Stellenliste) urteilt wie die Prüfung vor jeder Bewerbung."""
+    rules = [
+        ("company", "Acme GmbH"),
+        ("title", "werkstudent|praktikum"),
+        ("title", "senior ("),  # ungültiger Ausdruck: gilt als Text
+        ("url", "/blocked/"),
+        ("job", "3"),
+    ]
+    jobs = [
+        ("Acme Cloud", "Site Reliability Engineer", "https://a.example/1"),
+        ("Beta", "Werkstudent DevOps", "https://b.example/2"),
+        ("Gamma", "Platform Engineer", "https://c.example/3"),
+        ("Delta", "Senior (Lead) SRE", "https://d.example/4"),
+        ("Epsilon", "SRE", "https://e.example/blocked/5"),
+        ("Zeta", "SRE", "https://z.example/6"),
+    ]
+    with session_scope(settings.db_path) as s:
+        s.add_all(Exclusion(kind=k, value=v) for k, v in rules)
+        rows = [
+            Job(fingerprint=f"fp{i}", match_key="", source="t", company=c, title=t, url=u)
+            for i, (c, t, u) in enumerate(jobs)
+        ]
+        s.add_all(rows)
+        s.flush()
+        single = {j.id for j in rows if is_excluded(s, j)}
+        assert excluded_job_ids(s, rows) == single
+        assert {j.company for j in rows if j.id in single} == {
+            "Acme Cloud",
+            "Beta",
+            "Gamma",
+            "Delta",
+            "Epsilon",
+        }
 
 
 def test_legacy_home_is_migrated(tmp_path, monkeypatch):

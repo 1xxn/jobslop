@@ -127,6 +127,9 @@ FastAPI serves a JSON API and the pre-built React app. Security for a local serv
 - binds to `127.0.0.1` only,
 - rejects unknown `Host` headers (DNS rebinding),
 - requires `X-Jobslop: 1` on every mutating request (a foreign website cannot set it without a CORS preflight).
+- forbids framing (`X-Frame-Options: DENY`, `frame-ancestors 'none'`) and serves the UI with a Content-Security-Policy
+  that allows only its own scripts (`script-src 'self'`; the theme script is `public/theme.js`, not inline),
+- sends `nosniff` and `Referrer-Policy: no-referrer` on every response.
 
 Application runs are separate processes (`runner.py`) so a hanging page never blocks the UI. Prompts (questions,
 approvals, handoffs) are rows in the database that both sides poll. The autopilot scheduler runs inside the

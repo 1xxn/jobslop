@@ -9,7 +9,7 @@ import logging
 import shutil
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any, cast
 
 import typer
 from rich.console import Console
@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 
 from . import __version__
 from .classify import LEVEL_LABEL
-from .config import get_settings
+from .config import ApplyMode, get_settings
 from .db import Answer, Application, CrawlRun, Exclusion, Job, JobSnapshot, session_scope, utcnow
 from .guard import DONE_STATES
 from .runtime import Runtime, init_home
@@ -433,7 +433,7 @@ def _print_jobs(ids: list[int] | None = None, rows: list[Job] | None = None, tit
         # In schmalen Terminals bekäme der Titel sonst nur ein Zeichen pro Zeile.
         compact = console.width < 110
         t = Table(title=f"{title} ({len(rows)})", expand=True)
-        columns = [
+        columns: list[tuple[str, dict[str, Any]]] = [
             ("ID", {"justify": "right", "no_wrap": True}),
             ("Score", {"justify": "right", "no_wrap": True}),
             ("Rolle", {"no_wrap": True}),
@@ -636,7 +636,7 @@ def apply(
     force: Annotated[bool, typer.Option(help="Firmen-Limit und Offen-Status ignorieren")] = False,
 ) -> None:
     """Bewerbungen ausfüllen und – je nach Modus – absenden."""
-    from .apply.interact import ConsoleInteractor, DbInteractor, UnattendedInteractor
+    from .apply.interact import ConsoleInteractor, DbInteractor, Interactor, UnattendedInteractor
 
     r = rt()
     mode = mode or r.settings.apply_mode
@@ -661,6 +661,7 @@ def apply(
             console.print(f"[red]{escape(login.message)}[/red]")
             console.print("Ohne Claude geht nur der Regel-Planer für Standardfelder: [bold]--offline[/bold]")
             raise typer.Exit(1)
+    interactor: Interactor
     if unattended:
         interactor = UnattendedInteractor()
     elif via_dashboard:
@@ -702,8 +703,8 @@ def _run_apply(
             engine = r.engine(
                 browser=browser,
                 interactor=interactor,
-                mode=mode,
-                offline=offline,  # type: ignore[arg-type]
+                mode=cast(ApplyMode, mode),
+                offline=offline,
                 on_event=lambda m: console.print(f"  [dim]{escape(m)}[/dim]"),
             )
             outcomes = []
