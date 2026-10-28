@@ -3,10 +3,10 @@ import { extendTailwindMerge } from "tailwind-merge";
 import { hasMessage, type MessageKey } from "./messages";
 
 // Eigene Schriftstufen (styles.css → --text-*) bekannt machen: sonst hält tailwind-merge z. B. `text-body`
-// für eine Textfarbe und verwirft dafür `text-primary-fg`.
+// für eine Textfarbe und verwirft dafür `text-on-accent`.
 const twMerge = extendTailwindMerge({
   extend: {
-    theme: { text: ["caption", "footnote", "body", "headline", "title3", "title2", "title1", "large"] },
+    theme: { text: ["small", "meta", "body", "read", "heading", "title", "display"] },
   },
 });
 
@@ -39,9 +39,40 @@ export function formatDateTime(value: string | null | undefined, lang: string): 
   return d.toLocaleString(lang, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
+/** Zeitpunkt in der nahen Zukunft oder Vergangenheit: „heute 08:00“, „morgen 08:00“, „Mi. 08:00“, sonst Datum. */
+export function formatWhen(value: string | null | undefined, lang: string): string {
+  const d = parseDate(value);
+  if (!d) return "";
+  const time = d.toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit" });
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((startOf(d) - startOf(new Date())) / 86_400_000);
+  if (Math.abs(days) <= 1) {
+    return `${new Intl.RelativeTimeFormat(lang, { numeric: "auto" }).format(days, "day")} ${time}`;
+  }
+  if (Math.abs(days) < 7) return `${d.toLocaleDateString(lang, { weekday: "short" })} ${time}`;
+  return formatDateTime(value, lang);
+}
+
 export function formatDate(value: string | null | undefined, lang: string): string {
   const d = parseDate(value);
   return d ? d.toLocaleDateString(lang, { day: "numeric", month: "short", year: "numeric" }) : "";
+}
+
+/** Einträge nach Kalendertag gruppieren (Tagesname in der Sprache der Oberfläche), optional neueste zuerst. */
+export function groupByDay<T>(
+  items: T[],
+  ts: (item: T) => string | null | undefined,
+  lang: string,
+  newestFirst = false,
+): [string, T[]][] {
+  const time = (item: T) => parseDate(ts(item))?.getTime() ?? 0;
+  const sorted = newestFirst ? [...items].sort((a, b) => time(b) - time(a)) : items;
+  const days = new Map<string, T[]>();
+  for (const item of sorted) {
+    const day = parseDate(ts(item))?.toLocaleDateString(lang, { weekday: "long", day: "numeric", month: "long" }) ?? "";
+    days.set(day, [...(days.get(day) ?? []), item]);
+  }
+  return [...days];
 }
 
 export function percent(value: number, lang: string): string {
@@ -52,15 +83,6 @@ export function percent(value: number, lang: string): string {
 export function roleClass(category: string, roles: string[]): string {
   const idx = roles.indexOf(category);
   return `role-${idx < 0 ? 7 : idx % 7}`;
-}
-
-export function initials(name: string): string {
-  return name
-    .split(/[\s&,.-]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? "")
-    .join("");
 }
 
 export function hostOf(url: string): string {

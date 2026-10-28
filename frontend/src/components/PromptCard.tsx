@@ -1,181 +1,196 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CircleAlert, Hand, MessageCircleQuestion, MonitorSmartphone, Send, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { forwardRef, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { api, artifactUrl } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import type { MessageKey } from "@/lib/messages";
 import type { Prompt } from "@/lib/types";
-import { cn } from "@/lib/utils";
-import { Badge, Button, Card, Input, Select } from "./ui/primitives";
+import { cn, formatRelative } from "@/lib/utils";
+import { Dialog, DialogContent } from "./ui/overlays";
+import { Button, Card, Input, Select } from "./ui/primitives";
 
 function screenshotName(path: string | undefined): string {
   return path ? (path.split(/[\\/]/).pop() ?? "") : "";
 }
 
-export function PromptCard({ prompt, compact }: { prompt: Prompt; compact?: boolean }) {
-  const { t } = useI18n();
-  const qc = useQueryClient();
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [zoom, setZoom] = useState(false);
-  const send = useMutation({
-    mutationFn: (body: Parameters<typeof api.answerPrompt>[1]) => api.answerPrompt(prompt.id, body),
-    onSuccess: () => {
-      toast.success(t("prompt.sent"));
-      qc.invalidateQueries({ queryKey: ["status"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
+/** Kurzname der Rückfrage-Art für Listen: Freigabe, Rückfrage, Übergabe. */
+export const PROMPT_KIND: Record<Prompt["kind"], MessageKey> = {
+  confirm: "prompt.kind_confirm",
+  questions: "prompt.kind_questions",
+  handoff: "prompt.kind_handoff",
+};
 
-  const title = prompt.payload.title ?? "";
-  const icon =
-    prompt.kind === "questions" ? <MessageCircleQuestion /> : prompt.kind === "confirm" ? <ShieldCheck /> : <Hand />;
-  const heading =
-    prompt.kind === "questions"
-      ? t("prompt.questions")
-      : prompt.kind === "confirm"
-        ? t("prompt.confirm")
-        : t("prompt.handoff");
+const HEADING: Record<Prompt["kind"], MessageKey> = {
+  confirm: "prompt.confirm",
+  questions: "prompt.questions",
+  handoff: "prompt.handoff",
+};
 
-  return (
-    <Card className="overflow-hidden border-warning/40 animate-slide-up">
-      <div className="flex items-start gap-3 border-b border-border bg-warning-soft/60 px-5 py-3.5">
-        <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full bg-warning text-white [&_svg]:size-4">
-          {icon}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="text-headline font-semibold">{heading}</div>
-          <div className="truncate text-footnote text-fg-muted">{title}</div>
-        </div>
-        <Link
-          to={`/applications/${prompt.application_id}`}
-          className="shrink-0 text-footnote font-medium text-primary hover:underline"
-        >
-          {t("prompt.open_run")}
-        </Link>
-      </div>
+/**
+ * Das eine Objekt, an dem du gerade handelst: Freigabe vor dem Absenden, Rückfrage oder Übergabe – mit genau einer
+ * Hauptaktion. „Absenden“ bekommt bewusst kein Tastenkürzel.
+ */
+export const PromptCard = forwardRef<HTMLDivElement, { prompt: Prompt; showLink?: boolean; className?: string }>(
+  function PromptCard({ prompt, showLink = true, className }, ref) {
+    const { t, tp, lang } = useI18n();
+    const qc = useQueryClient();
+    const [answers, setAnswers] = useState<Record<string, string>>({});
+    const [shot, setShot] = useState(false);
+    const send = useMutation({
+      mutationFn: (body: Parameters<typeof api.answerPrompt>[1]) => api.answerPrompt(prompt.id, body),
+      onSuccess: () => {
+        toast.success(t("prompt.sent"));
+        qc.invalidateQueries({ queryKey: ["status"] });
+        qc.invalidateQueries({ queryKey: ["application", prompt.application_id] });
+      },
+      onError: (e: Error) => toast.error(e.message),
+    });
+    const questions = prompt.payload.questions ?? [];
+    const rows = prompt.payload.rows ?? [];
+    const screenshot = screenshotName(prompt.payload.screenshot);
+    const headingId = `prompt-${prompt.id}`;
 
-      {prompt.kind === "questions" && (
-        <form
-          className="space-y-4 px-5 py-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            send.mutate({ answers });
-          }}
-        >
-          <p className="text-footnote text-fg-muted">{t("prompt.questions_hint")}</p>
-          {(prompt.payload.questions ?? []).map((q) => (
-            <div key={q.field_id} className="space-y-1.5">
-              <label className="block text-[0.875rem] font-medium" htmlFor={`q-${prompt.id}-${q.field_id}`}>
-                {q.question}
-              </label>
-              {q.why && <p className="text-caption text-fg-subtle">{q.why}</p>}
-              {q.options.length > 0 ? (
-                <Select
-                  id={`q-${prompt.id}-${q.field_id}`}
-                  value={answers[q.field_id] ?? ""}
-                  onChange={(e) => setAnswers({ ...answers, [q.field_id]: e.target.value })}
-                >
-                  <option value="">{t("common.choose")}</option>
-                  {q.options.map((o) => (
-                    <option key={o}>{o}</option>
-                  ))}
-                </Select>
-              ) : (
-                <Input
-                  id={`q-${prompt.id}-${q.field_id}`}
-                  value={answers[q.field_id] ?? ""}
-                  onChange={(e) => setAnswers({ ...answers, [q.field_id]: e.target.value })}
-                />
-              )}
-            </div>
-          ))}
-          <div className="flex flex-wrap justify-end gap-2 pt-1">
-            <Button type="button" variant="ghost" onClick={() => send.mutate({ skip: true })} disabled={send.isPending}>
-              {t("prompt.skip")}
-            </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              loading={send.isPending}
-              disabled={(prompt.payload.questions ?? []).some((q) => !answers[q.field_id]?.trim())}
-            >
-              {t("prompt.answer")}
-            </Button>
+    return (
+      <Card ref={ref} tabIndex={-1} aria-labelledby={headingId} className={cn("px-5 py-4 focus:outline-none animate-slide-up", className)}>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-small text-ink-3">
+              {t(PROMPT_KIND[prompt.kind])} · {prompt.payload.title}
+              {prompt.created_at && <> · {formatRelative(prompt.created_at, lang)}</>}
+            </p>
+            <h2 id={headingId} className="mt-0.5 text-heading font-semibold">
+              {t(HEADING[prompt.kind])}
+            </h2>
           </div>
-        </form>
-      )}
+          {showLink && (
+            <Link
+              to={`/applications/${prompt.application_id}`}
+              className="shrink-0 text-meta font-medium text-accent hover:underline"
+            >
+              {t("prompt.open_run")}
+            </Link>
+          )}
+        </div>
 
-      {prompt.kind === "confirm" && (
-        <div className="px-5 py-4">
-          <div className={cn("grid gap-4", !compact && prompt.payload.screenshot && "md:grid-cols-[minmax(0,1fr)_280px]")}>
-            <div className="max-h-72 overflow-y-auto rounded-md border border-border">
-              <table className="w-full text-footnote">
-                <tbody>
-                  {(prompt.payload.rows ?? []).map((r, i) => (
-                    <tr key={`${r.label}-${i}`} className="border-b border-border last:border-0">
-                      <td className="w-2/5 px-3 py-2 align-top text-fg-muted">{r.label}</td>
-                      <td className="px-3 py-2 align-top break-words">
-                        {r.value || <span className="text-fg-subtle">–</span>}
-                        {r.confidence === "low" && (
-                          <Badge tone="warning" className="ml-2">
-                            <CircleAlert />
-                            {t("prompt.unsure")}
-                          </Badge>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {!compact && prompt.payload.screenshot && (
-              <button
-                type="button"
-                onClick={() => setZoom(!zoom)}
-                className="overflow-hidden rounded-md border border-border bg-surface-2"
-                aria-label={t("prompt.screenshot")}
+        {prompt.kind === "questions" && (
+          <form
+            className="mt-3 grid gap-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              send.mutate({ answers });
+            }}
+          >
+            <p className="text-meta text-ink-2">
+              {tp("prompt.questions_count", questions.length)} · {t("prompt.questions_hint")}
+            </p>
+            {questions.map((q) => (
+              <div key={q.field_id} className="grid gap-1">
+                <label className="text-body font-medium" htmlFor={`q-${prompt.id}-${q.field_id}`}>
+                  {q.question}
+                </label>
+                {q.why && <p className="text-small text-ink-3">{q.why}</p>}
+                {q.options.length > 0 ? (
+                  <Select
+                    id={`q-${prompt.id}-${q.field_id}`}
+                    value={answers[q.field_id] ?? ""}
+                    onChange={(e) => setAnswers({ ...answers, [q.field_id]: e.target.value })}
+                  >
+                    <option value="">{t("common.choose")}</option>
+                    {q.options.map((o) => (
+                      <option key={o}>{o}</option>
+                    ))}
+                  </Select>
+                ) : (
+                  <Input
+                    id={`q-${prompt.id}-${q.field_id}`}
+                    value={answers[q.field_id] ?? ""}
+                    onChange={(e) => setAnswers({ ...answers, [q.field_id]: e.target.value })}
+                  />
+                )}
+              </div>
+            ))}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button type="button" variant="quiet" onClick={() => send.mutate({ skip: true })} disabled={send.isPending}>
+                {t("prompt.skip")}
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                loading={send.isPending}
+                disabled={questions.some((q) => !answers[q.field_id]?.trim())}
               >
-                <img
-                  src={artifactUrl(prompt.application_id, screenshotName(prompt.payload.screenshot))}
-                  alt={t("prompt.screenshot")}
-                  className={cn("w-full object-cover object-top", zoom ? "max-h-none" : "max-h-72")}
-                />
-              </button>
+                {t("prompt.answer")}
+              </Button>
+            </div>
+          </form>
+        )}
+
+        {prompt.kind === "confirm" && (
+          <div className="mt-3">
+            <dl className="grid grid-cols-[minmax(7rem,2fr)_minmax(0,3fr)] border-t border-line text-meta">
+              {rows.map((r, i) => (
+                <div key={`${r.label}-${i}`} className="col-span-2 grid grid-cols-subgrid border-b border-line py-1.5">
+                  <dt className="pr-3 text-ink-2">{r.label}</dt>
+                  <dd className="[overflow-wrap:anywhere]">
+                    {r.value || <span className="text-ink-3">–</span>}
+                    {r.confidence === "low" && (
+                      <span className="ml-2 font-semibold whitespace-nowrap text-amber">? {t("prompt.unsure")}</span>
+                    )}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            <p className="mt-3 text-meta text-ink-2">
+              {t("prompt.confirm_hint")}
+              {screenshot && (
+                <>
+                  {" "}
+                  <button type="button" onClick={() => setShot(true)} className="font-medium text-accent hover:underline">
+                    {t("prompt.show_screenshot")}
+                  </button>
+                </>
+              )}
+            </p>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <Button variant="quiet" onClick={() => send.mutate({ decision: "reject" })} disabled={send.isPending}>
+                {t("prompt.reject")}
+              </Button>
+              <Button variant="secondary" onClick={() => send.mutate({ decision: "manual" })} disabled={send.isPending}>
+                {t("prompt.manual")}
+              </Button>
+              <Button variant="primary" onClick={() => send.mutate({ decision: "submit" })} loading={send.isPending}>
+                {t("prompt.submit")}
+              </Button>
+            </div>
+            {screenshot && (
+              <Dialog open={shot} onOpenChange={setShot}>
+                <DialogContent title={t("prompt.screenshot")} description={prompt.payload.title} wide>
+                  <img
+                    src={artifactUrl(prompt.application_id, screenshot)}
+                    alt={t("prompt.screenshot")}
+                    className="w-full rounded-md border border-line"
+                  />
+                </DialogContent>
+              </Dialog>
             )}
           </div>
-          <p className="mt-3 flex items-center gap-2 text-footnote text-fg-muted">
-            <MonitorSmartphone className="size-4" />
-            {t("prompt.confirm_hint")}
-          </p>
-          <div className="mt-4 flex flex-wrap justify-end gap-2">
-            <Button variant="ghost" onClick={() => send.mutate({ decision: "reject" })} disabled={send.isPending}>
-              {t("prompt.reject")}
-            </Button>
-            <Button variant="outline" onClick={() => send.mutate({ decision: "manual" })} disabled={send.isPending}>
-              {t("prompt.manual")}
-            </Button>
-            <Button variant="primary" onClick={() => send.mutate({ decision: "submit" })} loading={send.isPending}>
-              <Send />
-              {t("prompt.submit")}
-            </Button>
-          </div>
-        </div>
-      )}
+        )}
 
-      {prompt.kind === "handoff" && (
-        <div className="px-5 py-4">
-          <p className="text-body leading-relaxed">{prompt.payload.message}</p>
-          <div className="mt-4 flex flex-wrap justify-end gap-2">
-            <Button variant="ghost" onClick={() => send.mutate({ abort: true })} disabled={send.isPending}>
-              {t("prompt.abort")}
-            </Button>
-            <Button variant="primary" onClick={() => send.mutate({ done: true })} loading={send.isPending}>
-              {t("prompt.done")}
-            </Button>
+        {prompt.kind === "handoff" && (
+          <div className="mt-3">
+            <p className="text-read">{prompt.payload.message}</p>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <Button variant="quiet" onClick={() => send.mutate({ abort: true })} disabled={send.isPending}>
+                {t("prompt.abort")}
+              </Button>
+              <Button variant="primary" onClick={() => send.mutate({ done: true })} loading={send.isPending}>
+                {t("prompt.done")}
+              </Button>
+            </div>
           </div>
-        </div>
-      )}
-    </Card>
-  );
-}
+        )}
+      </Card>
+    );
+  },
+);

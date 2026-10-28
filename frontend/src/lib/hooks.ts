@@ -1,6 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { toast } from "sonner";
 import { api } from "./api";
+import { useI18n } from "./i18n";
 import type { Status } from "./types";
 
 /** Live-Zustand (Rückfragen, laufende Prozesse) – alle 3 Sekunden. */
@@ -75,4 +77,41 @@ export function useDebounced<T>(value: T, ms = 250): T {
     return () => clearTimeout(id);
   }, [value, ms]);
   return v;
+}
+
+/** Trifft die Media Query gerade zu? (z. B. breit genug für Liste und Stelle nebeneinander) */
+export function useMediaQuery(query: string): boolean {
+  const subscribe = useCallback(
+    (notify: () => void) => {
+      const m = matchMedia(query);
+      m.addEventListener("change", notify);
+      return () => m.removeEventListener("change", notify);
+    },
+    [query],
+  );
+  return useSyncExternalStore(subscribe, () => matchMedia(query).matches, () => false);
+}
+
+/** Neue Stellen suchen – mit Rückmeldung; im Demo-Modus sagt der Fehler-Toast, warum nicht. */
+export function useCrawl() {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.crawl,
+    onSuccess: (r) => {
+      toast(r.started ? t("crawl.started") : t("crawl.running"));
+      qc.invalidateQueries({ queryKey: ["status"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+}
+
+/** Einen Autopilot-Lauf sofort starten. */
+export function useAutopilotRun() {
+  const { t } = useI18n();
+  return useMutation({
+    mutationFn: api.autopilotRun,
+    onSuccess: () => toast(t("autopilot.started")),
+    onError: (e: Error) => toast.error(e.message),
+  });
 }
