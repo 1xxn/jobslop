@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, FileText, Plus, Trash2, Upload } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ChipsInput, Switch } from "@/components/ui/controls";
+import { ChipsInput, Switch, SwitchRow } from "@/components/ui/controls";
 import { Button, SectionBody, SectionHeader, Field, Input, Select, Textarea } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -206,6 +206,14 @@ export function ProfileForm({
                 <option value="en">English</option>
               </Select>
             </Field>
+            <div className="sm:col-span-2">
+              <SwitchRow
+                title={t("profile.tailor_cv")}
+                description={t("profile.tailor_cv_hint")}
+                checked={!!p.documents.tailor_cv}
+                onCheckedChange={(v) => set("documents", { ...p.documents, tailor_cv: v })}
+              />
+            </div>
             <Field label={t("profile.diversity")} hint={t("profile.diversity_hint")}>
               <Select
                 value={p.preferences.diversity_questions}

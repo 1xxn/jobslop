@@ -78,6 +78,11 @@ submit, no double submit, confirmation detection, loop/step limits). Stopping co
 `guard.check_job` (exclusions, duplicates across sources, per-company window) runs before every application.
 LinkedIn/Indeed URLs (`HANDOFF_HOSTS`) and aggregator pages are handed off to the user, never automated.
 
+**CV per job** (`apply/tailor.py`, opt-in `documents.tailor_cv`): Claude reorders the CV for a posting,
+`fact_check` (no Claude) rejects anything not in profile/CV; cached per job in `tailored/job-<id>/`. Engine, extension
+and dashboard preview share `ensure_tailored_cv`. **Inbox** (`inbox.py`, opt-in IMAP, read-only via `EXAMINE` +
+`BODY.PEEK`): `related()` filters locally, only application mail goes to Claude; suggestions are `InboxMessage` rows.
+
 **Human in the loop** (`apply/interact.py`): the engine talks to an `Interactor` – terminal implementation for
 the CLI, and a DB-backed one for the dashboard where questions/approvals/handoffs are `Prompt` rows that both the
 runner process and the web UI poll. Answers go into the answer bank (`Answer`) and are reused.
@@ -102,7 +107,8 @@ on every mutating request (CSRF). Apply runs are separate processes managed by `
 API client and types in `lib/api.ts` / `lib/types.ts`; all UI strings live in `lib/messages.ts` in German and
 English and the type checker enforces both languages exist. Design tokens are in `styles.css` (paper/ink neutrals, one
 petrol accent for "your turn"); build pages from `components/ui` (`Section`, `StickyBar`, `Field`, …) and status as
-`StatusLabel` – no cards for layout, no coloured pills. Shortcuts go through `lib/hotkeys.ts`. Backend texts that reach the UI carry a code + params
+`StatusLabel` – no cards for layout, no coloured pills. Shortcuts go through `lib/hotkeys.ts`. API errors are `Problem(status, "api.<code>", …)`
+and show as translated toasts via the shared mutation error handler (no per-mutation `onError` toasts). Backend texts that reach the UI carry a code + params
 (`record(..., code=..., **params)`, `guard.Verdict.code/params`) translated via `be.<code>` keys in
 `lib/backendText.ts`; plain German text is only the fallback. Pages are lazy-loaded in `App.tsx`.
 

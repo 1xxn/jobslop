@@ -9,12 +9,13 @@ import { Button, Card, EmptyState, rowHover, Section, Skeleton } from "@/compone
 import { api } from "@/lib/api";
 import { useStatus } from "@/lib/hooks";
 import { useI18n } from "@/lib/i18n";
-import type { ApplicationSummary, Prompt } from "@/lib/types";
+import type { ApplicationSummary, Prompt, Reply } from "@/lib/types";
 import { cn, formatDate, formatRelative } from "@/lib/utils";
 import { useReportError } from "@/lib/backendText";
 
 type Item =
   | { key: string; kind: "prompt"; prompt: Prompt }
+  | { key: string; kind: "reply"; reply: Reply }
   | { key: string; kind: "followup"; app: ApplicationSummary };
 
 // Reihenfolge: Freigaben (der Browser wartet) → Rückfragen (der Lauf wartet) → Übergaben → fälliges Nachfassen
@@ -37,9 +38,11 @@ export function TodayPage() {
     );
     return [
       ...prompts.map((p) => ({ key: `p${p.id}`, kind: "prompt" as const, prompt: p })),
+      // Antworten aus dem Postfach vor dem Nachfassen: wer geantwortet hat, braucht keine Erinnerung mehr
+      ...(status?.replies ?? []).map((r) => ({ key: `r${r.id}`, kind: "reply" as const, reply: r })),
       ...(pipeline.data?.follow_ups_due ?? []).map((a) => ({ key: `f${a.id}`, kind: "followup" as const, app: a })),
     ];
-  }, [status?.prompts, pipeline.data]);
+  }, [status?.prompts, status?.replies, pipeline.data]);
 
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const focus = items.find((i) => i.key === focusKey) ?? items[0];
@@ -83,6 +86,7 @@ export function TodayPage() {
       {pipeline.isError && <LoadError error={pipeline.error} onRetry={() => pipeline.refetch()} />}
 
       {focus?.kind === "prompt" && <PromptCard ref={focusRef} key={focus.key} prompt={focus.prompt} />}
+      {focus?.kind === "reply" && <ReplyCard ref={focusRef} key={focus.key} reply={focus.reply} />}
       {focus?.kind === "followup" && <FollowUpCard ref={focusRef} key={focus.key} app={focus.app} />}
 
       <div className="mt-8 grid gap-10">
@@ -171,7 +175,9 @@ function QueueRow({ item, onPick }: { item: Item; onPick: () => void }) {
   const title =
     item.kind === "prompt"
       ? t(PROMPT_KIND[item.prompt.kind])
-      : t("followup.with", { company: item.app.company });
+      : item.kind === "reply"
+        ? t(`reply.${item.reply.kind}`, { company: item.reply.company })
+        : t("followup.with", { company: item.app.company });
   const meta =
     item.kind === "prompt"
       ? [
@@ -180,14 +186,18 @@ function QueueRow({ item, onPick }: { item: Item; onPick: () => void }) {
         ]
           .filter(Boolean)
           .join(" · ")
-      : item.app.title;
+      : item.kind === "reply"
+        ? item.reply.title
+        : item.app.title;
   return (
     <button
       type="button"
       onClick={onPick}
       className={cn(rowHover, "grid w-[calc(100%+1rem)] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-2.5 text-left")}
     >
-      <StatusGlyph status={item.kind === "prompt" ? "needs_input" : "submitted"} />
+      <StatusGlyph
+        status={item.kind === "prompt" ? "needs_input" : item.kind === "reply" ? REPLY_STATUS[item.reply.kind] : "submitted"}
+      />
       <span className="min-w-0">
         <span className="block truncate font-semibold">{title}</span>
         <span className="block truncate text-meta text-ink-2">{meta}</span>
@@ -200,9 +210,69 @@ function QueueRow({ item, onPick }: { item: Item; onPick: () => void }) {
       >
         {item.kind === "prompt"
           ? formatRelative(item.prompt.created_at, lang)
-          : t("followup.due", { when: formatRelative(item.app.follow_up_at, lang) })}
+          : item.kind === "reply"
+            ? formatRelative(item.reply.received_at, lang)
+            : t("followup.due", { when: formatRelative(item.app.follow_up_at, lang) })}
       </span>
     </button>
+  );
+}
+
+const REPLY_STATUS = { rejection: "rejected", interview: "interview", offer: "offer" } as const;
+
+/** Antwort aus dem Postfach als Fokus-Karte: den vorgeschlagenen Stand übernehmen (mit Rückgängig) oder ignorieren. */
+function ReplyCard({ reply, ref }: { reply: Reply; ref?: Ref<HTMLDivElement> }) {
+  const { t, lang } = useI18n();
+  const qc = useQueryClient();
+  const reportError = useReportError();
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["status"] });
+    qc.invalidateQueries({ queryKey: ["pipeline"] });
+    qc.invalidateQueries({ queryKey: ["applications"] });
+  };
+  const act = useMutation({
+    mutationFn: (action: "apply" | "dismiss") => api.inboxAction(reply.id, action),
+    onSuccess: (r, action) => {
+      refresh();
+      if (action === "apply")
+        toast(t("reply.applied", { company: reply.company }), {
+          action: {
+            label: t("common.undo"),
+            onClick: () => api.patchApplication(r.application_id, { status: r.previous_status }).then(refresh, reportError),
+          },
+        });
+    },
+  });
+  const headingId = `reply-${reply.id}`;
+  const status = REPLY_STATUS[reply.kind];
+  return (
+    <Card ref={ref} tabIndex={-1} aria-labelledby={headingId} className="px-5 py-4 focus:outline-none animate-slide-up">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-small text-ink-3">
+            {t("reply.kind")} · {reply.title} · {formatRelative(reply.received_at, lang)}
+          </p>
+          <h2 id={headingId} className="mt-0.5 text-heading font-semibold">
+            {t(`reply.${reply.kind}`, { company: reply.company })}
+          </h2>
+        </div>
+        <Link to={`/applications/${reply.application_id}`} className="shrink-0 text-meta font-medium text-accent hover:underline">
+          {t("prompt.open_run")}
+        </Link>
+      </div>
+      {reply.summary && <p className="mt-2 text-read">{reply.summary}</p>}
+      <p className="mt-2 text-meta text-ink-2 [overflow-wrap:anywhere]">
+        {reply.subject} · {reply.sender}
+      </p>
+      <div className="mt-4 flex flex-wrap justify-end gap-2">
+        <Button variant="secondary" onClick={() => act.mutate("dismiss")} disabled={act.isPending}>
+          {t("reply.dismiss")}
+        </Button>
+        <Button variant="primary" onClick={() => act.mutate("apply")} loading={act.isPending}>
+          {t("reply.apply", { status: t(`status.${status}`) })}
+        </Button>
+      </div>
+    </Card>
   );
 }
 

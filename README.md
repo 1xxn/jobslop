@@ -52,6 +52,8 @@ jobslop does the copy‑pasting. You keep the deciding.
 | 🤖 **Autopilot** | Searches on a schedule, queues the best matches and applies – in the dashboard or via Task Scheduler/cron. |
 | 🔔 **Notifications** | Browser notifications, plus push to your phone via [ntfy](https://ntfy.sh) or any webhook (Discord, Slack, Home Assistant). |
 | 🗂️ **Applications** | Every application grouped by stage (or as a drag‑and‑drop board), notes, follow‑up dates, response and interview rates. |
+| 📄 **CV per job** | Optional: Claude orders your CV by what the posting asks for and renders a clean, ATS-readable PDF. A fact check removes every number, company or skill that isn't in your profile or CV – and falls back to your original CV when in doubt. Preview it in the job before applying. |
+| 📬 **Replies from your inbox** | Optional, read-only IMAP: rejections, invitations and offers are matched to your applications and wait on *Today* for one click. Only mail from companies you applied to (or from applicant tracking systems) goes to Claude; nothing is marked read, moved or deleted. |
 | 🔗 **Add any job by link** | Paste a URL – jobslop reads title, company and location (schema.org JobPosting first, Claude only if needed). |
 | 🧩 **Browser extension** | Fills forms in your own Chrome where an automated browser gets stuck (bot checks, logins) – incl. LinkedIn/Indeed Easy Apply if you allow it. Nothing is sent without your click. |
 | 🛡️ **Guard rails** | Company limits, exclusions, duplicate detection, no double submissions, approval before every submit, LinkedIn/Indeed only opt‑in with a daily limit. |

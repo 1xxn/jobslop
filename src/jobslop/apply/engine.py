@@ -8,6 +8,7 @@ import json
 import logging
 import random
 import re
+import shutil
 import traceback
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager
@@ -39,6 +40,7 @@ from .planner import (
     guard_submit_clicks,
 )
 from .prepare import dismiss_cookie_banners, reveal_lazy_content, try_autofill
+from .tailor import CV_TOKENS, ensure_tailored_cv, wants_cv
 
 log = logging.getLogger(__name__)
 
@@ -78,6 +80,8 @@ class _Run:
     vision_forced: bool = False
     seen_urls: set[str] = field(default_factory=set)
     autofill_tried: set[str] = field(default_factory=set)
+    cv_checked: bool = False  # Lebenslauf je Stelle nur einmal pro Bewerbung versuchen
+    tailored_cv: Path | None = None
 
 
 def slugify(text: str) -> str:
@@ -336,6 +340,8 @@ class ApplyEngine:
 
             if wants_cover_letter(plan, self.profile):
                 await self._ensure_cover_letter(run)
+            if not run.cv_checked and wants_cv(plan.actions):
+                await self._ensure_tailored_cv(run)
 
             self._guard_submit_clicks(run, state, plan)
             results = await Executor(page, self.files).run(state, plan.actions)
@@ -348,7 +354,7 @@ class ApplyEngine:
                         "field_id": r.field_id,
                         "label": r.label,
                         "action": r.action,
-                        "value": r.value if r.value != "@cover_letter" else "(Anschreiben)",
+                        "value": self._shown_value(run, r.value),
                         "ok": r.ok,
                         "detail": r.detail,
                         "source": a.source if a else "",
@@ -529,6 +535,43 @@ class ApplyEngine:
             self._event(
                 run.app_id, "cover_letter", "Anschreiben erstellt", {"pdf": str(self.files.cover_letter_pdf)}
             )
+
+    async def _ensure_tailored_cv(self, run: _Run) -> None:
+        run.cv_checked = True
+
+        @contextlib.asynccontextmanager
+        async def pdf_context() -> AsyncIterator[Any]:
+            ctx = await self.browser.pdf_context()
+            try:
+                yield ctx
+            finally:
+                await ctx.close()
+
+        pdf, note = await ensure_tailored_cv(
+            self.llm,
+            self.profile,
+            run.job,
+            self.settings.home,
+            self.settings.profile_path.parent,
+            self.files,
+            pdf_context,
+        )
+        if pdf:
+            run.tailored_cv = pdf
+            shutil.copy2(pdf, run.artdir / pdf.name)  # gehört zu den Belegen dieser Bewerbung
+            self._event(run.app_id, "tailored_cv", "Lebenslauf für die Stelle verwendet", {"pdf": pdf.name})
+        elif note:
+            run.history.append(note)
+            self._event(run.app_id, "tailored_cv", note)
+
+    @staticmethod
+    def _shown_value(run: _Run, value: str) -> str:
+        """Was in der Freigabe als Wert erscheint: Platzhalter werden zu lesbaren Dokumentnamen."""
+        if value == "@cover_letter":
+            return "(Anschreiben)"
+        if run.tailored_cv and value.strip().lower() in CV_TOKENS:
+            return f"({run.tailored_cv.name})"
+        return value
 
     async def _handoff(self, run: _Run, page: Any, title: str, message: str) -> Any:
         self._event(run.app_id, "handoff", message)
