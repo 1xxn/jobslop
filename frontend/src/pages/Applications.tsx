@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { ApplicationsSummary, PageHeader, StatusGlyph } from "@/components/domain";
+import { ApplicationsSummary, LoadError, PageHeader, StatusGlyph } from "@/components/domain";
 import { Segmented } from "@/components/ui/controls";
 import { Button, EmptyState, rowHover, SearchInput, Skeleton } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
@@ -71,13 +71,7 @@ function ApplicationList() {
     );
   }
   if (apps.isError) {
-    return (
-      <EmptyState
-        title={t("apps.load_error")}
-        description={t("jobs.load_error_hint")}
-        action={<Button size="sm" onClick={() => apps.refetch()}>{t("common.retry")}</Button>}
-      />
-    );
+    return <LoadError title={t("apps.load_error")} error={apps.error} onRetry={() => apps.refetch()} />;
   }
   if (!apps.data?.length && !upNext.length && !q) {
     return (

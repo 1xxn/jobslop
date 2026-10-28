@@ -4,7 +4,7 @@ import { type KeyboardEvent, type MouseEvent, type ReactNode, useEffect, useMemo
 import { useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { AddJobDialog, ApplyDialog } from "@/components/actions";
-import { PageHeader, Score, StatusLabel } from "@/components/domain";
+import { LoadError, PageHeader, Score, StatusLabel } from "@/components/domain";
 import { type Decisions, DecisionButtons, JobDetail } from "@/components/JobDetail";
 import { nextSearchText } from "@/components/layout/run";
 import { QueueBar } from "@/components/QueueBar";
@@ -27,6 +27,7 @@ import { useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
 import type { JobDetail as JobFull, JobSummary, JobView } from "@/lib/types";
 import { cn, formatRelative } from "@/lib/utils";
+import { useReportError } from "@/lib/backendText";
 
 const VIEWS: { id: JobView; label: MessageKey }[] = [
   { id: "triage", label: "jobs.view_triage" },
@@ -131,12 +132,17 @@ export function JobsPage() {
 
   type Done = { action: Action; ids: number[]; exclusions: number[] };
   const lastAction = useRef<Done | null>(null);
+  const reportError = useReportError();
   const undo = async (done: Done | null) => {
     if (!done) return;
     if (lastAction.current === done) lastAction.current = null;
-    if (done.action === "exclude") await Promise.all(done.exclusions.map((id) => api.deleteExclusion(id)));
-    else if (INVERSE[done.action]) await api.bulk(done.ids, INVERSE[done.action] as Action);
-    toast(t("decide.undone"));
+    try {
+      if (done.action === "exclude") await Promise.all(done.exclusions.map((id) => api.deleteExclusion(id)));
+      else if (INVERSE[done.action]) await api.bulk(done.ids, INVERSE[done.action] as Action);
+      toast(t("decide.undone"));
+    } catch (e) {
+      reportError(e);
+    }
     refresh();
   };
   const act = useMutation({
@@ -155,7 +161,6 @@ export function JobsPage() {
       toast(message, { action: { label: t("common.undo"), onClick: () => void undo(done) } });
       setSelection(new Set());
     },
-    onError: (e: Error) => toast.error(e.message),
   });
 
   /** Ziel einer Entscheidung: die Mehrfachauswahl, sonst die offene Stelle. */
@@ -184,15 +189,19 @@ export function JobsPage() {
     act.mutate({ action, ids, title });
   };
   const restore = async (job: JobSummary) => {
-    const own = (await api.exclusions()).filter((e) => e.kind === "job" && e.value === String(job.id));
-    if (!own.length) {
-      toast(t("decide.rule_excluded"), {
-        action: { label: t("decide.edit_rules"), onClick: () => navigate("/settings/exclusions") },
-      });
-      return;
+    try {
+      const own = (await api.exclusions()).filter((e) => e.kind === "job" && e.value === String(job.id));
+      if (!own.length) {
+        toast(t("decide.rule_excluded"), {
+          action: { label: t("decide.edit_rules"), onClick: () => navigate("/settings/exclusions") },
+        });
+        return;
+      }
+      await Promise.all(own.map((e) => api.deleteExclusion(e.id)));
+      toast(t("decide.restored", { title: job.title }));
+    } catch (e) {
+      reportError(e);
     }
-    await Promise.all(own.map((e) => api.deleteExclusion(e.id)));
-    toast(t("decide.restored", { title: job.title }));
     refresh();
   };
   const decisions: Decisions = {
@@ -291,7 +300,6 @@ export function JobsPage() {
       toast.success(tp("queue.added", r.changed.length));
       refresh();
     },
-    onError: (e: Error) => toast.error(e.message),
   });
 
   const counts = jobs.data?.counts;
@@ -393,11 +401,7 @@ export function JobsPage() {
             <div className={cn("min-w-0", split && "border-r border-line pr-4")}>
               {jobs.isLoading && <ListSkeleton />}
               {jobs.isError && (
-                <EmptyState
-                  title={t("jobs.load_error")}
-                  description={t("jobs.load_error_hint")}
-                  action={<Button size="sm" onClick={() => jobs.refetch()}>{t("common.retry")}</Button>}
-                />
+                <LoadError title={t("jobs.load_error")} error={jobs.error} onRetry={() => jobs.refetch()} />
               )}
               {jobs.data && items.length === 0 && (
                 <ViewEmpty view={view} filtered={filtered} onReset={() => (setQ(""), setCategory([]), setWhere(""), setStretch(false))} />

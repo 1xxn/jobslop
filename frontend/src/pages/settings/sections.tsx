@@ -7,7 +7,7 @@ import {
 import { type ReactNode, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
-import { StatusGlyph } from "@/components/domain";
+import { LoadError, Pending, StatusGlyph } from "@/components/domain";
 import { SwitchRow } from "@/components/ui/controls";
 import { Dialog, DialogContent } from "@/components/ui/overlays";
 import {
@@ -19,7 +19,6 @@ import {
   Field,
   Input,
   Select,
-  Skeleton,
   Textarea,
 } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
@@ -27,6 +26,7 @@ import { useI18n } from "@/lib/i18n";
 import type { Answer, ApplyMode, Exclusion, Settings } from "@/lib/types";
 import { cn, formatRelative } from "@/lib/utils";
 import { SaveBar } from "./SaveBar";
+import { useStatus } from "@/lib/hooks";
 
 function useSettingsForm() {
   const { t } = useI18n();
@@ -48,22 +48,22 @@ function useSettingsForm() {
       setDirty(false);
       toast.success(t("common.saved"));
     },
-    onError: (e: Error) => toast.error(e.message),
   });
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => {
     setS((prev) => (prev ? { ...prev, [k]: v } : prev));
     setDirty(true);
   };
   const bar = <SaveBar dirty={dirty} saving={save.isPending} onSave={() => save.mutate()} onReset={() => setDirty(false)} />;
-  return { s, set, bar };
+  const pending = <Pending query={data} className="h-80 rounded-lg" />;
+  return { s, set, bar, pending };
 }
 
 /* ----------------------------------------------------------------- Bewerben */
 
 export function ApplySettings() {
   const { t } = useI18n();
-  const { s, set, bar } = useSettingsForm();
-  if (!s) return <Skeleton className="h-80 rounded-lg" />;
+  const { s, set, bar, pending } = useSettingsForm();
+  if (!s) return pending;
   return (
     <div className="space-y-10">
       <section>
@@ -131,8 +131,8 @@ export function ApplySettings() {
 /* ----------------------------------------------------------------- Browser-Erweiterung */
 
 export function ExtensionSettings() {
-  const { s, set, bar } = useSettingsForm();
-  if (!s) return <Skeleton className="h-80 rounded-lg" />;
+  const { s, set, bar, pending } = useSettingsForm();
+  if (!s) return pending;
   return (
     <div className="space-y-10">
       <ExtensionSection
@@ -166,7 +166,6 @@ function ExtensionSection({
       qc.setQueryData(["extension"], r);
       toast.success(t("ext.installed"));
     },
-    onError: (e: Error) => toast.error(e.message),
   });
   const folder = useMutation({ mutationFn: api.openExtensionFolder });
   const x = info.data;
@@ -174,6 +173,7 @@ function ExtensionSection({
     <section>
       <p className="max-w-prose text-meta text-ink-2">{t("ext.hint")}</p>
       <SectionBody className="space-y-4">
+        {info.isError && <LoadError error={info.error} onRetry={() => info.refetch()} />}
         {x && (
           <StatusLine
             ok={x.installed && !x.outdated}
@@ -219,8 +219,8 @@ function ExtensionSection({
 
 export function AutopilotSettings() {
   const { t } = useI18n();
-  const { s, set, bar } = useSettingsForm();
-  if (!s) return <Skeleton className="h-80 rounded-lg" />;
+  const { s, set, bar, pending } = useSettingsForm();
+  if (!s) return pending;
   const days = [t("day.mon"), t("day.tue"), t("day.wed"), t("day.thu"), t("day.fri"), t("day.sat"), t("day.sun")];
   return (
     <div className="space-y-10">
@@ -307,14 +307,14 @@ export function AutopilotSettings() {
 
 export function NotificationSettings() {
   const { t } = useI18n();
-  const { s, set, bar } = useSettingsForm();
+  const { s, set, bar, pending } = useSettingsForm();
   const [permission, setPermission] = useState(typeof Notification !== "undefined" ? Notification.permission : "denied");
   const test = useMutation({
     mutationFn: () => fetch("/api/notify/test", { method: "POST", headers: { "X-Jobslop": "1" } }).then((r) => r.json()),
     onSuccess: (r: { sent: number }) =>
       r.sent ? toast.success(t("notify.test_ok", { n: r.sent })) : toast(t("notify.test_none")),
   });
-  if (!s) return <Skeleton className="h-80 rounded-lg" />;
+  if (!s) return pending;
   return (
     <div className="space-y-10">
       <section>
@@ -355,6 +355,93 @@ export function NotificationSettings() {
           <Button variant="secondary" size="sm" onClick={() => test.mutate()} loading={test.isPending}>
             {t("notify.test")}
           </Button>
+        </SectionBody>
+      </section>
+      {bar}
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------------- Postfach */
+
+/** Antworten aus dem Postfach: IMAP nur lesend, Vorschläge erscheinen unter „Heute“. */
+export function InboxSettings() {
+  const { t, lang } = useI18n();
+  const { data: status } = useStatus();
+  const { s, set, bar, pending } = useSettingsForm();
+  const test = useMutation({
+    mutationFn: api.inboxTest,
+    onSuccess: (r) => toast.success(t("inbox.test_ok", { n: r.messages })),
+  });
+  const qc = useQueryClient();
+  const check = useMutation({
+    mutationFn: api.inboxCheck,
+    onSuccess: (r) => {
+      toast(r.suggested ? t("inbox.check_found", { n: r.suggested }) : t("inbox.check_none", { n: r.checked }));
+      qc.invalidateQueries({ queryKey: ["status"] });
+    },
+  });
+  if (!s) return pending;
+  const inbox = status?.inbox;
+  return (
+    <div className="space-y-10">
+      <section>
+        <SectionHeader title={t("inbox.title")} description={t("inbox.hint")} />
+        <SectionBody className="space-y-4">
+          <SwitchRow
+            title={t("inbox.enabled")}
+            description={t("inbox.privacy")}
+            checked={s.inbox_enabled}
+            onCheckedChange={(v) => set("inbox_enabled", v)}
+          />
+          <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_7rem]">
+            <Field label={t("inbox.host")} hint={t("inbox.host_hint")}>
+              <Input
+                value={s.inbox_host}
+                placeholder="imap.gmail.com"
+                onChange={(e) => set("inbox_host", e.target.value.trim())}
+              />
+            </Field>
+            <Field label={t("inbox.port")}>
+              <Input
+                type="number"
+                value={s.inbox_port}
+                onChange={(e) => set("inbox_port", Number(e.target.value) || 993)}
+              />
+            </Field>
+          </div>
+          <Field label={t("inbox.user")}>
+            <Input
+              type="email"
+              autoComplete="off"
+              value={s.inbox_user}
+              onChange={(e) => set("inbox_user", e.target.value.trim())}
+            />
+          </Field>
+          <Field label={t("inbox.password")} hint={t("inbox.password_hint")}>
+            <Input
+              type="password"
+              autoComplete="new-password"
+              value={s.inbox_password}
+              placeholder={s.inbox_password_set ? t("inbox.password_saved") : ""}
+              onChange={(e) => set("inbox_password", e.target.value)}
+            />
+          </Field>
+          <Field label={t("inbox.folder")}>
+            <Input value={s.inbox_folder} onChange={(e) => set("inbox_folder", e.target.value)} />
+          </Field>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={() => test.mutate()} loading={test.isPending}>
+              {t("inbox.test")}
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => check.mutate()} loading={check.isPending}>
+              {t("inbox.check")}
+            </Button>
+            {inbox?.checked_at && !inbox.error && (
+              <span className="text-meta text-ink-3">{t("inbox.checked", { when: formatRelative(inbox.checked_at, lang) })}</span>
+            )}
+          </div>
+          {inbox?.error && <p className="text-meta text-danger [overflow-wrap:anywhere]">{inbox.error}</p>}
         </SectionBody>
       </section>
       {bar}
@@ -468,7 +555,6 @@ export function ExclusionSettings() {
       setValue("");
       qc.invalidateQueries({ queryKey: ["exclusions"] });
     },
-    onError: (e: Error) => toast.error(e.message),
   });
   const remove = useMutation({
     mutationFn: api.deleteExclusion,
@@ -496,7 +582,9 @@ export function ExclusionSettings() {
             {t("common.add")}
           </Button>
         </form>
-        {rows.data?.length === 0 ? (
+        {rows.isError ? (
+          <LoadError error={rows.error} onRetry={() => rows.refetch()} />
+        ) : rows.data?.length === 0 ? (
           <EmptyState title={t("excl.empty")} />
         ) : (
           <ul className="divide-y divide-line border-y border-line">
@@ -541,7 +629,7 @@ export function SystemSettings() {
       navigate("/setup");
     },
   });
-  if (!sys.data) return <Skeleton className="h-80 rounded-lg" />;
+  if (!sys.data) return <Pending query={sys} className="h-80 rounded-lg" />;
   const s = sys.data;
   return (
     <div className="space-y-6">
