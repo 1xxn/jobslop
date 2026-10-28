@@ -24,11 +24,94 @@ from .db import Job, JobSnapshot, session_scope
 
 log = logging.getLogger(__name__)
 
-_LD_RX = re.compile(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', re.I | re.S)
-_META_RX = re.compile(
-    r'<meta[^>]+(?:property|name)=["\']([^"\']+)["\'][^>]+content=["\']([^"\']*)["\']', re.I
-)
-_TITLE_RX = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+
+_MAX_HTML = 3_000_000  # Stellenseiten sind weit kleiner; mehr wird nicht gelesen
+_WS = " \t\r\n\f"
+
+
+@dataclass
+class _Head:
+    """JSON-LD-Blöcke, Meta-Angaben und Titel einer fremden Seite. Gelesen wird mit str.find in linearer Zeit und
+    ohne Regex – Regexes und (auf manchen Python-Versionen) html.parser ließen sich mit präpariertem HTML ausbremsen
+    (CodeQL py/polynomial-redos)."""
+
+    ld: list[str]
+    meta: dict[str, str]
+    title: str
+
+
+def _open_tags(html: str, low: str, name: str) -> Any:
+    """Öffnende Tags <name …>: (Tag-Text, Position hinter „>“). Jedes Zeichen wird höchstens einmal überflogen."""
+    needle, pos = "<" + name, 0
+    while (start := low.find(needle, pos)) != -1:
+        after = start + len(needle)
+        if after < len(low) and low[after] not in _WS + "/>":  # <scripts, <metadata …
+            pos = after
+            continue
+        end = low.find(">", after)
+        if end == -1:
+            return
+        yield html[start : end + 1], end + 1
+        pos = end + 1
+
+
+def _attr(tag: str, name: str) -> str:
+    """Wert eines Attributs im Tag-Text (Anführungszeichen optional), ohne Regex."""
+    low, i = tag.lower(), 0
+    while (i := low.find(name, i)) != -1:
+        k = i + len(name)
+        if i > 0 and low[i - 1] in _WS:
+            while k < len(low) and low[k] in _WS:
+                k += 1
+            if k < len(low) and low[k] == "=":
+                k += 1
+                while k < len(low) and low[k] in _WS:
+                    k += 1
+                if k < len(tag) and tag[k] in "\"'":
+                    close = tag.find(tag[k], k + 1)
+                    return unescape(tag[k + 1 : close]) if close != -1 else ""
+                stop = k
+                while stop < len(tag) and tag[stop] not in _WS + ">":
+                    stop += 1
+                return unescape(tag[k:stop])
+        i += len(name)
+    return ""
+
+
+def _head(html: str) -> _Head:
+    html = html[:_MAX_HTML]
+    low = html.lower()
+    ld: list[str] = []
+    pos = 0
+    while (start := low.find("<script", pos)) != -1:
+        tag_end = low.find(">", start)
+        if tag_end == -1:
+            break
+        close = low.find("</script", tag_end)
+        if close == -1:
+            break
+        if "application/ld+json" in low[start:tag_end]:
+            ld.append(html[tag_end + 1 : close])
+        pos = close + 8  # hinter „</script“ weiter – Inhalt nie doppelt durchsuchen
+    meta: dict[str, str] = {}
+    for tag, _after in _open_tags(html, low, "meta"):
+        key = (_attr(tag, "property") or _attr(tag, "name")).lower()
+        if key and key not in meta and " content" in tag.lower().replace("\n", " ").replace("\t", " "):
+            meta[key] = _attr(tag, "content")
+    title = ""
+    for _tag, after in _open_tags(html, low, "title"):
+        close = low.find("</title", after)
+        if close != -1:
+            title = " ".join(unescape(html[after:close]).split())
+        break
+    return _Head(ld, meta, title)
+
+
+def _site_title(title: str) -> str:
+    """„Platform Engineer | Acme – Karriere“ → „Platform Engineer“ (ohne Regex)."""
+    title = " ".join(title.split())
+    cuts = [i for sep in (" | ", " – ", " - ") if (i := title.find(sep)) > 0]
+    return title[: min(cuts)].strip() if cuts else title
 
 
 @dataclass
@@ -86,7 +169,8 @@ def _location(posting: dict[str, Any]) -> str:
 
 def parse_html(url: str, html: str) -> FetchedJob:
     job = FetchedJob(url=url)
-    for raw in _LD_RX.findall(html):
+    head = _head(html)
+    for raw in head.ld:
         try:
             data = json.loads(raw.strip())
         except json.JSONDecodeError:
@@ -107,9 +191,9 @@ def parse_html(url: str, html: str) -> FetchedJob:
         job.via = "jsonld"
         if job.title:
             return job
-    meta = {k.lower(): unescape(v) for k, v in _META_RX.findall(html)}
-    title = meta.get("og:title") or (unescape(m.group(1)).strip() if (m := _TITLE_RX.search(html)) else "")
-    job.title = re.split(r"\s+[|–-]\s+", title)[0].strip() if title else ""
+    meta = head.meta
+    title = meta.get("og:title") or head.title
+    job.title = _site_title(title) if title else ""
     job.company = meta.get("og:site_name", "")
     job.description = meta.get("og:description") or meta.get("description", "")
     job.via = "meta"
