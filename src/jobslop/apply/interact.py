@@ -172,7 +172,8 @@ class DbInteractor:
             app_id, "confirm", {"title": title, "rows": rows, "screenshot": str(screenshot or "")}
         )
         resp = await self._wait(pid)
-        return (resp or {}).get("decision", "reject")
+        # Keine Antwort in der Wartezeit: wie Ablehnen nichts absenden – aber als solches erkennbar melden
+        return "timeout" if resp is None else resp.get("decision", "reject")
 
     async def handoff(self, app_id: int, title: str, message: str, check: Check | None = None) -> bool:
         pid = self._create(app_id, "handoff", {"title": title, "message": message})

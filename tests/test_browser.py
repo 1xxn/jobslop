@@ -11,7 +11,7 @@ from conftest import ScriptedInteractor, add_job
 from jobslop.apply.engine import ApplyEngine, BrowserSession
 from jobslop.apply.executor import Executor, Files
 from jobslop.apply.extract import extract_state
-from jobslop.apply.planner import FieldAction, HeuristicPlanner, JobContext
+from jobslop.apply.planner import FieldAction, HeuristicPlanner, JobContext, PagePlan
 from jobslop.apply.prepare import dismiss_cookie_banners, reveal_lazy_content, try_autofill
 from jobslop.apply.tailor import fingerprint, sources_for, tailored_dir
 from jobslop.db import Answer, Application, ApplicationEvent, Job, session_scope
@@ -482,3 +482,132 @@ async def test_engine_uploads_the_cv_tailored_for_the_job(settings, site, profil
         assert "tailored_cv" in kinds
         assert (Path(app.artifacts_dir) / "Lebenslauf_Max_Mustermann.pdf").is_file()
         assert any(r["value"] == "(Lebenslauf_Max_Mustermann.pdf)" for r in app.filled)
+
+
+async def test_engine_continues_when_login_popup_closes_itself(settings, site, profile, config):
+    """Echttest JOIN: „Apply now“ öffnet kurz ein Fenster, das sich selbst schließt – die Bewerbung geht im
+    ursprünglichen Tab weiter, statt mit TargetClosedError abzubrechen."""
+    job_id = add_job(settings, f"{site.base_url}/popup_posting.html", "Popup GmbH", "Infrastructure Engineer")
+    before = len(site.submissions)
+    async with BrowserSession(settings, headless=True) as browser:
+        outcome = await _engine(settings, config, profile, browser).apply(job_id)
+    assert outcome.status == "submitted", outcome.message
+    assert site.submissions[before]["vorname"] == "Max"
+
+
+async def test_browser_restarts_after_the_window_was_closed(settings):
+    """Echttest: Wurde Chromium geschlossen, scheiterten alle weiteren Bewerbungen des Laufs sofort."""
+    async with BrowserSession(settings, headless=True) as browser:
+        await browser.context.close()  # wie: Fenster von Hand geschlossen
+        page = await browser.new_page()
+        await page.set_content("<p>wieder da</p>")
+        assert await page.inner_text("p") == "wieder da"
+
+
+async def test_upload_through_a_dropzone_that_ignores_the_hidden_input(settings, site, profile):
+    """Echttest JOIN: Die Drop-Zone übernimmt nur Dateien aus ihrer eigenen Dateiauswahl – das direkt gesetzte versteckte
+    Feld lief ins Leere, „Continue“ blieb grau und jobslop lud viermal hoch."""
+    session, page = await _page(settings)
+    try:
+        await page.goto(f"{site.base_url}/dropzone.html")
+        state = await extract_state(page)
+        upload = next(f for f in state.fields if f["kind"] == "file")
+        action = FieldAction(
+            field_id=upload["id"],
+            action="upload",
+            value="@cv",
+            confidence="high",
+            source="profile",
+            reason="t",
+        )
+        results = await Executor(page, Files(cv=profile.cv_path(settings.home))).run(state, [action])
+        assert results[0].ok, results[0].detail
+        assert await page.inner_text("#label") == "Max_Mustermann_CV.pdf"
+        assert await page.is_visible("#confirm")  # jetzt muss nur noch bestätigt werden
+    finally:
+        await session.__aexit__(None, None, None)
+
+
+class _JoinLikePlanner:
+    """Plant wie Claude im JOIN-Echttest: hochladen + warten, dann „Confirm“ klicken und weiter, dann Ende."""
+
+    cv_text = ""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def remember(self, *_args) -> None:
+        pass
+
+    async def plan(self, inp) -> PagePlan:
+        self.calls += 1
+        st = inp.state
+
+        def act(fid: str, action: str, value: str = "") -> FieldAction:
+            return FieldAction(
+                field_id=fid, action=action, value=value, confidence="high", source="policy", reason="t"
+            )
+
+        if self.calls == 1:
+            upload = next(f for f in st.fields if f["kind"] == "file")
+            return PagePlan(
+                page_kind="application_form",
+                actions=[act(upload["id"], "upload", "@cover_letter_pdf")],
+                open_questions=[],
+                next_step="wait_for_user",
+                next_target_id="",
+                summary="hochladen, dann bestätigen",
+            )
+        if self.calls == 2:
+            confirm = next(b for b in st.buttons if b["text"] == "Confirm")
+            nxt = next(b for b in st.buttons if b["text"] == "Continue")
+            return PagePlan(
+                page_kind="application_form",
+                actions=[act(confirm["id"], "click")],
+                open_questions=[],
+                next_step="click_next",
+                next_target_id=nxt["id"],
+                summary="bestätigen, weiter",
+            )
+        return PagePlan(
+            page_kind="closed_or_error",
+            actions=[],
+            open_questions=[],
+            next_step="abort",
+            next_target_id="",
+            summary="Ende des Tests",
+        )
+
+
+class _CountingInteractor(ScriptedInteractor):
+    def __init__(self) -> None:
+        super().__init__({})
+        self.handoffs: list[str] = []
+
+    async def handoff(self, app_id, title, message, check=None) -> bool:
+        self.handoffs.append(message)
+        return True
+
+
+async def test_wait_with_actions_runs_them_before_handing_off(settings, site, profile, config):
+    """Echttest JOIN: Der Plan „Anschreiben hochladen, dann warten“ führte zur Übergabe, ohne hochzuladen. Jetzt wird
+    erst hochgeladen, danach „Confirm“ geklickt – ganz ohne Übergabe. Anschreiben aus: der Lebenslauf geht hoch."""
+    job_id = add_job(settings, f"{site.base_url}/dropzone.html", "Join GmbH", "Infrastructure Engineer")
+    profile.documents.cover_letter = "none"
+    interactor = _CountingInteractor()
+    async with BrowserSession(settings, headless=True) as browser:
+        engine = ApplyEngine(
+            settings=settings,
+            config=config,
+            profile=profile,
+            planner=_JoinLikePlanner(),
+            interactor=interactor,
+            browser=browser,
+            mode="review",
+        )
+        outcome = await engine.apply(job_id)
+    assert interactor.handoffs == []
+    assert outcome.status == "failed" and "Ende des Tests" in outcome.message
+    with session_scope(settings.db_path) as s:
+        filled = s.get(Application, outcome.application_id).filled
+    assert [(r["action"], r["ok"]) for r in filled] == [("upload", True), ("click", True)]
