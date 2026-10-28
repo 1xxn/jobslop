@@ -21,8 +21,11 @@ def split_city(value: str) -> tuple[str, str]:
     """„10115 Berlin, Deutschland“ → ("Berlin", "10115"): nur der Ort, Land und PLZ getrennt. Formulare und der
     Ortsfilter der Suche erwarten den reinen Ortsnamen."""
     city = value.split(",")[0].strip()
-    m = re.match(r"^(\d{4,5})\s+(.+)$", city)
-    return (m.group(2).strip(), m.group(1)) if m else (city, "")
+    # ohne Regex: „\s+(.+)“ wäre bei vielen Leerzeichen polynomiell (CodeQL py/polynomial-redos)
+    head, _, rest = city.partition(" ")
+    if head.isdigit() and len(head) in (4, 5) and rest.strip():
+        return rest.strip(), head
+    return city, ""
 
 
 def web_url(value: str) -> str:
