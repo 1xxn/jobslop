@@ -41,7 +41,6 @@ export function ApplyDialog({
       onOpenChange(false);
       run.open();
     },
-    onError: (e: Error) => toast.error(e.message),
   });
   const modes: { value: ApplyMode; title: string; text: string }[] = [
     { value: "review", title: t("mode.review"), text: t("mode.review_text") },
@@ -130,7 +129,6 @@ export function AddJobDialog({ open, onOpenChange }: { open: boolean; onOpenChan
       setUrl("");
       navigate(`/jobs?job=${r.id}`);
     },
-    onError: (e: Error) => toast.error(e.message),
   });
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -189,14 +187,23 @@ export function RunnerPanel({ className }: { className?: string }) {
     if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 80) el.scrollTop = el.scrollHeight;
   }, [log]);
   const r = runner.data;
+  const crashed = !!r && !r.active && !r.stopped && !!r.returncode;
+  const headline = r?.active
+    ? t("runner.active", { label: r.label })
+    : crashed
+      ? t("runner.crashed", { code: r.returncode ?? "" })
+      : r?.stopped
+        ? t("runner.was_stopped")
+        : t("runner.idle");
   return (
     <div className={cn("grid gap-3", className)}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <StatusGlyph status={r?.active ? "running" : "skipped"} className={cn(r?.active && "animate-pulse-slow")} />
-          <span className="truncate text-body font-semibold">
-            {r?.active ? t("runner.active", { label: r.label }) : t("runner.idle")}
-          </span>
+          <StatusGlyph
+            status={r?.active ? "running" : crashed ? "failed" : "skipped"}
+            className={cn(r?.active && "animate-pulse-slow")}
+          />
+          <span className={cn("truncate text-body font-semibold", crashed && "text-danger")}>{headline}</span>
           {r?.started_at && (
             <span className="shrink-0 text-small text-ink-3">
               {r.active ? formatRelative(r.started_at, lang) : formatRelative(r.finished_at ?? r.started_at, lang)}

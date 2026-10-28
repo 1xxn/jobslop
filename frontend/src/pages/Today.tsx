@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type Ref, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
-import { ApplicationsSummary, PageHeader, Score, StatusGlyph } from "@/components/domain";
+import { ApplicationsSummary, LoadError, PageHeader, Score, StatusGlyph } from "@/components/domain";
 import { PROMPT_KIND, PromptCard } from "@/components/PromptCard";
 import { nextSearchText } from "@/components/layout/run";
 import { Button, Card, EmptyState, rowHover, Section, Skeleton } from "@/components/ui/primitives";
@@ -11,6 +11,7 @@ import { useStatus } from "@/lib/hooks";
 import { useI18n } from "@/lib/i18n";
 import type { ApplicationSummary, Prompt } from "@/lib/types";
 import { cn, formatDate, formatRelative } from "@/lib/utils";
+import { useReportError } from "@/lib/backendText";
 
 type Item =
   | { key: string; kind: "prompt"; prompt: Prompt }
@@ -79,6 +80,8 @@ export function TodayPage() {
         </p>
       )}
 
+      {pipeline.isError && <LoadError error={pipeline.error} onRetry={() => pipeline.refetch()} />}
+
       {focus?.kind === "prompt" && <PromptCard ref={focusRef} key={focus.key} prompt={focus.prompt} />}
       {focus?.kind === "followup" && <FollowUpCard ref={focusRef} key={focus.key} app={focus.app} />}
 
@@ -113,6 +116,7 @@ export function TodayPage() {
           }
         >
           {fresh.isLoading && <Skeleton className="mt-3 h-24" />}
+          {fresh.isError && <LoadError error={fresh.error} onRetry={() => fresh.refetch()} />}
           {fresh.data?.items.length === 0 && (
             <EmptyState
               title={t("today.all_reviewed")}
@@ -206,6 +210,7 @@ function QueueRow({ item, onPick }: { item: Item; onPick: () => void }) {
 function FollowUpCard({ app, ref }: { app: ApplicationSummary; ref?: Ref<HTMLDivElement> }) {
   const { t, lang } = useI18n();
   const qc = useQueryClient();
+  const reportError = useReportError();
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["pipeline"] });
     qc.invalidateQueries({ queryKey: ["status"] });
@@ -213,7 +218,6 @@ function FollowUpCard({ app, ref }: { app: ApplicationSummary; ref?: Ref<HTMLDiv
   const patch = useMutation({
     mutationFn: (body: Parameters<typeof api.patchApplication>[1]) => api.patchApplication(app.id, body),
     onSuccess: refresh,
-    onError: (e: Error) => toast.error(e.message),
   });
   const done = () =>
     patch.mutate(
@@ -223,7 +227,8 @@ function FollowUpCard({ app, ref }: { app: ApplicationSummary; ref?: Ref<HTMLDiv
           toast(t("followup.done_toast"), {
             action: {
               label: t("common.undo"),
-              onClick: () => api.patchApplication(app.id, { follow_up_at: app.follow_up_at }).then(refresh),
+              onClick: () =>
+                api.patchApplication(app.id, { follow_up_at: app.follow_up_at }).then(refresh, reportError),
             },
           }),
       },
