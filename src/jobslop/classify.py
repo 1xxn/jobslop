@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import html
 import re
 import unicodedata
+from collections.abc import Callable
 from html.parser import HTMLParser
 from typing import Any, ClassVar
 
@@ -31,15 +33,24 @@ def _norm(text: str) -> str:
 
 
 def _contains_term(text: str, term: str) -> bool:
+    test = _term_test(term)
+    return test is not None and test(text)
+
+
+@functools.lru_cache(maxsize=4096)
+def _term_test(term: str) -> Callable[[str], bool] | None:
+    """Prüfung für einen Suchbegriff, einmal gebaut: Ein Crawl prüft Tausende Titel gegen dieselben Begriffe."""
     term = term.lower().strip()
     if not term:
-        return False
+        return None
     if re.fullmatch(r"[a-z0-9]+", term) and len(term) <= 4:
-        return re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text) is not None
+        whole = re.compile(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])")
+        return lambda text: whole.search(text) is not None
     if len(re.split(r"[\s\-]", term, maxsplit=1)[0]) <= 3:
         # "it engineer" darf nicht in "audit engineer" treffen; lange Begriffe dürfen in Komposita stecken
-        return re.search(rf"(?<![a-z0-9]){re.escape(term)}", text) is not None
-    return term in text
+        start = re.compile(rf"(?<![a-z0-9]){re.escape(term)}")
+        return lambda text: start.search(text) is not None
+    return lambda text: term in text
 
 
 def level_of(title: str, filters: FilterConfig) -> str:
