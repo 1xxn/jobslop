@@ -1,6 +1,17 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
-import { type KeyboardEvent, type MouseEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { AddJobDialog, ApplyDialog } from "@/components/actions";
@@ -243,6 +254,13 @@ export function JobsPage() {
     }
     setActive(id);
   };
+  // Gleichbleibender Klick-Handler für alle Zeilen: Sonst rendert jede Bewegung (J/K, Klick) die ganze Liste neu –
+  // bei 600 Zeilen ~30 ms pro Tastendruck.
+  const rowClick = useRef(onRowClick);
+  useLayoutEffect(() => {
+    rowClick.current = onRowClick;
+  });
+  const onRow = useCallback((e: MouseEvent, id: number) => rowClick.current(e, id), []);
   /** Zeile mit dem Tastaturfokus (schmal bewegen die Pfeile nur den Fokus, Enter öffnet). */
   const focusedId = () => {
     const id = (document.activeElement as HTMLElement | null)?.id ?? "";
@@ -424,7 +442,7 @@ export function JobsPage() {
                       active={job.id === activeId}
                       selected={multi && selection.has(job.id)}
                       focusable={activeIndex < 0 ? i === 0 : job.id === activeId}
-                      onClick={(e) => onRowClick(e, job.id)}
+                      onClick={onRow}
                     />
                   ))}
                 </ul>
@@ -534,7 +552,8 @@ function Picker({ label, value, children }: { label: string; value: string; chil
   );
 }
 
-function JobRow({
+/** Eine Zeile der Liste – nur neu gerendert, wenn sich ihre Stelle oder ihr Zustand ändert. */
+const JobRow = memo(function JobRow({
   job,
   view,
   lang,
@@ -549,7 +568,7 @@ function JobRow({
   active: boolean;
   selected: boolean;
   focusable: boolean;
-  onClick: (e: MouseEvent) => void;
+  onClick: (e: MouseEvent, id: number) => void;
 }) {
   const { t } = useI18n();
   const meta = [
@@ -567,7 +586,7 @@ function JobRow({
       role="option"
       aria-selected={selected || active}
       tabIndex={focusable ? 0 : -1}
-      onClick={onClick}
+      onClick={(e) => onClick(e, job.id)}
       className={cn(
         "relative grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-line px-3 py-2.5 transition-colors duration-[120ms] hover:bg-sunken focus-visible:-outline-offset-2",
         selected && "bg-accent-soft hover:bg-accent-soft",
@@ -589,7 +608,7 @@ function JobRow({
       <Score score={job.score} />
     </li>
   );
-}
+});
 
 function ListSkeleton() {
   return (
