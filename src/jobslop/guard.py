@@ -86,18 +86,34 @@ def excluded_job_ids(session: Session, jobs: Iterable[Any]) -> set[int]:
     if not rules:
         return set()
     companies = [key for ex in rules if ex.kind == "company" and (key := company_key(ex.value))]
-    job_ids = {ex.value for ex in rules if ex.kind == "job"}
+    # Als Zahl vergleichen spart str() pro Stelle; „7“ trifft Stelle 7, „007“ wie bisher nicht
+    job_ids = {
+        int(v)
+        for ex in rules
+        if ex.kind == "job" and (v := ex.value).isascii() and v.isdigit() and str(int(v)) == v
+    }
     titles = [_title_test(ex.value) for ex in rules if ex.kind == "title"]
     urls = [ex.value.lower() for ex in rules if ex.kind == "url"]
+    # Titel und Firmen wiederholen sich (dieselbe Firma, „DevOps Engineer (m/w/d)“ bei vielen) – jedes Ergebnis nur
+    # einmal berechnen; das waren zwei Drittel eines Status-Abrufs
+    title_hit: dict[str, bool] = {}
+    company_hit: dict[str, bool] = {}
 
     def hit(job: Any) -> bool:
-        if str(job.id) in job_ids or any(test(job.title) for test in titles):
+        if job.id in job_ids:
             return True
+        if titles:
+            if (by_title := title_hit.get(job.title)) is None:
+                by_title = title_hit[job.title] = any(test(job.title) for test in titles)
+            if by_title:
+                return True
         if urls and any(u in job.url.lower() for u in urls):
             return True
         if companies:
-            key = company_key(job.company)
-            return any(c in key for c in companies)
+            if (by_company := company_hit.get(job.company)) is None:
+                key = company_key(job.company)
+                by_company = company_hit[job.company] = any(c in key for c in companies)
+            return by_company
         return False
 
     return {j.id for j in jobs if hit(j)}

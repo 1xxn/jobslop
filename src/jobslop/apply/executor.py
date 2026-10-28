@@ -239,7 +239,9 @@ class Executor:
         tag = await loc.evaluate("e => e.tagName")
         if tag == "INPUT":
             try:
-                await loc.set_checked(checked, timeout=5000)
+                # Ein normales Input ist sofort klickbar; nur visuell versteckte (1 px, eigene Radio-Optik wie bei
+                # Greenhouse) warten hier vergeblich – mit 5 s Wartezeit kostete das jede solche Option 5 s.
+                await loc.set_checked(checked, timeout=1000)
             except Exception:
                 # Visuell versteckte Inputs: über das Label klicken
                 await loc.evaluate(
@@ -294,14 +296,16 @@ class Executor:
         if is_file_input:
             multiple = await loc.evaluate("e => e.multiple")
             chosen = paths if multiple else paths[:1]
-            before = await self._page_text()
-            await loc.set_input_files([str(p) for p in chosen], timeout=10_000)
-            await asyncio.sleep(1.2)
             # Nur versteckte Felder hinter einer Drop-Zone (z. B. JOIN) brauchen die Rückfallebene. Ein sichtbares Feld
-            # zeigt den Dateinamen selbst an (nicht im Seitentext) – dort bleibt die Datei einfach gesetzt.
-            hidden = not await loc.is_visible()
-            if hidden and not multiple and not await self._shows_files(chosen, before):
-                await self._upload_via_zone(loc, chosen)
+            # zeigt den Dateinamen selbst an (nicht im Seitentext) – dort bleibt die Datei einfach gesetzt, und die
+            # zusätzliche Wartezeit für die Prüfung entfällt.
+            hidden = not multiple and not await loc.is_visible()
+            before = await self._page_text() if hidden else ""
+            await loc.set_input_files([str(p) for p in chosen], timeout=10_000)
+            if hidden:
+                await asyncio.sleep(1.2)  # der Seite Zeit geben, die Datei anzuzeigen
+                if not await self._shows_files(chosen, before):
+                    await self._upload_via_zone(loc, chosen)
         else:
             async with self.page.expect_file_chooser(timeout=8000) as fc_info:
                 await loc.click()

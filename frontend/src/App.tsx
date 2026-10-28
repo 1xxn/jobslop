@@ -1,4 +1,4 @@
-import { lazy, type ReactNode, Suspense, useEffect } from "react";
+import { type ReactNode, useEffect } from "react";
 import { createBrowserRouter, Navigate, RouterProvider, useLocation, useRouteError } from "react-router";
 import { Toaster } from "sonner";
 import { AppShell } from "./components/layout/AppShell";
@@ -9,15 +9,17 @@ import { useErrorText } from "./lib/backendText";
 import { useStatus } from "./lib/hooks";
 import { useI18n } from "./lib/i18n";
 
-// Jede Seite ist ein eigener Chunk – geladen wird nur, was du öffnest.
-const ApplicationDetailPage = lazy(() =>
-  import("./pages/ApplicationDetail").then((m) => ({ default: m.ApplicationDetailPage })),
-);
-const ApplicationsPage = lazy(() => import("./pages/Applications").then((m) => ({ default: m.ApplicationsPage })));
-const JobsPage = lazy(() => import("./pages/Jobs").then((m) => ({ default: m.JobsPage })));
-const TodayPage = lazy(() => import("./pages/Today").then((m) => ({ default: m.TodayPage })));
-const SettingsPage = lazy(() => import("./pages/settings/Settings").then((m) => ({ default: m.SettingsPage })));
-const SetupWizard = lazy(() => import("./pages/setup/SetupWizard").then((m) => ({ default: m.SetupWizard })));
+// Jede Seite ist ein eigener Chunk – geladen wird nur, was du öffnest. Der Router lädt ihn, bevor er die Seite zeigt
+// (route.lazy): Mit React.lazy zeigte Suspense erst einen Platzhalter, und React 19 gibt den Inhalt danach frühestens
+// nach 300 ms frei – jeder Start und jedes Neuladen wartete so 300 ms, obwohl der Chunk nach 10 ms da war.
+const pages = {
+  applicationDetail: async () => ({ Component: (await import("./pages/ApplicationDetail")).ApplicationDetailPage }),
+  applications: async () => ({ Component: (await import("./pages/Applications")).ApplicationsPage }),
+  jobs: async () => ({ Component: (await import("./pages/Jobs")).JobsPage }),
+  today: async () => ({ Component: (await import("./pages/Today")).TodayPage }),
+  settings: async () => ({ Component: (await import("./pages/settings/Settings")).SettingsPage }),
+  setup: async () => ({ Component: (await import("./pages/setup/SetupWizard")).SetupWizard }),
+};
 
 function FullPageSpinner() {
   return (
@@ -97,11 +99,8 @@ const router = createBrowserRouter([
         <RouteError />
       </div>
     ),
-    element: (
-      <Suspense fallback={<FullPageSpinner />}>
-        <SetupWizard />
-      </Suspense>
-    ),
+    lazy: pages.setup,
+    HydrateFallback: FullPageSpinner,
   },
   {
     element: (
@@ -109,6 +108,7 @@ const router = createBrowserRouter([
         <AppShell />
       </Gated>
     ),
+    HydrateFallback: FullPageSpinner,
     errorElement: (
       <div className="px-4 sm:px-6">
         <RouteError />
@@ -119,15 +119,15 @@ const router = createBrowserRouter([
         // Abstürze einer Seite landen hier – innerhalb der Hülle, die Navigation bleibt
         errorElement: <RouteError />,
         children: [
-          { index: true, element: <TodayPage /> },
-          { path: "jobs", element: <JobsPage /> },
+          { index: true, lazy: pages.today },
+          { path: "jobs", lazy: pages.jobs },
           // alte Adressen: Pipeline ist jetzt die Board-Ansicht der Bewerbungen, Aktivität das Protokoll
           { path: "pipeline", element: <Navigate to="/applications?view=board" replace /> },
-          { path: "applications", element: <ApplicationsPage /> },
-          { path: "applications/:id", element: <ApplicationDetailPage /> },
+          { path: "applications", lazy: pages.applications },
+          { path: "applications/:id", lazy: pages.applicationDetail },
           { path: "activity", element: <Navigate to="/settings/log" replace /> },
-          { path: "settings", element: <SettingsPage /> },
-          { path: "settings/:tab", element: <SettingsPage /> },
+          { path: "settings", lazy: pages.settings },
+          { path: "settings/:tab", lazy: pages.settings },
           { path: "*", element: <Navigate to="/" replace /> },
         ],
       },
