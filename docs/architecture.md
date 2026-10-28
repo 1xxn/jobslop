@@ -41,6 +41,26 @@ Everything lives in `~/.jobslop` (override with `JOBSLOP_HOME`):
 
 New columns are added automatically on start (`db._add_missing_columns`), so upgrades never need a manual migration.
 
+### Database performance
+
+SQLite runs in WAL mode with `synchronous=FULL` (set explicitly: a submitted application must survive a power cut,
+otherwise the next run could apply twice) and reads through a 256 MB memory map (`mmap_size`; writes still go through
+the WAL). A job row stores its description (several KB) before `status`, `queued`, `starred` and `first_seen`, so
+reading those columns from the table means reading the row's overflow pages. Queries that touch every job therefore
+read them from their indexes instead:
+
+- `/api/jobs` reads plain rows (id, company, title, url, category, level, score) for counts and views, the state from
+  `ix_jobs_state` and the date from `ix_jobs_first_seen` (both covering), and loads ORM objects only for the page.
+- `/api/status` (polled every 3 s) caches the "to review" count until anybody writes to the database:
+  `db.ChangeCounter` reads `PRAGMA data_version` on its own connection, which changes with every commit of any other
+  connection – dashboard, application run or CLI.
+- The crawl looks up duplicates by `match_key` alone and filters the rest in Python: with `status = 'open'` in the
+  same query SQLite used `ix_jobs_state` and read every open job (14 ms instead of 0.1 ms per new posting).
+
+`scripts/bench.py` measures API, crawl, engine, start-up, frontend and memory on invented data in a temporary folder;
+`tests/test_performance.py` pins the properties (no N+1 queries, index lookups in the crawl, status cache
+invalidation, instant port check).
+
 ## Crawling
 
 Each source returns `RawPosting`s. The pipeline filters titles (role keywords minus exclusions; "senior" is kept as

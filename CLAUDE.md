@@ -16,6 +16,7 @@ uv run mypy                               # types (default mode, config in pypro
 uv run pytest -m "not live"               # full suite, ~2 min (real headless Chromium against tests/fixtures/site)
 uv run pytest tests/test_browser.py::test_name -m "not live"   # single test
 uv run pytest -m "not browser and not live"                    # fast subset without Chromium
+uv run python scripts/bench.py api --jobs 5000 20000           # benchmarks, invented data in a temp folder
 
 cd frontend && npm ci
 npm run typecheck
