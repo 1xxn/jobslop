@@ -11,7 +11,6 @@ import logging
 import re
 from dataclasses import dataclass
 from html import unescape
-from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import urlparse
 
@@ -26,45 +25,86 @@ from .db import Job, JobSnapshot, session_scope
 log = logging.getLogger(__name__)
 
 
-class _Head(HTMLParser):
-    """JSON-LD-Blöcke, Meta-Angaben und den Titel einer Seite einsammeln – in einem Durchgang und in linearer Zeit
-    (die früheren Regexes ließen sich mit präpariertem HTML ausbremsen, CodeQL py/polynomial-redos)."""
+_MAX_HTML = 3_000_000  # Stellenseiten sind weit kleiner; mehr wird nicht gelesen
+_WS = " \t\r\n\f"
 
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.ld: list[str] = []
-        self.meta: dict[str, str] = {}
-        self.title = ""
-        self._open: str | None = None
-        self._buf: list[str] = []
 
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        a = {k.lower(): v or "" for k, v in attrs}
-        if tag == "script" and a.get("type", "").strip().lower() == "application/ld+json":
-            self._open, self._buf = "ld", []
-        elif tag == "title" and not self.title:
-            self._open, self._buf = "title", []
-        elif tag == "meta" and "content" in a and (key := (a.get("property") or a.get("name") or "").lower()):
-            self.meta.setdefault(key, a["content"])
+@dataclass
+class _Head:
+    """JSON-LD-Blöcke, Meta-Angaben und Titel einer fremden Seite. Gelesen wird mit str.find in linearer Zeit und
+    ohne Regex – Regexes und (auf manchen Python-Versionen) html.parser ließen sich mit präpariertem HTML ausbremsen
+    (CodeQL py/polynomial-redos)."""
 
-    def handle_endtag(self, tag: str) -> None:
-        if self._open == "ld" and tag == "script":
-            self.ld.append("".join(self._buf))
-            self._open = None
-        elif self._open == "title" and tag == "title":
-            self.title = " ".join("".join(self._buf).split())
-            self._open = None
+    ld: list[str]
+    meta: dict[str, str]
+    title: str
 
-    def handle_data(self, data: str) -> None:
-        if self._open:
-            self._buf.append(data)
+
+def _open_tags(html: str, low: str, name: str) -> Any:
+    """Öffnende Tags <name …>: (Tag-Text, Position hinter „>“). Jedes Zeichen wird höchstens einmal überflogen."""
+    needle, pos = "<" + name, 0
+    while (start := low.find(needle, pos)) != -1:
+        after = start + len(needle)
+        if after < len(low) and low[after] not in _WS + "/>":  # <scripts, <metadata …
+            pos = after
+            continue
+        end = low.find(">", after)
+        if end == -1:
+            return
+        yield html[start : end + 1], end + 1
+        pos = end + 1
+
+
+def _attr(tag: str, name: str) -> str:
+    """Wert eines Attributs im Tag-Text (Anführungszeichen optional), ohne Regex."""
+    low, i = tag.lower(), 0
+    while (i := low.find(name, i)) != -1:
+        k = i + len(name)
+        if i > 0 and low[i - 1] in _WS:
+            while k < len(low) and low[k] in _WS:
+                k += 1
+            if k < len(low) and low[k] == "=":
+                k += 1
+                while k < len(low) and low[k] in _WS:
+                    k += 1
+                if k < len(tag) and tag[k] in "\"'":
+                    close = tag.find(tag[k], k + 1)
+                    return unescape(tag[k + 1 : close]) if close != -1 else ""
+                stop = k
+                while stop < len(tag) and tag[stop] not in _WS + ">":
+                    stop += 1
+                return unescape(tag[k:stop])
+        i += len(name)
+    return ""
 
 
 def _head(html: str) -> _Head:
-    parser = _Head()
-    parser.feed(html)
-    parser.close()
-    return parser
+    html = html[:_MAX_HTML]
+    low = html.lower()
+    ld: list[str] = []
+    pos = 0
+    while (start := low.find("<script", pos)) != -1:
+        tag_end = low.find(">", start)
+        if tag_end == -1:
+            break
+        close = low.find("</script", tag_end)
+        if close == -1:
+            break
+        if "application/ld+json" in low[start:tag_end]:
+            ld.append(html[tag_end + 1 : close])
+        pos = close + 8  # hinter „</script“ weiter – Inhalt nie doppelt durchsuchen
+    meta: dict[str, str] = {}
+    for tag, _after in _open_tags(html, low, "meta"):
+        key = (_attr(tag, "property") or _attr(tag, "name")).lower()
+        if key and key not in meta and " content" in tag.lower().replace("\n", " ").replace("\t", " "):
+            meta[key] = _attr(tag, "content")
+    title = ""
+    for _tag, after in _open_tags(html, low, "title"):
+        close = low.find("</title", after)
+        if close != -1:
+            title = " ".join(unescape(html[after:close]).split())
+        break
+    return _Head(ld, meta, title)
 
 
 def _site_title(title: str) -> str:
