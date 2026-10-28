@@ -1,10 +1,11 @@
 import { lazy, type ReactNode, Suspense, useEffect } from "react";
-import { createBrowserRouter, Navigate, RouterProvider, useLocation } from "react-router";
+import { createBrowserRouter, Navigate, RouterProvider, useLocation, useRouteError } from "react-router";
 import { Toaster } from "sonner";
 import { AppShell } from "./components/layout/AppShell";
 import { Logo } from "./components/domain";
 import { TooltipProvider } from "./components/ui/overlays";
-import { Spinner } from "./components/ui/primitives";
+import { Button, Spinner } from "./components/ui/primitives";
+import { useErrorText } from "./lib/backendText";
 import { useStatus } from "./lib/hooks";
 import { useI18n } from "./lib/i18n";
 
@@ -51,6 +52,39 @@ function SetupGate({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/** Absturz beim Anzeigen einer Seite: statt weißer Fläche eine Meldung mit Ausweg. In der App-Hülle bleibt die
+ * Navigation dabei bedienbar. */
+function RouteError() {
+  const error = useRouteError();
+  const { t } = useI18n();
+  const errorText = useErrorText();
+  // Nach einem Update gibt es die alten Seiten-Dateien nicht mehr – dann hilft genau ein Neuladen
+  const stale =
+    error instanceof Error && /dynamically imported module|module script|error loading dynamically/i.test(error.message);
+  return (
+    <div role="alert" className="grid max-w-prose gap-4 py-10">
+      <h1 className="text-title font-semibold">{t(stale ? "error.updated_title" : "error.page_title")}</h1>
+      <p className="text-ink-2">{t(stale ? "error.updated_text" : "error.page_text")}</p>
+      {!stale && (
+        <details className="text-meta text-ink-2">
+          <summary className="cursor-pointer">{t("error.details")}</summary>
+          <pre className="mt-2 overflow-auto rounded-md border border-line bg-sunken px-3 py-2 font-mono text-small whitespace-pre-wrap">
+            {errorText(error)}
+          </pre>
+        </details>
+      )}
+      <div className="flex flex-wrap gap-3">
+        <Button variant="primary" onClick={() => window.location.reload()}>
+          {t("error.reload")}
+        </Button>
+        <Button variant="secondary" onClick={() => window.location.assign("/")}>
+          {t("error.home")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function Gated({ children }: { children: ReactNode }) {
   return <SetupGate>{children}</SetupGate>;
 }
@@ -58,6 +92,11 @@ function Gated({ children }: { children: ReactNode }) {
 const router = createBrowserRouter([
   {
     path: "/setup",
+    errorElement: (
+      <div className="px-4 sm:px-6">
+        <RouteError />
+      </div>
+    ),
     element: (
       <Suspense fallback={<FullPageSpinner />}>
         <SetupWizard />
@@ -70,17 +109,28 @@ const router = createBrowserRouter([
         <AppShell />
       </Gated>
     ),
+    errorElement: (
+      <div className="px-4 sm:px-6">
+        <RouteError />
+      </div>
+    ),
     children: [
-      { index: true, element: <TodayPage /> },
-      { path: "jobs", element: <JobsPage /> },
-      // alte Adressen: Pipeline ist jetzt die Board-Ansicht der Bewerbungen, Aktivität das Protokoll
-      { path: "pipeline", element: <Navigate to="/applications?view=board" replace /> },
-      { path: "applications", element: <ApplicationsPage /> },
-      { path: "applications/:id", element: <ApplicationDetailPage /> },
-      { path: "activity", element: <Navigate to="/settings/log" replace /> },
-      { path: "settings", element: <SettingsPage /> },
-      { path: "settings/:tab", element: <SettingsPage /> },
-      { path: "*", element: <Navigate to="/" replace /> },
+      {
+        // Abstürze einer Seite landen hier – innerhalb der Hülle, die Navigation bleibt
+        errorElement: <RouteError />,
+        children: [
+          { index: true, element: <TodayPage /> },
+          { path: "jobs", element: <JobsPage /> },
+          // alte Adressen: Pipeline ist jetzt die Board-Ansicht der Bewerbungen, Aktivität das Protokoll
+          { path: "pipeline", element: <Navigate to="/applications?view=board" replace /> },
+          { path: "applications", element: <ApplicationsPage /> },
+          { path: "applications/:id", element: <ApplicationDetailPage /> },
+          { path: "activity", element: <Navigate to="/settings/log" replace /> },
+          { path: "settings", element: <SettingsPage /> },
+          { path: "settings/:tab", element: <SettingsPage /> },
+          { path: "*", element: <Navigate to="/" replace /> },
+        ],
+      },
     ],
   },
 ]);

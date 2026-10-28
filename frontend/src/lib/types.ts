@@ -57,6 +57,8 @@ export interface RunnerState {
   started_at: string | null;
   finished_at: string | null;
   returncode: number | null;
+  /** per „Stopp“ beendet – ein Exit-Code ungleich 0 ist dann kein Absturz */
+  stopped?: boolean;
   log?: string;
 }
 

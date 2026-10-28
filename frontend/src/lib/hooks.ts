@@ -102,7 +102,6 @@ export function useCrawl() {
       toast(r.started ? t("crawl.started") : t("crawl.running"));
       qc.invalidateQueries({ queryKey: ["status"] });
     },
-    onError: (e: Error) => toast.error(e.message),
   });
 }
 
@@ -112,6 +111,5 @@ export function useAutopilotRun() {
   return useMutation({
     mutationFn: api.autopilotRun,
     onSuccess: () => toast(t("autopilot.started")),
-    onError: (e: Error) => toast.error(e.message),
   });
 }

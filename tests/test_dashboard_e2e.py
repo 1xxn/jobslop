@@ -66,7 +66,7 @@ async def test_dashboard_end_to_end(dashboard):
             # Demo-Modus: Suchen ist gesperrt und sagt das auch (Suche sitzt in der Lauf-Seitenleiste)
             await page.get_by_role("button", name="Lauf und Suche anzeigen").click()
             await page.get_by_role("button", name="Neue Stellen suchen").click()
-            await page.get_by_text("Demo-Modus: Crawlen ist gesperrt").wait_for()
+            await page.get_by_text("Im Demo-Modus gesperrt").wait_for()  # übersetzt über den Fehlercode
             await page.keyboard.press("Escape")
 
             # Stellen: Liste und Stelle nebeneinander, die Score-Erklärung steht offen in der Stelle

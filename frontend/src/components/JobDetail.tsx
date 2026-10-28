@@ -4,13 +4,13 @@ import { type ReactNode, useEffect, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { useBackendText } from "@/lib/backendText";
+import { useBackendText, useReportError } from "@/lib/backendText";
 import { useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
 import type { JobDetail as Job } from "@/lib/types";
 import { cn, formatDate, formatRelative, hostOf, sourceName } from "@/lib/utils";
 import { ApplyDialog } from "./actions";
-import { SCORE_MAX, StatusLabel } from "./domain";
+import { LoadError, SCORE_MAX, StatusLabel } from "./domain";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "./ui/overlays";
 import { Button, Kbd, rowHover, Skeleton, Textarea } from "./ui/primitives";
 
@@ -86,8 +86,10 @@ export function JobDetail({
 }) {
   const { t, lang } = useI18n();
   const backendText = useBackendText();
+  const reportError = useReportError();
   const qc = useQueryClient();
-  const { data: job, isLoading, isError } = useQuery({ queryKey: ["job", jobId], queryFn: () => api.job(jobId) });
+  const query = useQuery({ queryKey: ["job", jobId], queryFn: () => api.job(jobId) });
+  const { data: job, isLoading, isError } = query;
   const [notes, setNotes] = useState("");
   const [showDesc, setShowDesc] = useState(false);
   const [applyOpen, setApplyOpen] = useState(false);
@@ -105,7 +107,6 @@ export function JobDetail({
   const saveNotes = useMutation({
     mutationFn: (value: string) => api.patchJob(jobId, { notes: value }),
     onSuccess: refresh,
-    onError: (e: Error) => toast.error(e.message),
   });
   const mark = useMutation({
     mutationFn: (status: "applied" | "interview" | "rejected" | "offer") => api.markJob(jobId, status),
@@ -113,20 +114,18 @@ export function JobDetail({
       toast.success(t("job.marked"));
       refresh();
     },
-    onError: (e: Error) => toast.error(e.message),
   });
   const excludeCompany = useMutation({
     mutationFn: (company: string) => api.createExclusion("company", company, t("job.excluded_reason")),
     onSuccess: (r, company) => {
       toast(t("decide.company_dismissed", { company }), {
-        action: { label: t("common.undo"), onClick: () => api.deleteExclusion(r.id).then(refresh) },
+        action: { label: t("common.undo"), onClick: () => api.deleteExclusion(r.id).then(refresh, reportError) },
       });
       refresh();
     },
-    onError: (e: Error) => toast.error(e.message),
   });
 
-  if (isError) return <p className="py-8 text-meta text-danger">{t("jobs.load_error")}</p>;
+  if (isError) return <LoadError error={query.error} onRetry={() => query.refetch()} />;
   if (isLoading || !job) {
     return (
       <div className="grid gap-3 py-2" aria-busy="true">

@@ -3,12 +3,13 @@ import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ChipsInput, SwitchRow } from "@/components/ui/controls";
-import { Button, SectionBody, SectionHeader, Field, Input, Skeleton } from "@/components/ui/primitives";
+import { Button, SectionBody, SectionHeader, Field, Input } from "@/components/ui/primitives";
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { type Portal, PORTALS, type SearchConfig } from "@/lib/types";
 import { roleClass, sourceName } from "@/lib/utils";
 import { SaveBar } from "./SaveBar";
+import { Pending } from "@/components/domain";
 
 /** Suche in drei Seiten: Zielrollen & Filter, Quellen, Limits – alle speichern dieselbe search.toml. */
 export function SearchForm({ part }: { part: "roles" | "sources" | "limits" }) {
@@ -27,9 +28,8 @@ export function SearchForm({ part }: { part: "roles" | "sources" | "limits" }) {
       setDirty(false);
       toast.success(t("search.saved"));
     },
-    onError: (e: Error) => toast.error(e.message),
   });
-  if (!c) return <Skeleton className="h-96 rounded-lg" />;
+  if (!c) return <Pending query={data} className="h-96 rounded-lg" />;
   const update = (next: SearchConfig) => {
     setC(next);
     setDirty(true);

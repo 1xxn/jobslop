@@ -23,6 +23,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import load_only, selectinload
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .. import __version__, assist
 from ..autopilot import Scheduler, activity, crawl_and_queue, next_run, record
@@ -51,6 +52,7 @@ from ..db import (
     utcnow,
 )
 from ..guard import ACTIVE_STATES, DONE_STATES, check_job, excluded_job_ids
+from ..llm import LLMLimitReached, LLMUnavailable
 from ..notify import notify
 from ..presets import presets_for_ui
 from ..profile import TODO, Profile, Work, normalize_question
@@ -70,6 +72,14 @@ STAGES = {
     "rejected": ("rejected",),
 }
 MARK = {"applied": "manual", "interview": "interview", "rejected": "rejected", "offer": "offer"}
+
+
+class Problem(HTTPException):
+    """API-Fehler mit Code für das Dashboard (übersetzt über ``be.<code>``); ``detail`` bleibt der Klartext."""
+
+    def __init__(self, status_code: int, code: str, detail: str, **params: Any) -> None:
+        super().__init__(status_code, detail)
+        self.code, self.params = code, params
 
 
 # --------------------------------------------------------------------------- Serialisierung
@@ -377,6 +387,13 @@ class Context:
                 queued=len(summary["queued"]),
             )
             await self.notify("jobslop Autopilot", text)
+        except Exception as exc:
+            # Der Lauf startet auch per Knopf als losgelöste Task – ohne Eintrag bliebe ein Fehler unsichtbar.
+            log.exception("Autopilot-Lauf fehlgeschlagen")
+            error = f"{type(exc).__name__}: {exc}"[:300]
+            self.crawl["last"] = {"error": error}
+            record(s, "autopilot", f"Autopilot fehlgeschlagen: {error}", code="autopilot.failed", error=error)
+            await self.notify("jobslop Autopilot", f"Fehlgeschlagen: {error}")
         finally:
             self.autopilot_running = False
 
@@ -415,6 +432,22 @@ class Context:
     async def _run_finished(self) -> None:
         since = self.runner.started_at or utcnow()
         with session_scope(self.db) as s:
+            # Gestoppt oder abgestürzt: Was der Prozess nicht mehr abschließen konnte, steht sonst für immer auf
+            # „läuft“ (und sperrt die Stelle), seine Rückfragen beantwortet niemand mehr.
+            run_apps = select(Application.id).where(Application.started_at >= since)
+            for a in s.scalars(
+                select(Application).where(
+                    Application.id.in_(run_apps),
+                    Application.status == "running",
+                    Application.origin != "extension",
+                )
+            ):
+                a.status, a.finished_at = "failed", utcnow()
+                a.error = a.error or "Lauf beendet, bevor die Bewerbung fertig war"
+            for p in s.scalars(
+                select(Prompt).where(Prompt.status == "open", Prompt.application_id.in_(run_apps))
+            ):
+                p.status = "expired"
             rows = (
                 s.execute(select(Application.status).where(Application.started_at >= since)).scalars().all()
             )
@@ -431,6 +464,19 @@ class Context:
             counts=dict(counts),
         )
         await self.notify("jobslop: Lauf beendet", text)
+        code = self.runner.returncode
+        if code not in (0, None) and not self.runner.stopped:
+            lines = [line for line in self.runner.tail(40).splitlines() if line.strip()]
+            error = " ".join(lines[-3:])[-300:] or f"Exit {code}"
+            record(
+                self.settings,
+                "run",
+                f"Bewerbungslauf abgebrochen (Exit {code}): {error}",
+                code="run.crashed",
+                exit=code,
+                error=error,
+            )
+            await self.notify("jobslop: Lauf abgebrochen", error)
 
 
 def create_app(runtime: Runtime) -> FastAPI:
@@ -451,7 +497,33 @@ def create_app(runtime: Runtime) -> FastAPI:
 
     @app.exception_handler(DemoModeError)
     async def demo_mode(_request: Request, exc: DemoModeError) -> JSONResponse:
-        return JSONResponse({"detail": str(exc)}, status_code=409)
+        return JSONResponse({"detail": str(exc), "code": "api.demo"}, status_code=409)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(_request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        body: dict[str, Any] = {"detail": exc.detail}
+        if isinstance(exc, Problem):
+            body |= {"code": exc.code, "params": exc.params}
+        elif exc.status_code == 404:
+            body["code"] = "api.not_found"
+        return JSONResponse(body, status_code=exc.status_code, headers=exc.headers)
+
+    @app.exception_handler(LLMLimitReached)
+    async def llm_limit(_request: Request, exc: LLMLimitReached) -> JSONResponse:
+        return JSONResponse({"detail": str(exc), "code": "api.llm_limit"}, status_code=429)
+
+    @app.exception_handler(LLMUnavailable)
+    async def llm_unavailable(_request: Request, exc: LLMUnavailable) -> JSONResponse:
+        return JSONResponse({"detail": str(exc), "code": "api.llm_unavailable"}, status_code=503)
+
+    @app.exception_handler(Exception)
+    async def internal_error(_request: Request, exc: Exception) -> JSONResponse:
+        # Den Traceback schreibt uvicorn; das Dashboard bekommt JSON statt „Internal Server Error“ als Text.
+        error = f"{type(exc).__name__}: {exc}"[:300]
+        return JSONResponse(
+            {"detail": f"Interner Fehler – {error}", "code": "api.internal", "params": {"error": error}},
+            status_code=500,
+        )
 
     @app.middleware("http")
     async def local_only(request: Request, call_next):
@@ -669,10 +741,10 @@ def create_app(runtime: Runtime) -> FastAPI:
             raise HTTPException(400, "Unbekannte Dokumentart")
         name = re.sub(r"[^\w.\- ]", "_", Path(file.filename or "dokument.pdf").name).strip() or "dokument.pdf"
         if not name.lower().endswith(".pdf"):
-            raise HTTPException(400, "Bitte eine PDF-Datei hochladen")
+            raise Problem(400, "api.pdf_only", "Bitte eine PDF-Datei hochladen")
         data = await file.read()
         if len(data) > 15 * 1024 * 1024:
-            raise HTTPException(413, "Datei ist größer als 15 MB")
+            raise Problem(413, "api.too_large", "Datei ist größer als 15 MB")
         ctx.settings.ensure_dirs()
         target = ctx.settings.documents_dir / name
         target.write_bytes(data)
@@ -716,7 +788,7 @@ def create_app(runtime: Runtime) -> FastAPI:
         except ValidationError as exc:
             raise HTTPException(422, exc.errors()) from exc
         if not config.roles and not config.filters.include_titles:
-            raise HTTPException(422, "Mindestens eine Zielrolle angeben")
+            raise Problem(422, "api.roles_missing", "Mindestens eine Zielrolle angeben")
         config.save(ctx.settings.search_path)
         return config.model_dump(mode="json")
 
@@ -875,7 +947,7 @@ def create_app(runtime: Runtime) -> FastAPI:
             if body.queued is True:
                 verdict = check_job(s, j, ctx.runtime().config.limits)
                 if not verdict.ok:
-                    raise HTTPException(409, verdict.reason)
+                    raise Problem(409, verdict.code, verdict.reason, **verdict.params)
             for key, value in body.model_dump(exclude_none=True).items():
                 setattr(j, key, value)
             return job_summary(j)
@@ -975,11 +1047,11 @@ def create_app(runtime: Runtime) -> FastAPI:
         if mode not in ("review", "auto", "dry-run"):
             raise HTTPException(400, "Modus muss review, auto oder dry-run sein")
         if ctx.runner.active:
-            raise HTTPException(409, "Es läuft bereits ein Bewerbungslauf")
+            raise Problem(409, "api.run_active", "Es läuft bereits ein Bewerbungslauf")
         if not body.job_ids:
             with session_scope(ctx.db) as s:
                 if not s.scalar(select(func.count(Job.id)).where(Job.queued)):
-                    raise HTTPException(409, "Die Warteschlange ist leer")
+                    raise Problem(409, "api.queue_empty", "Die Warteschlange ist leer")
         ctx.runner.start(body.job_ids or None, mode=mode, max_count=body.max, force=body.force)  # type: ignore[arg-type]
         record(
             ctx.settings,
@@ -1054,7 +1126,7 @@ def create_app(runtime: Runtime) -> FastAPI:
     @app.post("/api/autopilot/run")
     async def autopilot_run() -> dict[str, Any]:
         if ctx.autopilot_running:
-            raise HTTPException(409, "Autopilot läuft bereits")
+            raise Problem(409, "api.autopilot_running", "Autopilot läuft bereits")
         ensure_not_demo(ctx.settings, "Autopilot")
         ctx.spawn(ctx.run_autopilot())
         return {"started": True}
@@ -1204,7 +1276,7 @@ def create_app(runtime: Runtime) -> FastAPI:
         with session_scope(ctx.db) as s:
             p = s.get(Prompt, prompt_id)
             if p is None or p.status != "open":
-                raise HTTPException(409, "Die Rückfrage ist nicht mehr offen")
+                raise Problem(409, "api.prompt_closed", "Die Rückfrage ist nicht mehr offen")
             if p.kind == "questions":
                 p.response = {"skip": True} if body.skip else {"answers": body.answers}
             elif p.kind == "confirm":
@@ -1277,7 +1349,9 @@ def create_app(runtime: Runtime) -> FastAPI:
             try:
                 re.compile(body.value.strip())
             except re.error as exc:
-                raise HTTPException(400, f"Ungültiger regulärer Ausdruck: {exc}") from exc
+                raise Problem(
+                    400, "api.bad_regex", f"Ungültiger regulärer Ausdruck: {exc}", error=str(exc)
+                ) from exc
         with session_scope(ctx.db) as s:
             e = Exclusion(kind=body.kind, value=body.value.strip(), reason=body.reason)
             s.add(e)
