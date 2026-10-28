@@ -81,6 +81,15 @@
   data in a temporary folder; `tests/test_performance.py` keeps query counts, index use, the status cache and the
   port check from regressing.
 
+### Updates
+- Python 3.15 is supported and is the development version (`.python-version`); 3.12 stays the minimum. CI tests 3.12
+  and 3.15 on Linux and Windows and 3.15 on macOS.
+- The dashboard is built with Node 26 (current LTS).
+- All Python and npm packages are on their latest stable versions (among them JobSpy 1.4.1, pypdf 6.21.4,
+  pydantic-settings 2.16.2, lucide-react 1.63, React Router 8.5.1, Vitest 5.0.5, jsdom 30.1.3); the minimum versions in
+  `pyproject.toml` are the tested ones, so an install never resolves older releases with known issues.
+- CI actions and tools: setup-uv 10.3.3, CodeQL 4.39.1, zizmor 1.31.1.
+
 ### Fixed
 - Found in a live test with real job boards: reposted job-board listings (same company, title and place) are merged;
   a company board that names its own country (e.g. "Krakow, Poland") is no longer turned into "remote Germany" by a

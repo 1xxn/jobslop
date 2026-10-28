@@ -73,7 +73,7 @@ Tests marked `live` call the real Claude Code and use your subscription; they on
 
 | Workflow | When | What |
 |---|---|---|
-| `ci.yml` | every PR and push to `main` | Ruff, zizmor (workflow security), pytest on Ubuntu 3.12/3.14, Windows 3.12 and macOS 3.13, Vitest + build check, dependency review on PRs |
+| `ci.yml` | every PR and push to `main` | Ruff, zizmor (workflow security), pytest on Ubuntu and Windows (3.12 and 3.15) and macOS (3.15), Vitest + build check, dependency review on PRs |
 | `codeql.yml` | PRs, `main`, weekly | CodeQL for Python, TypeScript/JavaScript and the workflows |
 | `sources.yml` | weekly, manual | Read-only smoke test against real job sites – notices when a source changes its format |
 | `release.yml` | tag `v*` | see above |
