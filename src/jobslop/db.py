@@ -186,6 +186,26 @@ class Answer(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class InboxMessage(Base):
+    """Mail aus dem Postfach, die zu einer Bewerbung gehört (inbox.py). Absage, Einladung und Angebot warten als
+    Vorschlag (open), bis du sie übernimmst (applied) oder verwirfst (dismissed); Bestätigungen sind „logged“."""
+
+    __tablename__ = "inbox_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    message_id: Mapped[str] = mapped_column(String(300), unique=True, index=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    sender: Mapped[str] = mapped_column(String(300), default="")
+    subject: Mapped[str] = mapped_column(Text, default="")
+    kind: Mapped[str] = mapped_column(String(20))  # confirmation, rejection, interview, offer
+    summary: Mapped[str] = mapped_column(Text, default="")
+    application_id: Mapped[int] = mapped_column(ForeignKey("applications.id"), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="open", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    application: Mapped[Application] = relationship()
+
+
 class Prompt(Base):
     """Offene Rückfrage eines laufenden Bewerbungsprozesses (Fragen, Freigabe, Übergabe an den Menschen)."""
 

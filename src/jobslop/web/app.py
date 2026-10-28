@@ -23,8 +23,13 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import load_only, selectinload
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .. import __version__, assist
+from ..apply.coverletter import headless_pdf_context
+from ..apply.executor import Files
+from ..apply.planner import JobContext
+from ..apply.tailor import cached_cv, ensure_tailored_cv
 from ..autopilot import Scheduler, activity, crawl_and_queue, next_run, record
 from ..classify import job_score_parts
 from ..config import (
@@ -44,6 +49,7 @@ from ..db import (
     ApplicationEvent,
     CrawlRun,
     Exclusion,
+    InboxMessage,
     Job,
     JobSnapshot,
     Prompt,
@@ -51,6 +57,8 @@ from ..db import (
     utcnow,
 )
 from ..guard import ACTIVE_STATES, DONE_STATES, check_job, excluded_job_ids
+from ..inbox import KIND_STATUS, InboxError, check_inbox, try_connection
+from ..llm import LLMLimitReached, LLMUnavailable
 from ..notify import notify
 from ..presets import presets_for_ui
 from ..profile import TODO, Profile, Work, normalize_question
@@ -70,6 +78,14 @@ STAGES = {
     "rejected": ("rejected",),
 }
 MARK = {"applied": "manual", "interview": "interview", "rejected": "rejected", "offer": "offer"}
+
+
+class Problem(HTTPException):
+    """API-Fehler mit Code für das Dashboard (übersetzt über ``be.<code>``); ``detail`` bleibt der Klartext."""
+
+    def __init__(self, status_code: int, code: str, detail: str, **params: Any) -> None:
+        super().__init__(status_code, detail)
+        self.code, self.params = code, params
 
 
 # --------------------------------------------------------------------------- Serialisierung
@@ -117,6 +133,22 @@ def job_summary(j: Job, *, excluded: bool = False) -> dict[str, Any]:
         "app_status": last.status if last else ("queued" if j.queued else ""),
         "app_id": last.id if last else None,
         "excluded": excluded,
+    }
+
+
+def inbox_json(m: InboxMessage) -> dict[str, Any]:
+    a = m.application
+    return {
+        "id": m.id,
+        "kind": m.kind,
+        "summary": m.summary,
+        "subject": m.subject,
+        "sender": m.sender,
+        "received_at": _iso(m.received_at),
+        "application_id": a.id,
+        "company": a.job.company,
+        "title": a.job.title,
+        "app_status": a.status,
     }
 
 
@@ -255,6 +287,10 @@ class UrlIn(BaseModel):
     url: str
 
 
+class InboxAction(BaseModel):
+    action: str  # apply | dismiss
+
+
 class AppAnswers(BaseModel):
     answers: dict[str, str]
     requeue: bool = True
@@ -279,6 +315,9 @@ class Context:
         self.crawl_idle = asyncio.Event()
         self._llm: tuple[Settings, Any] | None = None
         self.crawl_idle.set()
+        self.inbox_running = False
+        self.inbox_checked_at: datetime | None = None
+        self.inbox_error = ""
 
     @property
     def db(self) -> Path:
@@ -377,8 +416,63 @@ class Context:
                 queued=len(summary["queued"]),
             )
             await self.notify("jobslop Autopilot", text)
+        except Exception as exc:
+            # Der Lauf startet auch per Knopf als losgelöste Task – ohne Eintrag bliebe ein Fehler unsichtbar.
+            log.exception("Autopilot-Lauf fehlgeschlagen")
+            error = f"{type(exc).__name__}: {exc}"[:300]
+            self.crawl["last"] = {"error": error}
+            record(s, "autopilot", f"Autopilot fehlgeschlagen: {error}", code="autopilot.failed", error=error)
+            await self.notify("jobslop Autopilot", f"Fehlgeschlagen: {error}")
         finally:
             self.autopilot_running = False
+
+    async def check_inbox(self) -> dict[str, int]:
+        """Postfach jetzt prüfen (Knopf oder Zeitplan). Fehler gehen an den Aufrufer."""
+        if self.inbox_running:
+            return {}
+        self.inbox_running, self.inbox_checked_at = True, utcnow()
+        try:
+            counts = await check_inbox(self.settings, self.llm())
+        finally:
+            self.inbox_running = False
+        if counts["suggested"] or counts["logged"]:
+            record(
+                self.settings,
+                "inbox",
+                f"Postfach: {counts['suggested']} Antwort(en) zum Bestätigen, {counts['logged']} Eingangsbestätigung(en)",
+                code="inbox.checked",
+                suggested=counts["suggested"],
+                logged=counts["logged"],
+            )
+        if counts["suggested"]:
+            await self.notify("jobslop: Antwort auf eine Bewerbung", "Unter „Heute“ bestätigen")
+        return counts
+
+    def inbox_due(self) -> bool:
+        s = self.settings
+        if not s.inbox_enabled or s.demo or self.inbox_running:
+            return False
+        last = self.inbox_checked_at
+        return last is None or utcnow() - last >= timedelta(minutes=max(5, s.inbox_interval_min))
+
+    async def _inbox_tick(self) -> None:
+        try:
+            await self.check_inbox()
+            self.inbox_error = ""
+        except (
+            Exception
+        ) as exc:  # Postfach weg, Passwort falsch, Claude-Limit: protokollieren, nicht abbrechen
+            error = f"{type(exc).__name__}: {exc}"[:300] if not isinstance(exc, InboxError) else str(exc)
+            if error != self.inbox_error:  # gleicher Fehler alle 30 Minuten: nur einmal ins Protokoll
+                log.warning("Postfach-Prüfung fehlgeschlagen: %s", error)
+                record(
+                    self.settings,
+                    "inbox",
+                    f"Postfach-Prüfung fehlgeschlagen: {error}",
+                    code="inbox.failed",
+                    error=error,
+                )
+            self.inbox_error = error
 
     async def watch(self) -> None:
         """Hintergrund: Ende von Bewerbungsläufen und neue Rückfragen melden."""
@@ -391,6 +485,8 @@ class Context:
                 if was_active and not active:
                     await self._run_finished()
                 was_active = active
+                if self.inbox_due():
+                    self.spawn(self._inbox_tick())
                 with session_scope(self.db) as s:
                     new = list(
                         s.execute(
@@ -415,6 +511,22 @@ class Context:
     async def _run_finished(self) -> None:
         since = self.runner.started_at or utcnow()
         with session_scope(self.db) as s:
+            # Gestoppt oder abgestürzt: Was der Prozess nicht mehr abschließen konnte, steht sonst für immer auf
+            # „läuft“ (und sperrt die Stelle), seine Rückfragen beantwortet niemand mehr.
+            run_apps = select(Application.id).where(Application.started_at >= since)
+            for a in s.scalars(
+                select(Application).where(
+                    Application.id.in_(run_apps),
+                    Application.status == "running",
+                    Application.origin != "extension",
+                )
+            ):
+                a.status, a.finished_at = "failed", utcnow()
+                a.error = a.error or "Lauf beendet, bevor die Bewerbung fertig war"
+            for p in s.scalars(
+                select(Prompt).where(Prompt.status == "open", Prompt.application_id.in_(run_apps))
+            ):
+                p.status = "expired"
             rows = (
                 s.execute(select(Application.status).where(Application.started_at >= since)).scalars().all()
             )
@@ -431,6 +543,19 @@ class Context:
             counts=dict(counts),
         )
         await self.notify("jobslop: Lauf beendet", text)
+        code = self.runner.returncode
+        if code not in (0, None) and not self.runner.stopped:
+            lines = [line for line in self.runner.tail(40).splitlines() if line.strip()]
+            error = " ".join(lines[-3:])[-300:] or f"Exit {code}"
+            record(
+                self.settings,
+                "run",
+                f"Bewerbungslauf abgebrochen (Exit {code}): {error}",
+                code="run.crashed",
+                exit=code,
+                error=error,
+            )
+            await self.notify("jobslop: Lauf abgebrochen", error)
 
 
 def create_app(runtime: Runtime) -> FastAPI:
@@ -451,7 +576,33 @@ def create_app(runtime: Runtime) -> FastAPI:
 
     @app.exception_handler(DemoModeError)
     async def demo_mode(_request: Request, exc: DemoModeError) -> JSONResponse:
-        return JSONResponse({"detail": str(exc)}, status_code=409)
+        return JSONResponse({"detail": str(exc), "code": "api.demo"}, status_code=409)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(_request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        body: dict[str, Any] = {"detail": exc.detail}
+        if isinstance(exc, Problem):
+            body |= {"code": exc.code, "params": exc.params}
+        elif exc.status_code == 404:
+            body["code"] = "api.not_found"
+        return JSONResponse(body, status_code=exc.status_code, headers=exc.headers)
+
+    @app.exception_handler(LLMLimitReached)
+    async def llm_limit(_request: Request, exc: LLMLimitReached) -> JSONResponse:
+        return JSONResponse({"detail": str(exc), "code": "api.llm_limit"}, status_code=429)
+
+    @app.exception_handler(LLMUnavailable)
+    async def llm_unavailable(_request: Request, exc: LLMUnavailable) -> JSONResponse:
+        return JSONResponse({"detail": str(exc), "code": "api.llm_unavailable"}, status_code=503)
+
+    @app.exception_handler(Exception)
+    async def internal_error(_request: Request, exc: Exception) -> JSONResponse:
+        # Den Traceback schreibt uvicorn; das Dashboard bekommt JSON statt „Internal Server Error“ als Text.
+        error = f"{type(exc).__name__}: {exc}"[:300]
+        return JSONResponse(
+            {"detail": f"Interner Fehler – {error}", "code": "api.internal", "params": {"error": error}},
+            status_code=500,
+        )
 
     @app.middleware("http")
     async def local_only(request: Request, call_next):
@@ -485,6 +636,14 @@ def create_app(runtime: Runtime) -> FastAPI:
                 )
             )
             attention = len(waiting_ids | set(waiting_for_you(db)))
+            replies = [
+                inbox_json(m)
+                for m in db.scalars(
+                    select(InboxMessage)
+                    .where(InboxMessage.status == "open")
+                    .order_by(InboxMessage.received_at)
+                )
+            ]
             # Zähler für die Navigation: Stellen zu sichten (wie die Standardansicht, ohne Stretch-Level) …
             undecided = list(
                 db.execute(
@@ -528,6 +687,13 @@ def create_app(runtime: Runtime) -> FastAPI:
                 "attention": attention,
                 "to_review": to_review,
                 "follow_ups_due": follow_ups_due,
+                "replies": len(replies),
+            },
+            "replies": replies,
+            "inbox": {
+                "enabled": s.inbox_enabled,
+                "error": ctx.inbox_error,
+                "checked_at": _iso(ctx.inbox_checked_at),
             },
             "notify_desktop": s.notify_desktop,
         }
@@ -669,10 +835,10 @@ def create_app(runtime: Runtime) -> FastAPI:
             raise HTTPException(400, "Unbekannte Dokumentart")
         name = re.sub(r"[^\w.\- ]", "_", Path(file.filename or "dokument.pdf").name).strip() or "dokument.pdf"
         if not name.lower().endswith(".pdf"):
-            raise HTTPException(400, "Bitte eine PDF-Datei hochladen")
+            raise Problem(400, "api.pdf_only", "Bitte eine PDF-Datei hochladen")
         data = await file.read()
         if len(data) > 15 * 1024 * 1024:
-            raise HTTPException(413, "Datei ist größer als 15 MB")
+            raise Problem(413, "api.too_large", "Datei ist größer als 15 MB")
         ctx.settings.ensure_dirs()
         target = ctx.settings.documents_dir / name
         target.write_bytes(data)
@@ -716,7 +882,7 @@ def create_app(runtime: Runtime) -> FastAPI:
         except ValidationError as exc:
             raise HTTPException(422, exc.errors()) from exc
         if not config.roles and not config.filters.include_titles:
-            raise HTTPException(422, "Mindestens eine Zielrolle angeben")
+            raise Problem(422, "api.roles_missing", "Mindestens eine Zielrolle angeben")
         config.save(ctx.settings.search_path)
         return config.model_dump(mode="json")
 
@@ -734,17 +900,62 @@ def create_app(runtime: Runtime) -> FastAPI:
     @app.get("/api/settings")
     def get_settings_api() -> dict[str, Any]:
         data = ctx.settings.model_dump(mode="json")
-        return {k: data[k] for k in sorted(EDITABLE_SETTINGS)} | {"home": str(ctx.settings.home)}
+        out = {k: data[k] for k in sorted(EDITABLE_SETTINGS)} | {"home": str(ctx.settings.home)}
+        # Das App-Passwort verlässt den Server nicht; leer zurückschicken heißt „unverändert“
+        return out | {"inbox_password": "", "inbox_password_set": bool(ctx.settings.inbox_password)}
 
     @app.put("/api/settings")
     def put_settings(body: dict[str, Any]) -> dict[str, Any]:
-        body = {k: v for k, v in body.items() if k != "home"}
+        body = {k: v for k, v in body.items() if k not in ("home", "inbox_password_set")}
+        if not body.get("inbox_password"):
+            body.pop("inbox_password", None)
         try:
             ctx.settings = save_settings(ctx.settings, body)
         except (ValueError, ValidationError) as exc:
             raise HTTPException(422, str(exc)) from exc
         ctx.runner.settings = ctx.settings
         return get_settings_api()
+
+    @app.post("/api/inbox/test")
+    async def inbox_test() -> dict[str, Any]:
+        try:
+            count = await asyncio.to_thread(try_connection, ctx.settings)
+        except InboxError as exc:
+            raise Problem(502, "api.inbox_failed", str(exc), error=str(exc)) from exc
+        return {"ok": True, "messages": count}
+
+    @app.post("/api/inbox/check")
+    async def inbox_check() -> dict[str, Any]:
+        try:
+            counts = await ctx.check_inbox()
+        except InboxError as exc:
+            ctx.inbox_error = str(exc)
+            raise Problem(502, "api.inbox_failed", str(exc), error=str(exc)) from exc
+        ctx.inbox_error = ""
+        return counts
+
+    @app.post("/api/inbox/{message_id}")
+    def inbox_action(message_id: int, body: InboxAction) -> dict[str, Any]:
+        """Vorschlag übernehmen (Status der Bewerbung setzen) oder verwerfen. Rückgabe enthält den vorigen
+        Status, damit das Dashboard „Rückgängig“ anbieten kann."""
+        with session_scope(ctx.db) as s:
+            m = s.get(InboxMessage, message_id)
+            if m is None or m.status != "open":
+                raise Problem(409, "api.reply_closed", "Dieser Vorschlag ist schon erledigt")
+            a = m.application
+            previous = a.status
+            if body.action == "apply":
+                a.status = KIND_STATUS[m.kind]
+                a.stage_changed_at = utcnow()
+                if a.status in ("offer", "rejected"):
+                    a.follow_up_at = None
+                s.add(status_activity(a.job, a.status))
+                m.status = "applied"
+            elif body.action == "dismiss":
+                m.status = "dismissed"
+            else:
+                raise HTTPException(400, "action muss apply oder dismiss sein")
+            return {"application_id": a.id, "previous_status": previous, "status": a.status}
 
     @app.post("/api/notify/test")
     async def notify_test() -> dict[str, Any]:
@@ -866,6 +1077,59 @@ def create_app(runtime: Runtime) -> FastAPI:
                 "applications": [app_summary(a, waiting_for_you(s)) for a in j.applications],
             }
 
+    # ------------------------------------------------------------------ Lebenslauf je Stelle
+    def tailored_json(job_id: int) -> dict[str, Any]:
+        cached = cached_cv(ctx.settings.home, job_id)
+        enabled = ctx.runtime().profile.documents.tailor_cv
+        if cached is None:
+            return {"enabled": enabled, "file": None, "url": None, "matched_keywords": []}
+        pdf, meta = cached
+        return {
+            "enabled": enabled,
+            "file": pdf.name,
+            # Zeitstempel in der Adresse: nach „Neu erstellen“ zeigt der Browser nicht die alte Datei
+            "url": f"/api/jobs/{job_id}/cv/file?v={int(pdf.stat().st_mtime)}",
+            "matched_keywords": meta.get("matched_keywords", []),
+        }
+
+    @app.get("/api/jobs/{job_id}/cv")
+    def job_cv(job_id: int) -> dict[str, Any]:
+        return tailored_json(job_id)
+
+    @app.post("/api/jobs/{job_id}/cv")
+    async def job_cv_create(job_id: int) -> dict[str, Any]:
+        """Lebenslauf für die Stelle (neu) erstellen – genau diese Datei lädt jobslop später hoch."""
+        ensure_not_demo(ctx.settings, "Lebenslauf zuschneiden")
+        with session_scope(ctx.db) as s:
+            j = s.get(Job, job_id)
+            if j is None:
+                raise HTTPException(404)
+            job = JobContext.from_job(j)
+        rt = ctx.runtime()
+        files = Files.from_profile(rt.profile, ctx.settings.profile_path.parent)
+        if files.cv is None or not files.cv.exists():
+            raise Problem(409, "api.cv_missing", "Zuerst einen Lebenslauf hochladen")
+        pdf, note = await ensure_tailored_cv(
+            ctx.llm(),
+            rt.profile,
+            job,
+            ctx.settings.home,
+            ctx.settings.profile_path.parent,
+            files,
+            headless_pdf_context,
+            force=True,
+        )
+        if pdf is None:
+            raise Problem(422, "api.cv_rejected", note, reason=note)
+        return tailored_json(job_id)
+
+    @app.get("/api/jobs/{job_id}/cv/file")
+    def job_cv_file(job_id: int) -> FileResponse:
+        cached = cached_cv(ctx.settings.home, job_id)
+        if cached is None:
+            raise HTTPException(404)
+        return FileResponse(cached[0], media_type="application/pdf", content_disposition_type="inline")
+
     @app.patch("/api/jobs/{job_id}")
     def job_patch(job_id: int, body: JobPatch) -> dict[str, Any]:
         with session_scope(ctx.db) as s:
@@ -875,7 +1139,7 @@ def create_app(runtime: Runtime) -> FastAPI:
             if body.queued is True:
                 verdict = check_job(s, j, ctx.runtime().config.limits)
                 if not verdict.ok:
-                    raise HTTPException(409, verdict.reason)
+                    raise Problem(409, verdict.code, verdict.reason, **verdict.params)
             for key, value in body.model_dump(exclude_none=True).items():
                 setattr(j, key, value)
             return job_summary(j)
@@ -975,11 +1239,11 @@ def create_app(runtime: Runtime) -> FastAPI:
         if mode not in ("review", "auto", "dry-run"):
             raise HTTPException(400, "Modus muss review, auto oder dry-run sein")
         if ctx.runner.active:
-            raise HTTPException(409, "Es läuft bereits ein Bewerbungslauf")
+            raise Problem(409, "api.run_active", "Es läuft bereits ein Bewerbungslauf")
         if not body.job_ids:
             with session_scope(ctx.db) as s:
                 if not s.scalar(select(func.count(Job.id)).where(Job.queued)):
-                    raise HTTPException(409, "Die Warteschlange ist leer")
+                    raise Problem(409, "api.queue_empty", "Die Warteschlange ist leer")
         ctx.runner.start(body.job_ids or None, mode=mode, max_count=body.max, force=body.force)  # type: ignore[arg-type]
         record(
             ctx.settings,
@@ -1054,7 +1318,7 @@ def create_app(runtime: Runtime) -> FastAPI:
     @app.post("/api/autopilot/run")
     async def autopilot_run() -> dict[str, Any]:
         if ctx.autopilot_running:
-            raise HTTPException(409, "Autopilot läuft bereits")
+            raise Problem(409, "api.autopilot_running", "Autopilot läuft bereits")
         ensure_not_demo(ctx.settings, "Autopilot")
         ctx.spawn(ctx.run_autopilot())
         return {"started": True}
@@ -1204,7 +1468,7 @@ def create_app(runtime: Runtime) -> FastAPI:
         with session_scope(ctx.db) as s:
             p = s.get(Prompt, prompt_id)
             if p is None or p.status != "open":
-                raise HTTPException(409, "Die Rückfrage ist nicht mehr offen")
+                raise Problem(409, "api.prompt_closed", "Die Rückfrage ist nicht mehr offen")
             if p.kind == "questions":
                 p.response = {"skip": True} if body.skip else {"answers": body.answers}
             elif p.kind == "confirm":
@@ -1277,7 +1541,9 @@ def create_app(runtime: Runtime) -> FastAPI:
             try:
                 re.compile(body.value.strip())
             except re.error as exc:
-                raise HTTPException(400, f"Ungültiger regulärer Ausdruck: {exc}") from exc
+                raise Problem(
+                    400, "api.bad_regex", f"Ungültiger regulärer Ausdruck: {exc}", error=str(exc)
+                ) from exc
         with session_scope(ctx.db) as s:
             e = Exclusion(kind=body.kind, value=body.value.strip(), reason=body.reason)
             s.add(e)

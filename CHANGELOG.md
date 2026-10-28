@@ -18,6 +18,12 @@
   `vX.Y.Z` re-runs CI, checks the version and publishes wheel, sdist and release notes.
 - Every score is explained in the job details (target role, stack, company, level, location – out of 21 points).
 - Activity and guard messages are translated in the English UI (backend stores a code with parameters).
+- CV per job (opt-in): a CV tailored to the posting, rendered as an ATS-readable PDF and fact-checked against your
+  profile and CV – unverified numbers, companies and skills are removed, otherwise the original CV is used.
+  Preview and recreate it in the job details; the engine and the browser extension upload exactly that file.
+- Replies from your inbox (opt-in, read-only IMAP): rejections, invitations and offers are matched to your
+  applications and wait on Today for one click (with undo); receipts are logged on the application. Only mail
+  that belongs to an application goes to Claude.
 
 ### Improved
 - Redesigned dashboard: three work areas (Today, Jobs, Applications) and grouped settings, a calm look with one
@@ -29,8 +35,15 @@
 - Keyboard shortcuts (G then a letter, `?` for help), skip link, labelled form fields, WCAG AA contrast in both themes.
 - The dashboard loads only the page you open (code splitting); libraries are cached separately across updates.
 - The job list and job details show where a job came from (LinkedIn, Indeed, Arbeitsagentur, Greenhouse …).
+- Python 3.14 is supported. CI tests Ubuntu (3.12, 3.14), Windows and macOS, checks the workflows with zizmor, runs
+  CodeQL and a dependency review on pull requests, pins all actions to commit SHAs and caches Chromium; releases
+  carry build provenance attestations; a weekly job checks that the real job sources still work.
 
 ### Fixed
+- Errors are always visible and translated: failed actions show a toast, failed loads a retry instead of an endless
+  placeholder, a crashed page an error page instead of a white screen, unexpected server errors a readable message.
+- A stopped or crashed application run no longer leaves the application on "running" (which blocked the job) or
+  questions nobody answers; crashes appear in the run panel and the log. Autopilot failures are logged and notified.
 - The overview no longer scrolls sideways on phones, and the live run can be opened and stopped on phones.
 - Applications waiting for an approval or answer show as waiting for you instead of running.
 - An invalid title regex in the exclusions no longer breaks the dashboard; it is rejected when added.
