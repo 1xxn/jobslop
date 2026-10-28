@@ -936,6 +936,8 @@ def _running_instance(host: str, port: int) -> bool:
     """Läuft auf dem Port schon ein jobslop-Dashboard?"""
     import httpx
 
+    if _port_free(host, port):
+        return False  # niemand lauscht – unter Windows kostete der Verbindungsversuch sonst 1,5 s Wartezeit
     try:
         r = httpx.get(f"http://{host}:{port}/api/status", timeout=1.5)
         return r.status_code == 200 and "setup_completed" in r.json()
@@ -947,7 +949,15 @@ def _port_free(host: str, port: int) -> bool:
     import socket
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        return sock.connect_ex((host, port)) != 0
+        if sys.platform != "win32":
+            return sock.connect_ex((host, port)) != 0  # ein freier Port wird sofort abgelehnt
+        # Windows wiederholt den Verbindungsaufbau zu einem freien Port 2 s lang – probeweise binden dauert unter
+        # einer Millisekunde (ohne SO_REUSEADDR scheitert es an jedem, der dort schon lauscht)
+        try:
+            sock.bind((host, port))
+        except OSError:
+            return False
+        return True
 
 
 @app.command()
