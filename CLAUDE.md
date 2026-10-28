@@ -24,7 +24,7 @@ npm run dev                               # :5173, proxies /api and /artifacts t
 ```
 
 Before finishing any change, run all of: `ruff check`, `ruff format --check`, `pytest -m "not live"`,
-`npm run typecheck`, `npm test`, `npm run build`. CI (`.github/workflows/ci.yml`, Ubuntu 3.12/3.13 + Windows 3.12) fails if
+`npm run typecheck`, `npm test`, `npm run build`. CI (`.github/workflows/ci.yml`: lint incl. zizmor, tests on Ubuntu 3.12/3.14, Windows 3.12, macOS 3.13) fails if
 `src/jobslop/web/dist` differs from a fresh build – always commit the build output with frontend changes.
 
 `live` tests call the real Claude Code and spend the user's quota; they only run with `JOBSLOP_LIVE=1`.
