@@ -20,12 +20,20 @@
 - Activity and guard messages are translated in the English UI (backend stores a code with parameters).
 
 ### Improved
-- Leaner overview: what needs you, key figures, top matches and one “up next” card; the weekly chart moved to
-  Applications, the full log is on the Activity page.
+- Redesigned dashboard: three work areas (Today, Jobs, Applications) and grouped settings, a calm look with one
+  accent colour, system font and no cards-in-cards. Today shows the one thing that needs you, then the rest.
+- Jobs are triaged like mail: list and job side by side, Apply / Save / Dismiss with A / S / X, undo with Z, multi-select
+  with Ctrl/Shift; dismissed jobs leave the work lists and can be restored.
+- Applications: one list grouped by stage (the pipeline board is the second view, now also keyboard-operable), detail
+  page with status, follow-up and notes; the live run, search and autopilot open as a side panel from anywhere.
+- Keyboard shortcuts (G then a letter, `?` for help), skip link, labelled form fields, WCAG AA contrast in both themes.
 - The dashboard loads only the page you open (code splitting); libraries are cached separately across updates.
 - The job list and job details show where a job came from (LinkedIn, Indeed, Arbeitsagentur, Greenhouse …).
 
 ### Fixed
+- The overview no longer scrolls sideways on phones, and the live run can be opened and stopped on phones.
+- Applications waiting for an approval or answer show as waiting for you instead of running.
+- An invalid title regex in the exclusions no longer breaks the dashboard; it is rejected when added.
 - The submit button can no longer be clicked past the review: a planner that lists it as a plain click action or as
   "next" is routed through approval / dry run.
 - Claude may only read files in its own work folder when it gets screenshots (prompt injection from job pages).

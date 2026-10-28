@@ -18,7 +18,7 @@ describe("useBackendText", () => {
   it("translates codes with parameters", () => {
     const { result } = setup("en");
     expect(result.current.text("crawl.done", { run: 6, new: 18, queued: 5 }, "Crawl #6 …")).toBe(
-      "Search #6: 18 new jobs, 5 queued",
+      "Search #6: 18 new jobs, 5 up next",
     );
   });
 
