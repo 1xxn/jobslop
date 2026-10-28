@@ -6,6 +6,7 @@ import asyncio
 import csv
 import json
 import logging
+import shutil
 import sys
 from pathlib import Path
 from typing import Annotated
@@ -241,8 +242,13 @@ def profile_import_cv(
 
     r = rt()
     llm = need_claude(r)
+    # Wie beim Hochladen im Dashboard: der Lebenslauf liegt danach in documents/ (nur von dort liest Claude Dateien)
+    r.settings.ensure_dirs()
+    target = r.settings.documents_dir / cv.name
+    if cv.resolve() != target.resolve():
+        shutil.copyfile(cv, target)
     with console.status("Claude liest den Lebenslauf …"):
-        profile = asyncio.run(import_cv(llm, cv.resolve(), r.profile, overwrite=overwrite))
+        profile = asyncio.run(import_cv(llm, target.resolve(), r.profile, overwrite=overwrite))
     if r.settings.profile_path.exists():
         r.settings.profile_path.with_suffix(".yaml.bak").write_text(
             r.settings.profile_path.read_text(encoding="utf-8"), encoding="utf-8"
