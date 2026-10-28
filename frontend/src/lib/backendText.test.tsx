@@ -1,7 +1,8 @@
 import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import { codeOf, useBackendText } from "./backendText";
+import { ApiError } from "./api";
+import { codeOf, useBackendText, useErrorText } from "./backendText";
 import { I18nProvider, useI18n } from "./i18n";
 
 const wrapper = ({ children }: { children: ReactNode }) => <I18nProvider>{children}</I18nProvider>;
@@ -50,5 +51,31 @@ describe("codeOf", () => {
     expect(codeOf({ code: "setup.done", params: { a: 1 } })).toEqual(["setup.done", { a: 1 }]);
     expect(codeOf({ submitted: 3 })).toEqual([undefined, {}]);
     expect(codeOf(undefined)).toEqual([undefined, {}]);
+  });
+});
+
+describe("useErrorText", () => {
+  function errors(lang: "de" | "en") {
+    const hook = renderHook(() => ({ text: useErrorText(), i18n: useI18n() }), { wrapper });
+    act(() => hook.result.current.i18n.setLang(lang));
+    return hook.result.current.text;
+  }
+
+  it("translates API errors by code and keeps their parameters", () => {
+    const text = errors("en");
+    expect(text(new ApiError(409, "Die Warteschlange ist leer", "api.queue_empty"))).toBe(
+      "Nothing is up next – add jobs first.",
+    );
+    expect(text(new ApiError(500, "Interner Fehler", "api.internal", { error: "KeyError: x" }))).toBe(
+      "Internal error in jobslop: KeyError: x",
+    );
+    expect(text(new ApiError(0, "nicht erreichbar", "api.offline"))).toContain("Can't reach jobslop");
+  });
+
+  it("falls back to the message, then to a generic text", () => {
+    const text = errors("en");
+    expect(text(new ApiError(422, "field required"))).toBe("field required");
+    expect(text(new Error("boom"))).toBe("boom");
+    expect(text("weird")).toBe("Unknown error.");
   });
 });

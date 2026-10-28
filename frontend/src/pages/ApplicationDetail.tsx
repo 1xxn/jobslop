@@ -3,12 +3,12 @@ import { ArrowLeft } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "sonner";
-import { StatusLabel } from "@/components/domain";
+import { LoadError, StatusLabel } from "@/components/domain";
 import { PromptCard } from "@/components/PromptCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/controls";
 import { Dialog, DialogContent } from "@/components/ui/overlays";
 import { Button, EmptyState, Field, Input, Section, Select, Skeleton, Textarea } from "@/components/ui/primitives";
-import { api, artifactUrl } from "@/lib/api";
+import { api, ApiError, artifactUrl } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { hasMessage, type MessageKey } from "@/lib/messages";
 import type { ApplicationDetail as Detail } from "@/lib/types";
@@ -25,6 +25,9 @@ export function ApplicationDetailPage() {
   const app = useQuery({ queryKey: ["application", appId], queryFn: () => api.application(appId), refetchInterval: 4000 });
   const [shot, setShot] = useState<string | null>(null);
 
+  if (app.isError && !(app.error instanceof ApiError && app.error.status === 404)) {
+    return <LoadError error={app.error} onRetry={() => app.refetch()} />;
+  }
   if (app.isError) {
     return (
       <EmptyState
@@ -223,7 +226,6 @@ function Rail({ app }: { app: Detail }) {
       qc.invalidateQueries({ queryKey: ["pipeline"] });
       qc.invalidateQueries({ queryKey: ["status"] });
     },
-    onError: (e: Error) => toast.error(e.message),
   });
   const editable = PIPELINE.includes(app.status);
   return (
@@ -321,7 +323,6 @@ function OpenQuestions({ app }: { app: Detail }) {
       qc.invalidateQueries({ queryKey: ["application", app.id] });
       qc.invalidateQueries({ queryKey: ["status"] });
     },
-    onError: (e: Error) => toast.error(e.message),
   });
   return (
     <Section title={t("detail.questions")}>

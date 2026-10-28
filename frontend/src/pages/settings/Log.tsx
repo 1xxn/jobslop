@@ -8,6 +8,7 @@ import { useI18n } from "@/lib/i18n";
 import { hasMessage } from "@/lib/messages";
 import type { ActivityItem } from "@/lib/types";
 import { formatDateTime, groupByDay, parseDate } from "@/lib/utils";
+import { LoadError } from "@/components/domain";
 
 /** Protokoll: Suchläufe und alles, was jobslop zuletzt getan hat (früher die Seite „Aktivität“). */
 export function LogSettings() {
@@ -39,6 +40,7 @@ export function LogSettings() {
       </div>
 
       <Section title={t("activity.crawls")}>
+        {crawls.isError && <LoadError error={crawls.error} onRetry={() => crawls.refetch()} />}
         {crawls.data?.length === 0 && <EmptyState title={t("activity.no_crawls")} />}
         {!!crawls.data?.length && (
           <div className="overflow-x-auto">
@@ -85,6 +87,7 @@ export function LogSettings() {
       </Section>
 
       <Section title={t("activity.log")}>
+        {activity.isError && <LoadError error={activity.error} onRetry={() => activity.refetch()} />}
         {activity.data?.length === 0 && <EmptyState title={t("overview.no_activity")} />}
         <ActivityByDay items={activity.data ?? []} />
       </Section>
