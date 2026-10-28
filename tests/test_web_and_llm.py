@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -17,7 +17,7 @@ from jobslop.apply.planner import JobContext, LLMPlanner, PagePlan, PlanInput
 from jobslop.autopilot import next_run, record
 from jobslop.config import DemoModeError
 from jobslop.crawl.pipeline import run_crawl
-from jobslop.db import Answer, Application, Exclusion, Job, Prompt, session_scope
+from jobslop.db import Answer, Application, Exclusion, Job, Prompt, session_scope, utcnow
 from jobslop.importer import import_jobs
 from jobslop.jobpage import parse_html
 from jobslop.llm import DYNAMIC_BOUNDARY, Usage
@@ -182,6 +182,64 @@ def test_prompt_roundtrip(settings, config, profile):
         assert s.get(Prompt, pid).response == {"answers": {"0-7": "70000"}}
         assert s.get(Prompt, cid).response == {"decision": "submit"}
     assert client.get("/api/prompts").json() == []
+
+
+def test_api_errors_carry_codes(settings, config, profile, monkeypatch):
+    """Fehler kommen als JSON mit Code, damit das Dashboard sie übersetzen kann – auch unerwartete."""
+    client = _client(settings, config, profile)
+    r = client.post("/api/apply", json={})
+    assert r.status_code == 409 and r.json()["code"] == "api.queue_empty"
+    r = client.post("/api/exclusions", json={"kind": "title", "value": "senior ("})
+    assert r.json()["code"] == "api.bad_regex" and r.json()["params"]["error"]
+    assert client.get("/api/jobs/9999").json()["code"] == "api.not_found"
+
+    def boom(*_a, **_k):
+        raise RuntimeError("kaputt")
+
+    monkeypatch.setattr("jobslop.web.app.system_report", boom)
+    r = TestClient(client.app, raise_server_exceptions=False).get("/api/system")
+    assert r.status_code == 500
+    assert r.json()["code"] == "api.internal" and "RuntimeError: kaputt" in r.json()["detail"]
+
+
+async def test_aborted_run_leaves_nothing_hanging(settings, config, profile):
+    """Ein gestoppter oder abgestürzter Lauf darf keine Bewerbung auf „läuft“ und keine offene Rückfrage
+    hinterlassen; ein Absturz landet mit der letzten Log-Zeile im Protokoll."""
+    client = _client(settings, config, profile)
+    ctx = client.app.state.ctx
+    ctx.runner.started_at = utcnow() - timedelta(minutes=1)
+    with session_scope(settings.db_path) as s:
+        app = Application(job_id=1, status="running")
+        s.add(app)
+        s.flush()
+        s.add(Prompt(application_id=app.id, kind="confirm", payload={"title": "Beispiel"}))
+        aid = app.id
+    ctx.runner.log_path.write_text("Start\nClaude Code ist nicht angemeldet\n", encoding="utf-8")
+    ctx.runner.returncode = 1
+    await ctx._run_finished()
+    with session_scope(settings.db_path) as s:
+        app = s.get(Application, aid)
+        assert app.status == "failed" and app.error
+        assert s.scalars(select(Prompt.status)).all() == ["expired"]
+    entry = client.get("/api/activity").json()[0]
+    assert entry["data"]["code"] == "run.crashed" and "nicht angemeldet" in entry["message"]
+    # per „Stopp“ beendet: kein Absturz-Eintrag
+    ctx.runner.stopped = True
+    await ctx._run_finished()
+    assert client.get("/api/activity").json()[0]["data"]["code"] == "run.finished"
+
+
+async def test_autopilot_failure_is_recorded(settings, config, profile, monkeypatch):
+    client = _client(settings, config, profile)
+
+    async def boom(*_a, **_k):
+        raise RuntimeError("Quelle down")
+
+    monkeypatch.setattr("jobslop.web.app.crawl_and_queue", boom)
+    await client.app.state.ctx.run_autopilot()
+    entry = client.get("/api/activity").json()[0]
+    assert entry["data"]["code"] == "autopilot.failed" and "Quelle down" in entry["message"]
+    assert client.app.state.ctx.autopilot_running is False
 
 
 def test_settings_search_and_profile(settings, config, profile):
@@ -448,7 +506,8 @@ def test_every_backend_code_has_a_translation():
     source = "\n".join(p.read_text(encoding="utf-8") for p in (root / "src" / "jobslop").rglob("*.py"))
     codes = set(re.findall(r'code="([a-z_]+\.[a-z_.]+)"', source))
     codes |= {f"guard.{c}" for c in re.findall(r'_no\(\s*(?:f?"[^"]*"|\w+),\s*"([a-z_]+)"', source, re.S)}
-    assert {"crawl.done", "status.changed", "guard.closed", "guard.company_limit"} <= codes
+    codes |= set(re.findall(r'(?:Problem\(\s*\d+,\s*|"code": )"([a-z_]+\.[a-z_.]+)"', source))
+    assert {"crawl.done", "status.changed", "guard.closed", "guard.company_limit", "api.internal"} <= codes
     messages = (root / "frontend" / "src" / "lib" / "messages.ts").read_text(encoding="utf-8")
     missing = [c for c in sorted(codes) if messages.count(f'"be.{c}":') != 2]  # Deutsch und Englisch
     assert missing == []

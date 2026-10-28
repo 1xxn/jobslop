@@ -81,6 +81,7 @@ class Documents(_Model):
     cv_en: str = ""
     certificates: list[str] = Field(default_factory=list)
     cover_letter: Literal["auto", "none"] | str = "auto"
+    tailor_cv: bool = False  # Lebenslauf je Stelle zuschneiden (apply/tailor.py)
 
     def resolve(self, value: str, base: Path) -> Path | None:
         if not value or value in ("auto", "none"):
