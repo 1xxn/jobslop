@@ -193,7 +193,9 @@ def match_key(company: str, title: str) -> str:
 
 
 def fingerprint(*parts: str) -> str:
-    return hashlib.sha1("\x1f".join(parts).encode()).hexdigest()
+    return hashlib.sha1(
+        "\x1f".join(parts).encode(), usedforsecurity=False
+    ).hexdigest()  # Schlüssel, keine Signatur
 
 
 def content_hash(*parts: str) -> str:
@@ -241,9 +243,15 @@ class _TextExtractor(HTMLParser):
             self.parts.append(data)
 
 
+MAX_HTML_INPUT = 2_000_000  # Zeichen: Stellenbeschreibungen und Mails sind weit kleiner
+
+
 def html_to_text(raw: str) -> str:
     if not raw:
         return ""
+    # Fremder Inhalt (Job-Quellen, Seiten, Mails): ein präparierter Riese soll den Parser nicht minutenlang
+    # beschäftigen – html.parser ist bei manchen unvollständigen Tags quadratisch
+    raw = raw[:MAX_HTML_INPUT]
     raw = html.unescape(raw) if "&lt;" in raw else raw
     parser = _TextExtractor()
     parser.feed(raw)

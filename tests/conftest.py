@@ -58,7 +58,14 @@ LOCAL = "http://127.0.0.1"  # TestClient-Adresse: der Server nimmt nur lokale Ho
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
-    s = Settings(home=tmp_path / "home", headless=True, vision="never", max_steps_per_application=12)
+    # Die Formular-Fixtures liegen auf 127.0.0.1 – im echten Betrieb sperrt netguard solche Ziele
+    s = Settings(
+        home=tmp_path / "home",
+        headless=True,
+        vision="never",
+        max_steps_per_application=12,
+        allow_private_targets=True,
+    )
     s.ensure_dirs()
     get_engine(s.db_path)
     return s

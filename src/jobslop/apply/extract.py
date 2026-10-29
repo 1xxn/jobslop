@@ -89,7 +89,7 @@ async def extract_state(page: Any) -> PageState:
                 )
                 if visible and box and box["width"] > 60 and box["height"] > 60 and interactive:
                     state.captcha_visible = True
-            except Exception:
+            except Exception:  # noqa: S110 – Frame während des Lesens verschwunden: dann ist dort auch kein CAPTCHA
                 pass
             continue
         if index > 0 and (not url or url == "about:blank"):

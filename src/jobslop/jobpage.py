@@ -6,6 +6,7 @@ Google Jobs) → Meta-Tags → gerenderte Seite + Claude. So kostet das Hinzufü
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -21,11 +22,13 @@ from sqlalchemy import select
 from .classify import classify, content_hash, fingerprint, html_to_text, job_score, match_key, where_of
 from .config import SearchConfig
 from .db import Job, JobSnapshot, session_scope
+from .netguard import BlockedTarget, is_public_url, public_client, read_limited
 
 log = logging.getLogger(__name__)
 
 
 _MAX_HTML = 3_000_000  # Stellenseiten sind weit kleiner; mehr wird nicht gelesen
+_FETCH_BUDGET_S = 30  # Gesamtzeit für Abruf samt Weiterleitungen
 _WS = " \t\r\n\f"
 
 
@@ -200,16 +203,34 @@ def parse_html(url: str, html: str) -> FetchedJob:
     return job
 
 
-async def fetch_job(url: str, *, llm: Any = None, render: Any = None, fast_model: str = "") -> FetchedJob:
+async def _download(url: str, allow_private: bool) -> str:
+    """Seite laden – nur von öffentlichen Adressen (auch nach Weiterleitungen), höchstens ``_MAX_HTML`` Bytes und
+    ``_FETCH_BUDGET_S`` Sekunden. Der Link kommt von dir, die Seite (und wohin sie weiterleitet) von fremden Servern."""
+    client = (
+        httpx.AsyncClient(timeout=20, follow_redirects=True, max_redirects=5)
+        if allow_private
+        else public_client()
+    )
+    async with asyncio.timeout(_FETCH_BUDGET_S), client:
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; jobslop/1.0)", "Accept": "text/html,*/*;q=0.5"}
+        async with client.stream("GET", url, headers=headers) as resp:
+            if resp.status_code >= 400:
+                return ""
+            data = await read_limited(resp, _MAX_HTML)
+            return data.decode(resp.encoding or "utf-8", errors="replace")
+
+
+async def fetch_job(
+    url: str, *, llm: Any = None, render: Any = None, fast_model: str = "", allow_private: bool = False
+) -> FetchedJob:
     if not re.match(r"https?://", url):
         raise ValueError("Bitte einen vollständigen Link (https://…) angeben")
+    if not allow_private and not is_public_url(url):
+        raise BlockedTarget("Dieser Link zeigt in dein eigenes Netz – jobslop lädt nur öffentliche Seiten")
     html = ""
     try:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; jobslop/1.0)"})
-            if resp.status_code < 400:
-                html = resp.text
-    except httpx.HTTPError as exc:
+        html = await _download(url, allow_private)
+    except (httpx.HTTPError, TimeoutError) as exc:
         log.info("Abruf von %s fehlgeschlagen: %s", url, exc)
     job = parse_html(url, html) if html else FetchedJob(url=url)
     if job.via == "jsonld" and job.company:

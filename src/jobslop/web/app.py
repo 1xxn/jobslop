@@ -20,11 +20,11 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import defer, selectinload
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -38,6 +38,7 @@ from ..autopilot import Scheduler, activity, crawl_and_queue, next_run, record
 from ..classify import job_score_parts
 from ..config import (
     EDITABLE_SETTINGS,
+    ApplyMode,
     DemoModeError,
     SearchConfig,
     Settings,
@@ -61,9 +62,10 @@ from ..db import (
     session_scope,
     utcnow,
 )
-from ..guard import ACTIVE_STATES, DONE_STATES, check_job, excluded_job_ids
+from ..guard import ACTIVE_STATES, DONE_STATES, check_job, excluded_job_ids, regex_problem
 from ..inbox import KIND_STATUS, InboxError, check_inbox, try_connection
 from ..llm import LLMLimitReached, LLMUnavailable
+from ..netguard import WEB_SCHEMES
 from ..notify import notify
 from ..presets import presets_for_ui
 from ..profile import TODO, Profile, Work, normalize_question
@@ -100,6 +102,22 @@ STAGES = {
     "rejected": ("rejected",),
 }
 MARK = {"applied": "manual", "interview": "interview", "rejected": "rejected", "offer": "offer"}
+# Obergrenzen für Anfragen: ein lokaler Prozess (oder ein Fehler im Frontend) soll den Server nicht mit riesigen
+# Körpern, Listen oder Texten in die Knie zwingen können
+MAX_BODY = 1024 * 1024  # JSON-Anfragen
+MAX_UPLOAD = 15 * 1024 * 1024  # PDF-Dokumente
+UPLOAD_PATHS = ("/api/profile/document",)
+MAX_TEXT = 50_000  # Zeichen pro Text in Profil, Suche, Antworten
+MAX_ITEMS = 1_000  # Einträge pro Liste oder Objekt
+MAX_DEPTH = 12
+WINDOWS_RESERVED = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{i}" for i in range(10)),
+    *(f"LPT{i}" for i in range(10)),
+}
 
 
 class Problem(HTTPException):
@@ -275,75 +293,180 @@ def profile_json(profile: Profile) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- Request-Modelle
+# Unbekannte Felder sind ein Fehler (extra="forbid"), Texte und Listen haben Obergrenzen.
+
+Text: Any = Field(default="", max_length=MAX_TEXT)
+Ids: Any = Field(default_factory=list, max_length=5_000)
 
 
-class JobPatch(BaseModel):
+class _In(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class JobPatch(_In):
     queued: bool | None = None
     starred: bool | None = None
-    notes: str | None = None
+    notes: str | None = Field(default=None, max_length=MAX_TEXT)
 
 
-class JobStatus(BaseModel):
-    status: str
-    note: str = ""
+class JobStatus(_In):
+    status: str = Field(max_length=20)
+    note: str = Text
 
 
-class BulkAction(BaseModel):
-    ids: list[int]
-    action: str  # queue | unqueue | star | unstar | exclude
+class BulkAction(_In):
+    ids: list[int] = Ids
+    action: str = Field(max_length=20)  # queue | unqueue | star | unstar | exclude
 
 
-class ApplyRequest(BaseModel):
-    job_ids: list[int] = []
-    mode: str | None = None
-    max: int | None = None
+class ApplyRequest(_In):
+    job_ids: list[int] = Ids
+    mode: str | None = Field(default=None, max_length=20)
+    max: int | None = Field(default=None, ge=1, le=500)
     force: bool = False
 
 
-class AppPatch(BaseModel):
-    status: str | None = None
-    notes: str | None = None
+class AppPatch(_In):
+    status: str | None = Field(default=None, max_length=20)
+    notes: str | None = Field(default=None, max_length=MAX_TEXT)
     follow_up_at: datetime | None = None
     clear_follow_up: bool = False
 
 
-class PromptAnswer(BaseModel):
-    answers: dict[str, str] = {}
+class PromptAnswer(_In):
+    answers: dict[str, str] = Field(default_factory=dict, max_length=200)
     skip: bool = False
-    decision: str = ""
+    decision: str = Field(default="", max_length=20)
     done: bool = False
     abort: bool = False
 
-
-class AnswerIn(BaseModel):
-    question: str
-    answer: str
-
-
-class ExclusionIn(BaseModel):
-    kind: str
-    value: str
-    reason: str = ""
+    @field_validator("answers")
+    @classmethod
+    def _short_answers(cls, value: dict[str, str]) -> dict[str, str]:
+        if any(len(k) > 200 or len(v) > MAX_TEXT for k, v in value.items()):
+            raise ValueError("Antwort zu lang")
+        return value
 
 
-class PresetRequest(BaseModel):
-    presets: list[str] = ["cloud"]
-    cities: list[str] = ["berlin"]
+class AnswerIn(_In):
+    question: str = Field(min_length=1, max_length=2_000)
+    answer: str = Field(max_length=MAX_TEXT)
+
+
+class ExclusionIn(_In):
+    kind: str = Field(max_length=20)
+    value: str = Field(max_length=500)
+    reason: str = Field(default="", max_length=500)
+
+
+class PresetRequest(_In):
+    presets: list[str] = Field(default_factory=lambda: ["cloud"], max_length=50)
+    cities: list[str] = Field(default_factory=lambda: ["berlin"], max_length=50)
     remote: bool = True
     exclude_leadership: bool = True
 
 
-class UrlIn(BaseModel):
-    url: str
+class UrlIn(_In):
+    url: str = Field(max_length=2_000)
 
 
-class InboxAction(BaseModel):
-    action: str  # apply | dismiss
+class InboxAction(_In):
+    action: str = Field(max_length=20)  # apply | dismiss
 
 
-class AppAnswers(BaseModel):
-    answers: dict[str, str]
+class AppAnswers(_In):
+    answers: dict[str, str] = Field(max_length=200)
     requeue: bool = True
+
+
+def _web_or_empty(value: str) -> str:
+    value = value.strip()
+    if value and not value.lower().startswith(tuple(f"{s}://" for s in WEB_SCHEMES)):
+        raise ValueError("nur http(s)-Adressen")
+    return value
+
+
+class SettingsUpdate(_In):
+    """Was das Dashboard an den Einstellungen ändern darf (``EDITABLE_SETTINGS``) – mit Wertebereichen. Modellnamen
+    und Effort landen als Argumente beim claude-Aufruf, der Postfach-Ordner im IMAP-Befehl."""
+
+    llm_model: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._\-\[\]]{1,80}$")
+    llm_model_fast: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._\-\[\]]{1,80}$")
+    claude_parallel: int | None = Field(default=None, ge=1, le=8)
+    claude_effort: Literal["", "low", "medium", "high", "xhigh", "max"] | None = None
+    apply_mode: ApplyMode | None = None
+    headless: bool | None = None
+    vision: Literal["auto", "always", "never"] | None = None
+    autofill: bool | None = None
+    max_steps_per_application: int | None = Field(default=None, ge=1, le=60)
+    autopilot_enabled: bool | None = None
+    autopilot_days: list[int] | None = Field(default=None, max_length=7)
+    autopilot_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    autopilot_apply: bool | None = None
+    autopilot_apply_max: int | None = Field(default=None, ge=0, le=50)
+    autopilot_apply_mode: ApplyMode | None = None
+    notify_desktop: bool | None = None
+    notify_ntfy_url: str | None = Field(default=None, max_length=2_000)
+    notify_webhook_url: str | None = Field(default=None, max_length=2_000)
+    follow_up_days: int | None = Field(default=None, ge=1, le=365)
+    inbox_enabled: bool | None = None
+    inbox_host: str | None = Field(default=None, pattern=r"^[A-Za-z0-9.\-]{0,253}$")
+    inbox_port: int | None = Field(default=None, ge=1, le=65535)
+    inbox_user: str | None = Field(default=None, max_length=320)
+    inbox_password: str | None = Field(default=None, max_length=1_000)
+    inbox_folder: str | None = Field(default=None, min_length=1, max_length=200)
+    inbox_interval_min: int | None = Field(default=None, ge=5, le=1440)
+    inbox_lookback_days: int | None = Field(default=None, ge=1, le=365)
+    setup_completed: bool | None = None
+    extension_portals: bool | None = None
+    extension_portal_daily_limit: int | None = Field(default=None, ge=0, le=100)
+
+    @field_validator("notify_ntfy_url", "notify_webhook_url")
+    @classmethod
+    def _web_urls(cls, value: str | None) -> str | None:
+        return _web_or_empty(value) if value is not None else None
+
+    @field_validator("autopilot_days")
+    @classmethod
+    def _weekdays(cls, value: list[int] | None) -> list[int] | None:
+        if value is not None and any(not 0 <= d <= 6 for d in value):
+            raise ValueError("Wochentage 0 (Montag) bis 6")
+        return value
+
+    @field_validator("inbox_folder")
+    @classmethod
+    def _imap_folder(cls, value: str | None) -> str | None:
+        # Der Name steht in Anführungszeichen im IMAP-Befehl: kein " oder \, keine Steuerzeichen (CR/LF)
+        if value is not None and (any(c in value for c in '"\\') or not value.isprintable()):
+            raise ValueError("Ordnername ohne Anführungszeichen, Backslash und Steuerzeichen")
+        return value
+
+
+def bounded(value: Any, depth: int = 0) -> None:
+    """Texte, Listen und Verschachtelung eines JSON-Körpers begrenzen (Profil und Suche haben freie Struktur)."""
+    if depth > MAX_DEPTH:
+        raise Problem(413, "api.too_large", "Zu tief verschachtelt")
+    if isinstance(value, str):
+        if len(value) > MAX_TEXT:
+            raise Problem(413, "api.too_large", f"Text länger als {MAX_TEXT} Zeichen")
+    elif isinstance(value, dict | list):
+        if len(value) > MAX_ITEMS:
+            raise Problem(413, "api.too_large", f"Mehr als {MAX_ITEMS} Einträge")
+        for item in value.values() if isinstance(value, dict) else value:
+            bounded(item, depth + 1)
+
+
+def safe_filename(raw: str | None, default: str = "dokument.pdf") -> str:
+    """Dateiname aus einem Upload: nur der letzte Teil, harmlose Zeichen (kein „:“ für alternative Datenströme unter
+    Windows), keine führenden/abschließenden Punkte, keine reservierten Windows-Namen (CON, NUL, COM1 …)."""
+    name = re.sub(r"[^\w.\- ]", "_", Path((raw or "").replace("\\", "/")).name).strip(" .")
+    stem, dot, suffix = name.rpartition(".")
+    if not dot:
+        stem, suffix = name, ""
+    if stem.split(".")[0].upper() in WINDOWS_RESERVED:
+        stem = f"_{stem}"
+    name = f"{stem[:120]}.{suffix[:10]}" if suffix else stem[:120]
+    return name or default
 
 
 # --------------------------------------------------------------------------- App
@@ -366,6 +489,9 @@ class Context:
         self._llm: tuple[Settings, Any] | None = None
         self.crawl_idle.set()
         self.inbox_running = False
+        self.tailoring: set[int] = (
+            set()
+        )  # Stellen, für die gerade ein Lebenslauf entsteht (ein Claude-Lauf je Stelle)
         self.inbox_checked_at: datetime | None = None
         self.inbox_error = ""
         # Zähler „zu sichten“ (Ausschlussregeln über Tausende Stellen) – neu berechnet, sobald jemand schreibt
@@ -611,6 +737,55 @@ class Context:
             await self.notify("jobslop: Lauf abgebrochen", error)
 
 
+class _TooLarge(Exception):
+    pass
+
+
+class BodyLimit:
+    """Anfragekörper begrenzen, bevor jemand sie liest: per Content-Length sofort, bei gestückelter Übertragung
+    während des Lesens. JSON bis ``MAX_BODY``, Dokument-Uploads bis ``MAX_UPLOAD`` (plus Formular-Rahmen)."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        limit = MAX_UPLOAD + 64 * 1024 if scope["path"] in UPLOAD_PATHS else MAX_BODY
+        length = dict(scope["headers"]).get(b"content-length", b"0")
+        if not length.isdigit() or int(length) > limit:
+            await self._reject(send)
+            return
+        received, started = 0, False
+
+        async def limited_receive() -> Any:
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > limit:
+                    raise _TooLarge
+            return message
+
+        async def tracking_send(message: Any) -> None:
+            nonlocal started
+            started = started or message["type"] == "http.response.start"
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, tracking_send)
+        except _TooLarge:
+            if not started:
+                await self._reject(send)
+
+    @staticmethod
+    async def _reject(send: Any) -> None:
+        response = JSONResponse({"detail": "Anfrage zu groß", "code": "api.too_large", "params": {}}, 413)
+        await send({"type": "http.response.start", "status": 413, "headers": response.raw_headers})
+        await send({"type": "http.response.body", "body": response.body})
+
+
 def create_app(runtime: Runtime) -> FastAPI:
     ctx = Context(runtime)
 
@@ -625,8 +800,16 @@ def create_app(runtime: Runtime) -> FastAPI:
             await ctx.scheduler.stop()
             ctx.changes.close()
 
-    app = FastAPI(title="jobslop", version=__version__, docs_url=None, redoc_url=None, lifespan=lifespan)
+    app = FastAPI(
+        title="jobslop",
+        version=__version__,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+        lifespan=lifespan,
+    )
     app.state.ctx = ctx
+    app.add_middleware(BodyLimit)
 
     @app.exception_handler(DemoModeError)
     async def demo_mode(_request: Request, exc: DemoModeError) -> JSONResponse:
@@ -651,12 +834,11 @@ def create_app(runtime: Runtime) -> FastAPI:
 
     @app.exception_handler(Exception)
     async def internal_error(_request: Request, exc: Exception) -> JSONResponse:
-        # Den Traceback schreibt uvicorn; das Dashboard bekommt JSON statt „Internal Server Error“ als Text.
-        error = f"{type(exc).__name__}: {exc}"[:300]
-        return JSONResponse(
-            {"detail": f"Interner Fehler – {error}", "code": "api.internal", "params": {"error": error}},
-            status_code=500,
-        )
+        # Den Traceback schreibt uvicorn; das Dashboard bekommt JSON statt „Internal Server Error“ als Text – aber
+        # nur die Art des Fehlers: Exception-Texte enthalten Pfade, Werte aus dem Profil oder Teile fremder Seiten.
+        error = type(exc).__name__
+        detail = f"Interner Fehler ({error}) – Details im Server-Protokoll"
+        return JSONResponse({"detail": detail, "code": "api.internal", "params": {"error": error}}, 500)
 
     @app.middleware("http")
     async def local_only(request: Request, call_next):
@@ -876,12 +1058,33 @@ def create_app(runtime: Runtime) -> FastAPI:
             },
         }
 
+    def documents_inside_home(profile: Profile) -> None:
+        """Dokumente, die über die API neu gesetzt werden, müssen im jobslop-Ordner liegen (Uploads landen in
+        documents/). Sonst könnte ein Aufrufer ~/.ssh/id_rsa als Lebenslauf eintragen – Engine und Erweiterung
+        lüden die Datei auf eine Bewerbungsseite hoch. Was schon im Profil steht (von dir in profile.yaml), bleibt."""
+        base = ctx.settings.profile_path.parent
+        current = ctx.runtime().profile.documents
+        known = {current.cv, current.cv_en, current.cover_letter, *current.certificates}
+        docs = profile.documents
+        root = os.path.realpath(ctx.settings.home)
+        for value in (docs.cv, docs.cv_en, docs.cover_letter, *docs.certificates):
+            if value in known or not (path := docs.resolve(value, base)):
+                continue
+            if not os.path.realpath(path).startswith(root + os.sep):
+                raise Problem(
+                    422, "api.document_outside", "Dokumente nur aus dem jobslop-Ordner", value=value
+                )
+
     @app.put("/api/profile")
     def put_profile(body: dict[str, Any]) -> dict[str, Any]:
+        bounded(body)
         try:
-            profile = Profile.model_validate(body)
+            profile = Profile.model_validate(body, extra="forbid")
         except ValidationError as exc:
-            raise HTTPException(422, exc.errors()) from exc
+            raise HTTPException(
+                422, exc.errors(include_url=False, include_context=False, include_input=False)
+            ) from exc
+        documents_inside_home(profile)
         for name, default in Work():
             if default == TODO and getattr(profile.work, name) in ("", None):
                 setattr(profile.work, name, TODO)  # leer = unbekannt, der Agent fragt nach
@@ -897,15 +1100,28 @@ def create_app(runtime: Runtime) -> FastAPI:
     ) -> dict[str, Any]:
         if kind not in ("cv", "cv_en", "certificate"):
             raise HTTPException(400, "Unbekannte Dokumentart")
-        name = re.sub(r"[^\w.\- ]", "_", Path(file.filename or "dokument.pdf").name).strip() or "dokument.pdf"
+        name = safe_filename(file.filename)
         if not name.lower().endswith(".pdf"):
             raise Problem(400, "api.pdf_only", "Bitte eine PDF-Datei hochladen")
-        data = await file.read()
-        if len(data) > 15 * 1024 * 1024:
-            raise Problem(413, "api.too_large", "Datei ist größer als 15 MB")
         ctx.settings.ensure_dirs()
         target = ctx.settings.documents_dir / name
-        target.write_bytes(data)
+        # Stückweise in eine Zwischendatei: nie mehr als 15 MB, und erst eine vollständige, echte PDF ersetzt das Ziel
+        partial = target.with_name(f".{name}.upload")
+        size = 0
+        try:
+            with partial.open("wb") as out:
+                while chunk := await file.read(64 * 1024):
+                    if size == 0 and not chunk.startswith(b"%PDF-"):
+                        raise Problem(400, "api.pdf_only", "Bitte eine PDF-Datei hochladen")
+                    size += len(chunk)
+                    if size > MAX_UPLOAD:
+                        raise Problem(413, "api.too_large", "Datei ist größer als 15 MB")
+                    out.write(chunk)
+            if size == 0:
+                raise Problem(400, "api.pdf_only", "Bitte eine PDF-Datei hochladen")
+            os.replace(partial, target)
+        finally:
+            partial.unlink(missing_ok=True)
         rt = ctx.runtime()
         profile = rt.profile
         rel = f"documents/{name}"
@@ -930,7 +1146,7 @@ def create_app(runtime: Runtime) -> FastAPI:
                     message = "Profil aus dem Lebenslauf übernommen"
                 except Exception as exc:
                     log.exception("Lebenslauf-Import fehlgeschlagen")
-                    message = f"Lebenslauf konnte nicht ausgelesen werden: {exc}"
+                    message = f"Lebenslauf konnte nicht ausgelesen werden ({type(exc).__name__})"
         profile.save(ctx.settings.profile_path)
         return get_profile() | {"message": message}
 
@@ -941,10 +1157,13 @@ def create_app(runtime: Runtime) -> FastAPI:
 
     @app.put("/api/search")
     def put_search(body: dict[str, Any]) -> dict[str, Any]:
+        bounded(body)
         try:
-            config = SearchConfig.model_validate(body)
+            config = SearchConfig.model_validate(body, extra="forbid")
         except ValidationError as exc:
-            raise HTTPException(422, exc.errors()) from exc
+            raise HTTPException(
+                422, exc.errors(include_url=False, include_context=False, include_input=False)
+            ) from exc
         if not config.roles and not config.filters.include_titles:
             raise Problem(422, "api.roles_missing", "Mindestens eine Zielrolle angeben")
         config.save(ctx.settings.search_path)
@@ -974,8 +1193,13 @@ def create_app(runtime: Runtime) -> FastAPI:
         if not body.get("inbox_password"):
             body.pop("inbox_password", None)
         try:
-            ctx.settings = save_settings(ctx.settings, body)
-        except (ValueError, ValidationError) as exc:
+            changes = SettingsUpdate.model_validate(body).model_dump(exclude_unset=True)
+            ctx.settings = save_settings(ctx.settings, changes)
+        except ValidationError as exc:
+            raise HTTPException(
+                422, exc.errors(include_url=False, include_context=False, include_input=False)
+            ) from exc
+        except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         ctx.runner.settings = ctx.settings
         return get_settings_api()
@@ -1045,8 +1269,8 @@ def create_app(runtime: Runtime) -> FastAPI:
         view: str = "todo",
         min_fit: int = 0,
         sort: str = "score",
-        limit: int = 100,
-        offset: int = 0,
+        limit: int = Query(100, ge=1, le=1_000),
+        offset: int = Query(0, ge=0),
     ) -> dict[str, Any]:
         with session_scope(ctx.db) as s:
             # Ansichten und Zähler brauchen jede Stelle, die Liste nur eine Seite: schlichte Zeilen für alle, ORM-Objekte
@@ -1131,7 +1355,12 @@ def create_app(runtime: Runtime) -> FastAPI:
         ensure_not_demo(ctx.settings, "Stelle per Link laden")
         rt = ctx.runtime()
         try:
-            fetched = await fetch_job(body.url.strip(), llm=rt.llm(), fast_model=ctx.settings.llm_model_fast)
+            fetched = await fetch_job(
+                body.url.strip(),
+                llm=rt.llm(),
+                fast_model=ctx.settings.llm_model_fast,
+                allow_private=ctx.settings.allow_private_targets,
+            )
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         job_id, created = add_fetched_job(ctx.db, rt.config, fetched)
@@ -1194,6 +1423,15 @@ def create_app(runtime: Runtime) -> FastAPI:
     async def job_cv_create(job_id: int) -> dict[str, Any]:
         """Lebenslauf für die Stelle (neu) erstellen – genau diese Datei lädt jobslop später hoch."""
         ensure_not_demo(ctx.settings, "Lebenslauf zuschneiden")
+        if job_id in ctx.tailoring:  # Doppelklick: nicht zweimal Claude-Kontingent verbrauchen
+            raise Problem(409, "api.cv_running", "Der Lebenslauf für diese Stelle entsteht gerade")
+        ctx.tailoring.add(job_id)
+        try:
+            return await tailor_for(job_id)
+        finally:
+            ctx.tailoring.discard(job_id)
+
+    async def tailor_for(job_id: int) -> dict[str, Any]:
         with session_scope(ctx.db) as s:
             j = s.get(Job, job_id)
             if j is None:
@@ -1312,9 +1550,9 @@ def create_app(runtime: Runtime) -> FastAPI:
             return {"changed": changed, "skipped": [], "exclusions": [ex.id for ex in exclusions]}
 
     @app.post("/api/queue/top")
-    def queue_top(count: int = 10) -> dict[str, Any]:
+    def queue_top(count: int = Query(10, ge=1, le=50)) -> dict[str, Any]:
         config = ctx.runtime().config
-        picked = pick_top(ctx.db, config, max(1, min(count, 50)))
+        picked = pick_top(ctx.db, config, count)
         added, skipped = queue_jobs(ctx.db, config, picked)
         return {"changed": added, "skipped": skipped}
 
@@ -1349,8 +1587,8 @@ def create_app(runtime: Runtime) -> FastAPI:
         return ctx.runner.state()
 
     @app.get("/api/runner")
-    def runner_state(lines: int = 200) -> dict[str, Any]:
-        return ctx.runner.state(lines=max(0, min(lines, 2000)))
+    def runner_state(lines: int = Query(200, ge=0, le=2_000)) -> dict[str, Any]:
+        return ctx.runner.state(lines=lines)
 
     @app.post("/api/runner/stop")
     def runner_stop() -> dict[str, Any]:
@@ -1366,7 +1604,7 @@ def create_app(runtime: Runtime) -> FastAPI:
         return {"started": started, **ctx.crawl}
 
     @app.get("/api/crawls")
-    def crawls(limit: int = 50) -> list[dict[str, Any]]:
+    def crawls(limit: int = Query(50, ge=1, le=500)) -> list[dict[str, Any]]:
         with session_scope(ctx.db) as s:
             return [
                 {
@@ -1418,7 +1656,7 @@ def create_app(runtime: Runtime) -> FastAPI:
         return {"started": True}
 
     @app.get("/api/activity")
-    def activity(limit: int = 30) -> list[dict[str, Any]]:
+    def activity(limit: int = Query(30, ge=1, le=1_000)) -> list[dict[str, Any]]:
         with session_scope(ctx.db) as s:
             return [
                 {"id": a.id, "ts": _iso(a.ts), "kind": a.kind, "message": a.message, "data": a.data}
@@ -1427,7 +1665,7 @@ def create_app(runtime: Runtime) -> FastAPI:
 
     # ------------------------------------------------------------------ Bewerbungen & Pipeline
     @app.get("/api/applications")
-    def applications(status: str = "", limit: int = 300) -> list[dict[str, Any]]:
+    def applications(status: str = "", limit: int = Query(300, ge=1, le=5_000)) -> list[dict[str, Any]]:
         with session_scope(ctx.db) as s:
             stmt = select(Application).order_by(Application.id.desc()).limit(limit).options(WITH_JOB)
             if status:
@@ -1650,13 +1888,8 @@ def create_app(runtime: Runtime) -> FastAPI:
     def exclusion_create(body: ExclusionIn) -> dict[str, Any]:
         if body.kind not in ("company", "job", "title", "url") or not body.value.strip():
             raise HTTPException(400, "kind muss company, job, title oder url sein")
-        if body.kind == "title":
-            try:
-                re.compile(body.value.strip())
-            except re.error as exc:
-                raise Problem(
-                    400, "api.bad_regex", f"Ungültiger regulärer Ausdruck: {exc}", error=str(exc)
-                ) from exc
+        if body.kind == "title" and (problem := regex_problem(body.value.strip())):
+            raise Problem(400, "api.bad_regex", f"Ungültiger regulärer Ausdruck: {problem}", error=problem)
         with session_scope(ctx.db) as s:
             e = Exclusion(kind=body.kind, value=body.value.strip(), reason=body.reason)
             s.add(e)

@@ -164,8 +164,9 @@ def find_claude(explicit: str = "") -> list[str]:
 
 
 def subscription_env() -> dict[str, str]:
-    """Umgebung ohne API-Schlüssel, damit Claude Code garantiert den Abo-Login nutzt und nichts über die API abrechnet."""
-    env = dict(os.environ)
+    """Umgebung ohne API-Schlüssel, damit Claude Code garantiert den Abo-Login nutzt und nichts über die API abrechnet –
+    und ohne jobslops eigene Variablen (JOBSLOP_INBOX_PASSWORD u. a.): Claude braucht sie nicht."""
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith(("JOBSLOP_", "JOBPILOT_"))}
     for key in (
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_AUTH_TOKEN",
