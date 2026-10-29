@@ -85,6 +85,18 @@ export function roleClass(category: string, roles: string[]): string {
   return `role-${idx < 0 ? 7 : idx % 7}`;
 }
 
+// Adressen aus Job-Quellen und von Bewerbungsseiten sind fremde Daten: als Link oder Fenster nur http(s) – kein
+// javascript:, data: oder file:
+export function webUrl(url: string | null | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function hostOf(url: string): string {
   try {
     return new URL(url).hostname.replace(/^www\./, "");

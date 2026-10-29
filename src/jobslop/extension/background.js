@@ -56,9 +56,18 @@ async function save(tabId, s) {
 }
 
 // ------------------------------------------------------------------ Seite
+// Frames des Tabs ohne CAPTCHA-Frames – deren Adresse kommt vom Browser (webNavigation), nicht aus einem Skript im
+// Frame: in eine Sicherheitsabfrage wird nie Code eingeschleust.
+async function frames(tabId) {
+  const all = (await chrome.webNavigation.getAllFrames({ tabId }).catch(() => null)) || [];
+  return all.filter((f) => f.frameId === 0 || !isCaptcha(f.url));
+}
+
 async function inject(tabId) {
+  const frameIds = (await frames(tabId)).map((f) => f.frameId);
+  if (!frameIds.length) return;
   await chrome.scripting
-    .executeScript({ target: { tabId, allFrames: true }, files: ["extract.js", "content.js"] })
+    .executeScript({ target: { tabId, frameIds }, files: ["extract.js", "content.js"] })
     .catch(() => {});
 }
 
@@ -73,20 +82,20 @@ async function show(tabId, s, view) {
 }
 
 async function readPage(tabId) {
-  const probes = await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func: () => location.href });
+  const all = (await chrome.webNavigation.getAllFrames({ tabId }).catch(() => null)) || [];
   // Jeder Frame braucht seine eigene Nummer – also einzeln, aber parallel auslesen
-  const extract = async (probe) => {
-    if (probe.frameId !== 0 && isCaptcha(probe.result)) {
+  const extract = async (frame) => {
+    if (frame.frameId !== 0 && isCaptcha(frame.url)) {
       // CAPTCHA-Frames nie auslesen oder bedienen – jobslop meldet nur, dass eine da ist
-      return { index: probe.frameId, data: { url: probe.result, title: "", fields: [], buttons: [], errors: [], captcha: [], headings: [], text: "" } };
+      return { index: frame.frameId, data: { url: frame.url, title: "", fields: [], buttons: [], errors: [], captcha: [], headings: [], text: "" } };
     }
     try {
       const [result] = await chrome.scripting.executeScript({
-        target: { tabId, frameIds: [probe.frameId] },
+        target: { tabId, frameIds: [frame.frameId] },
         func: (index) => (self.jobslopExtract ? self.jobslopExtract(index) : null),
-        args: [probe.frameId],
+        args: [frame.frameId],
       });
-      return result && result.result ? { index: probe.frameId, data: result.result } : null;
+      return result && result.result ? { index: frame.frameId, data: result.result } : null;
     } catch {
       return null; // Frame während des Ladens weg – beim nächsten Schritt wieder dabei
     }
@@ -102,16 +111,20 @@ async function readPage(tabId) {
     })
     .then(([result]) => (result && result.result) || [])
     .catch(() => []); // ohne JSON-LD: jobslop nimmt Seitentitel und Überschrift
-  const [frames, ld] = await Promise.all([Promise.all(probes.map(extract)), jsonLd]);
-  return { frames: frames.filter(Boolean), ld };
+  const [read, ld] = await Promise.all([Promise.all(all.map(extract)), jsonLd]);
+  return { frames: read.filter(Boolean), ld };
 }
 
 const frameOf = (id) => parseInt(String(id).split("-")[0], 10) || 0;
 
 async function runIn(tabId, op, files) {
+  const frame = frameOf(op.field_id);
+  if (frame !== 0 && !(await frames(tabId)).some((f) => f.frameId === frame)) {
+    return { ok: false, detail: "Frame nicht (mehr) da oder eine Sicherheitsabfrage" };
+  }
   try {
     const [result] = await chrome.scripting.executeScript({
-      target: { tabId, frameIds: [frameOf(op.field_id)] },
+      target: { tabId, frameIds: [frame] },
       func: (o, f) => self.jobslopRun(o, f),
       args: [op, files || null],
     });
@@ -263,6 +276,15 @@ async function start(tab) {
 }
 self.jobslopStart = start; // für Tests
 
+// Antworten aus dem Panel: höchstens 50, Texte gekürzt – alles andere verwirft der Server ohnehin
+function cleanAnswers(answers) {
+  if (!Array.isArray(answers)) return [];
+  return answers
+    .filter((a) => a && typeof a.question === "string" && typeof a.answer === "string")
+    .slice(0, 50)
+    .map((a) => ({ question: a.question.slice(0, 500), answer: a.answer.slice(0, 5000) }));
+}
+
 async function handle(tabId, msg) {
   const s = await load(tabId);
   switch (msg.type) {
@@ -271,12 +293,15 @@ async function handle(tabId, msg) {
       s.active = true;
       await save(tabId, s);
       return step(tabId);
-    case "jobslop:answers":
-      if (!s) return;
-      await api("/api/assist/answers", { application_id: s.appId, answers: msg.answers });
-      s.history.push(`${msg.answers.length} Rückfrage(n) beantwortet und gespeichert`);
+    case "jobslop:answers": {
+      if (!s || s.waiting !== "questions") return;
+      const answers = cleanAnswers(msg.answers);
+      s.waiting = null;
+      await api("/api/assist/answers", { application_id: s.appId, answers });
+      s.history.push(`${answers.length} Rückfrage(n) beantwortet und gespeichert`);
       await save(tabId, s);
       return step(tabId);
+    }
     case "jobslop:submit":
       if (!s || s.waiting !== "submit") return;
       s.submitClicked = true;
@@ -285,7 +310,7 @@ async function handle(tabId, msg) {
       await ui(tabId, { state: "busy", text: "Sende ab …", job: s.job });
       return clickThenContinue(tabId, s, s.submitTarget);
     case "jobslop:self":
-      if (!s) return;
+      if (!s || s.waiting !== "submit") return;
       s.submitClicked = true;
       s.awaitNav = true;
       s.waiting = "self";
@@ -301,9 +326,12 @@ async function handle(tabId, msg) {
 
 chrome.action.onClicked.addListener((tab) => start(tab));
 
+// Nur das Panel spricht mit dem Service Worker: eigene Erweiterung, oberster Frame eines Tabs, bekannte Nachricht
+const PANEL_MESSAGES = new Set(["jobslop:continue", "jobslop:answers", "jobslop:submit", "jobslop:self", "jobslop:cancel"]);
 chrome.runtime.onMessage.addListener((msg, sender) => {
   const tabId = sender.tab && sender.tab.id;
-  if (tabId && msg && typeof msg.type === "string" && msg.type.startsWith("jobslop:")) handle(tabId, msg);
+  if (sender.id !== chrome.runtime.id || sender.frameId !== 0 || !tabId) return false;
+  if (msg && typeof msg.type === "string" && PANEL_MESSAGES.has(msg.type)) handle(tabId, msg);
   return false;
 });
 

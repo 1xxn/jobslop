@@ -50,6 +50,7 @@ from .hosts import host_of, is_handoff
 from .jobpage import FetchedJob, add_fetched_job, company_from_url, parse_html
 from .llm import LLM, LLMLimitReached
 from .netguard import BlockedTarget, ensure_public_target
+from .profile import normalize_question
 from .runtime import Runtime
 
 TOKEN_FILE = "extension-token"  # noqa: S105 – Dateiname, nicht das Token
@@ -134,37 +135,58 @@ def status(settings: Settings) -> dict[str, Any]:
 # --------------------------------------------------------------------------- Anfragen der Erweiterung
 
 
+# Alles, was die Erweiterung schickt, stammt zum Teil von der fremden Seite: Form und Größe werden geprüft, bevor
+# etwas davon in Planer, Datenbank oder Antwortbank geht.
+class FrameData(BaseModel):
+    """Ergebnis von extract.js für einen Frame (extract.js kürzt selbst; hier die harte Grenze)."""
+
+    url: str = Field(max_length=4_000)
+    title: str = Field(default="", max_length=2_000)
+    text: str = Field(default="", max_length=20_000)
+    headings: list[str] = Field(default_factory=list, max_length=50)
+    fields: list[dict[str, Any]] = Field(default_factory=list, max_length=500)
+    buttons: list[dict[str, Any]] = Field(default_factory=list, max_length=300)
+    errors: list[str] = Field(default_factory=list, max_length=100)
+    captcha: list[dict[str, Any]] = Field(default_factory=list, max_length=50)
+
+
 class FrameIn(BaseModel):
-    index: int
-    data: dict[str, Any]
+    index: int = Field(ge=0, le=100_000)
+    data: FrameData
 
 
 class StepIn(BaseModel):
-    frames: list[FrameIn]
+    frames: list[FrameIn] = Field(max_length=100)
     application_id: int | None = None
-    history: list[str] = Field(default_factory=list)
+    history: list[str] = Field(default_factory=list, max_length=200)
     submit_clicked: bool = False
-    step: int = 1
-    ld_json: list[str] = Field(default_factory=list)  # JSON-LD der Seite (Titel/Firma neuer Stellen)
+    step: int = Field(default=1, ge=1, le=1_000)
+    # JSON-LD der Seite (Titel/Firma neuer Stellen)
+    ld_json: list[str] = Field(default_factory=list, max_length=5)
 
 
 class ResultIn(BaseModel):
     application_id: int
-    step: int
-    summary: str = ""
-    results: list[dict[str, Any]] = Field(default_factory=list)
+    step: int = Field(ge=0, le=1_000)
+    summary: str = Field(default="", max_length=5_000)
+    results: list[dict[str, Any]] = Field(default_factory=list, max_length=500)
+
+
+class AnswerItem(BaseModel):
+    question: str = Field(max_length=500)
+    answer: str = Field(max_length=5_000)
 
 
 class AnswersIn(BaseModel):
     application_id: int
-    answers: list[dict[str, str]]  # {"question": …, "answer": …}
+    answers: list[AnswerItem] = Field(max_length=50)
 
 
 class FinishIn(BaseModel):
     application_id: int
     status: Literal["submitted", "aborted"]
-    url: str = ""
-    message: str = ""
+    url: str = Field(default="", max_length=4_000)
+    message: str = Field(default="", max_length=5_000)
 
 
 # --------------------------------------------------------------------------- Stellen & Bewerbungen
@@ -328,7 +350,7 @@ async def step(rt: Runtime, body: StepIn, llm: LLM | None = None) -> dict[str, A
     """Ein Schritt: Seite lesen → planen → Anweisungen. Abgeschickt wird nie hier, sondern nach deinem Klick."""
     settings = rt.settings
     ensure_not_demo(settings, "Bewerben")
-    state = state_from_frames({f.index: f.data for f in body.frames})
+    state = state_from_frames({f.index: f.data.model_dump() for f in body.frames})
     if not state.url:
         return {"blocked": "Die Seite ließ sich nicht lesen – neu laden und noch einmal versuchen."}
     try:
@@ -404,12 +426,21 @@ async def step(rt: Runtime, body: StepIn, llm: LLM | None = None) -> dict[str, A
         if problem:
             notes.append(problem)
     ops = [compile_action(state, a, files) for a in plan.actions if a.action != "skip"]
+    questions = [
+        q.model_dump() | {"label": (state.field(q.field_id) or {}).get("label", "")} for q in plan.open_questions
+    ]
     log_event(
         settings.db_path,
         app_id,
         "plan",
         f"[Erweiterung · {plan.page_kind} → {plan.next_step}] {plan.summary}",
-        {"actions": len(ops), "questions": len(plan.open_questions), "url": state.url},
+        {
+            "actions": len(ops),
+            "questions": len(questions),
+            "url": state.url,
+            # Nur auf diese Fragen nimmt save_answers Antworten an
+            "asked": [q["label"] or q["question"] for q in questions],
+        },
     )
     review = None
     if plan.next_step == "click_submit":
@@ -423,10 +454,7 @@ async def step(rt: Runtime, body: StepIn, llm: LLM | None = None) -> dict[str, A
             "summary": plan.summary,
             "next_step": plan.next_step,
             "next_target_id": plan.next_target_id,
-            "questions": [
-                q.model_dump() | {"label": (state.field(q.field_id) or {}).get("label", "")}
-                for q in plan.open_questions
-            ],
+            "questions": questions,
         },
         "ops": ops,
         "notes": notes,
@@ -468,11 +496,23 @@ def record_results(settings: Settings, body: ResultIn) -> None:
 
 
 def save_answers(settings: Settings, body: AnswersIn) -> int:
+    """Antworten aus dem Panel in die Antwortbank – nur für Fragen, die jobslop im letzten Schritt dieser laufenden
+    Bewerbung gestellt hat. Die Antwortbank füllt jede künftige Bewerbung; eine Seite darf dort nichts unterbringen."""
     with session_scope(settings.db_path) as s:
+        app = s.get(Application, body.application_id)
+        if app is None or app.origin != "extension" or app.status != "running":
+            return 0
+        last_plan = s.scalars(
+            select(ApplicationEvent)
+            .where(ApplicationEvent.application_id == app.id, ApplicationEvent.kind == "plan")
+            .order_by(ApplicationEvent.id.desc())
+            .limit(1)
+        ).first()
+        asked = {normalize_question(q) for q in ((last_plan.data or {}).get("asked") or [])} if last_plan else set()
         saved = 0
         for item in body.answers:
-            question, answer = item.get("question", "").strip(), item.get("answer", "").strip()
-            if question and answer:
+            question, answer = item.question.strip(), item.answer.strip()
+            if question and answer and normalize_question(question) in asked:
                 remember_answer(s, question, answer)
                 saved += 1
         s.add(

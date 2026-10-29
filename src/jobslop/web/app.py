@@ -87,13 +87,27 @@ SECURITY_HEADERS = {
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
     "Cross-Origin-Opener-Policy": "same-origin",
+    # Fremde Seiten dürfen nichts vom Dashboard als Bild, Skript o. Ä. einbinden (Spectre-artige Lecks)
+    "Cross-Origin-Resource-Policy": "same-origin",
+    # Das Dashboard braucht keine Kamera, kein Mikrofon, keinen Standort … – Kopieren in die Zwischenablage schon
+    "Permissions-Policy": (
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), hid=(), bluetooth=(), midi=(), "
+        "display-capture=(), screen-wake-lock=(), clipboard-read=(), clipboard-write=(self)"
+    ),
 }
-# Nur für HTML: Chromes PDF-Ansicht (Lebenslauf-Vorschau) verträgt object-src 'none' nicht. Inline-Styles braucht
-# Radix für die Position von Menüs und Tooltips.
+# Antworten mit Profil, Lebenslauf, Bewerbungen: nicht im Browser-Cache ablegen
+NO_STORE_PREFIXES = ("/api/", "/artifacts/")
+# Nur für HTML: Chromes PDF-Ansicht (Lebenslauf-Vorschau) verträgt object-src 'none' nicht.
+# - style-src 'unsafe-inline' gilt nur für <style>-Elemente: sonner (Toasts) und react-remove-scroll (Dialoge)
+#   legen ihr CSS zur Laufzeit so an. Style-Attribute im Markup sind verboten (style-src-attr 'none'); Reacts
+#   style-Prop setzt Werte über CSSOM und ist davon nicht betroffen.
+# - Trusted Types: innerHTML, eval & Co. nehmen keine Zeichenketten an – eine HTML-Einschleusung kann kein Skript
+#   ausführen, selbst wenn sie an React vorbei käme.
 CSP = (
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
-    "font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; "
-    "frame-ancestors 'none'"
+    "default-src 'self'; script-src 'self'; style-src 'self'; style-src-elem 'self' 'unsafe-inline'; "
+    "style-src-attr 'none'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; "
+    "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; "
+    "require-trusted-types-for 'script'; trusted-types 'none'"
 )
 STAGES = {
     "applied": ("submitted", "manual"),
@@ -107,6 +121,7 @@ MARK = {"applied": "manual", "interview": "interview", "rejected": "rejected", "
 MAX_BODY = 1024 * 1024  # JSON-Anfragen
 MAX_UPLOAD = 15 * 1024 * 1024  # PDF-Dokumente
 UPLOAD_PATHS = ("/api/profile/document",)
+MAX_ASSIST_STEP = 4 * 1024 * 1024  # Formular aller Frames einer Seite (Auswahllisten mit vielen Optionen)
 MAX_TEXT = 50_000  # Zeichen pro Text in Profil, Suche, Antworten
 MAX_ITEMS = 1_000  # Einträge pro Liste oder Objekt
 MAX_DEPTH = 12
@@ -754,7 +769,14 @@ class BodyLimit:
         if scope["type"] != "http" or scope["method"] in ("GET", "HEAD", "OPTIONS"):
             await self.app(scope, receive, send)
             return
-        limit = MAX_UPLOAD + 64 * 1024 if scope["path"] in UPLOAD_PATHS else MAX_BODY
+        path = scope["path"]
+        limit = (
+            MAX_UPLOAD + 64 * 1024
+            if path in UPLOAD_PATHS
+            else MAX_ASSIST_STEP
+            if path == "/api/assist/step"
+            else MAX_BODY
+        )
         length = dict(scope["headers"]).get(b"content-length", b"0")
         if not length.isdigit() or int(length) > limit:
             await self._reject(send)
@@ -864,6 +886,8 @@ def create_app(runtime: Runtime) -> FastAPI:
             return JSONResponse({"detail": "Fehlender X-Jobslop-Header"}, status_code=403)
         response = await call_next(request)
         response.headers.update(SECURITY_HEADERS)
+        if request.url.path.startswith(NO_STORE_PREFIXES):
+            response.headers["Cache-Control"] = "no-store"
         if response.headers.get("content-type", "").startswith("text/html"):
             response.headers["Content-Security-Policy"] = CSP
         return response

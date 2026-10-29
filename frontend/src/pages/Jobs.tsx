@@ -303,7 +303,8 @@ export function JobsPage() {
     z: () => void undo(lastAction.current),
     o: () => {
       const job = items.find((j) => j.id === activeId);
-      if (job) window.open(job.url, "_blank", "noopener");
+      const url = webUrl(job?.url);
+      if (url) window.open(url, "_blank", "noopener,noreferrer");
     },
     "/": () => searchRef.current?.focus(),
     escape: () => setSelection(new Set()),

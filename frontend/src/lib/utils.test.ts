@@ -1,8 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "./messages";
-import { formatWhen, hostOf, sourceName } from "./utils";
+import { formatWhen, hostOf, sourceName, webUrl } from "./utils";
 
 const t = (key: keyof typeof messages.en) => messages.en[key];
+
+describe("webUrl", () => {
+  it("keeps web addresses", () => {
+    expect(webUrl("https://boards.greenhouse.io/acme/jobs/1")).toBe("https://boards.greenhouse.io/acme/jobs/1");
+    expect(webUrl("http://example.com")).toBe("http://example.com/");
+  });
+
+  it("drops script, data and file addresses", () => {
+    for (const bad of ["javascript:alert(1)", " JavaScript:alert(1)", "data:text/html,<script>1</script>", "file:///etc/passwd", "vbscript:x", "", null, undefined, "not a url"]) {
+      expect(webUrl(bad)).toBeUndefined();
+    }
+  });
+});
 
 describe("sourceName", () => {
   it("names portals and boards readably", () => {
