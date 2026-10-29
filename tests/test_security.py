@@ -359,3 +359,12 @@ def test_windows_folder_outside_the_profile_is_private(tmp_path):
     assert "(I)" not in acl.split("\n")[0]  # keine geerbten Einträge mehr
     for group in ("S-1-1-0", "Everyone", "Jeder", "BUILTIN\\Users", "VORDEFINIERT\\Benutzer"):
         assert group not in acl
+
+
+def test_fastapi_telemetry_stays_off(settings, config, profile, monkeypatch):
+    """FastAPI bringt OpenTelemetry mit: jobslop exportiert nichts, auch wenn die Umgebung Exporter verlangt."""
+    monkeypatch.setenv("FASTAPI_OTEL_AUTO_CONFIGURE", "true")
+    app = create_app(Runtime(settings=settings, config=config, profile=profile))
+    telemetry = app._telemetry  # FastAPI hat dafür keinen öffentlichen Getter
+    assert not any(telemetry[k] for k in ("tracing", "metrics", "logs", "operation_spans", "auto_configure"))
+    assert not app._native_telemetry.enabled()
