@@ -69,6 +69,10 @@ Tests marked `live` call the real Claude Code and use your subscription; they on
    package metadata), run `uv lock` and `npm run build` in `frontend/`, commit.
 3. Tag and push: `git tag vX.Y.Z && git push origin main vX.Y.Z`.
 
+The install scripts pin the uv installer to a release and its SHA-256 (`UV_VERSION`, `UV_INSTALLER_SHA256` in
+`install.sh`, `$UvVersion`, `$UvInstallerSha256` in `install.ps1`; digests from the uv release page). Bump them
+now and then – the pinned uv only installs jobslop, `uv self update` brings it up to date.
+
 `.github/workflows/release.yml` re-runs all CI checks, verifies that tag, `pyproject.toml` and
 `frontend/package.json` agree, builds wheel and sdist, writes CycloneDX SBOMs (Python packages from `uv.lock`, npm
 packages of the dashboard), attests build provenance and the SBOM (`gh attestation verify <file> --repo 1xxn/jobslop`)
