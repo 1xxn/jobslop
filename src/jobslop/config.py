@@ -71,7 +71,8 @@ class Settings(BaseSettings):
     inbox_host: str = ""  # z. B. imap.gmail.com, outlook.office365.com, imap.web.de
     inbox_port: int = 993
     inbox_user: str = ""
-    inbox_password: str = ""
+    inbox_password: str = ""  # leer, wenn es im Schlüsselbund liegt (inbox_password_in_keyring) – imap_password()
+    inbox_password_in_keyring: bool = False  # nur jobslop selbst setzt das (nicht über die API)
     inbox_folder: str = "INBOX"
     inbox_interval_min: int = 30
     inbox_lookback_days: int = 30  # beim ersten Mal so weit zurück
@@ -177,6 +178,39 @@ def private_windows_folder(folder: Path) -> bool:
 
 class DemoModeError(RuntimeError):
     """Aktion mit echten Folgen (Crawl, Bewerbung, Nachricht) in einem Demo-Ordner."""
+
+
+def imap_password(settings: Settings) -> str:
+    """App-Passwort des Postfachs: aus Umgebung/settings.toml oder aus dem Schlüsselbund."""
+    if settings.inbox_password:
+        return settings.inbox_password
+    if settings.inbox_password_in_keyring:
+        from .secretstore import load
+
+        return load(settings.home, "imap")
+    return ""
+
+
+def store_imap_password(settings: Settings, password: str) -> tuple[str, dict[str, Any]]:
+    """Neues Passwort möglichst in den Schlüsselbund. Rückgabe: (Wert für settings.toml, interne Felder)."""
+    from .secretstore import store
+
+    if store(settings.home, "imap", password):
+        return "", {"inbox_password_in_keyring": bool(password)}
+    return password, {"inbox_password_in_keyring": False}
+
+
+def move_imap_password_to_keyring(settings: Settings) -> Settings:
+    """Ein Klartext-Passwort aus settings.toml (ältere Version) in den Schlüsselbund umziehen. Eins aus der Umgebung
+    (JOBSLOP_INBOX_PASSWORD) bleibt, wo es ist."""
+    plain = read_settings_file(settings.home).get("inbox_password") or ""
+    if not plain or ENV_PREFIX + "INBOX_PASSWORD" in os.environ:
+        return settings
+    value, internal = store_imap_password(settings, plain)
+    if value:
+        return settings  # kein Schlüsselbund: bleibt in der Datei
+    log.info("Postfach-Passwort in den Schlüsselbund verschoben")
+    return save_settings(settings, {"inbox_password": ""}, internal=internal)
 
 
 def ensure_not_demo(settings: Settings, action: str) -> None:
@@ -315,11 +349,16 @@ def get_settings() -> Settings:
     return load_settings()
 
 
-def save_settings(settings: Settings, updates: dict[str, Any]) -> Settings:
-    """Änderungen aus dem Dashboard in settings.toml schreiben und die neuen Einstellungen zurückgeben."""
+def save_settings(
+    settings: Settings, updates: dict[str, Any], *, internal: dict[str, Any] | None = None
+) -> Settings:
+    """Änderungen aus dem Dashboard in settings.toml schreiben und die neuen Einstellungen zurückgeben.
+
+    ``internal``: Felder, die nur jobslop selbst setzt (z. B. ob das Postfach-Passwort im Schlüsselbund liegt)."""
     unknown = set(updates) - EDITABLE_SETTINGS
     if unknown:
         raise ValueError(f"Nicht änderbar: {', '.join(sorted(unknown))}")
+    updates = updates | (internal or {})
     merged = read_settings_file(settings.home) | updates
     new = settings.model_copy(update=updates)
     Settings.model_validate(new.model_dump())  # Typen prüfen

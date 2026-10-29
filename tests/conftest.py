@@ -63,6 +63,36 @@ def signed_in(settings: Settings) -> dict[str, str]:
     return {SESSION_COOKIE: dashboard_token(settings)}
 
 
+class MemoryKeyring:
+    """Schlüsselbund im Speicher – Tests fassen nie den echten des Rechners an."""
+
+    priority = 1
+
+    def __init__(self) -> None:
+        self.data: dict[tuple[str, str], str] = {}
+
+    def get_password(self, service: str, username: str) -> str | None:
+        return self.data.get((service, username))
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        self.data[(service, username)] = password
+
+    def delete_password(self, service: str, username: str) -> None:
+        from keyring.errors import PasswordDeleteError
+
+        if self.data.pop((service, username), None) is None:
+            raise PasswordDeleteError(username)
+
+
+@pytest.fixture(autouse=True)
+def memory_keyring(monkeypatch) -> MemoryKeyring:
+    import keyring.core
+
+    backend = MemoryKeyring()
+    monkeypatch.setattr(keyring.core, "_keyring_backend", backend)
+    return backend
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     # Die Formular-Fixtures liegen auf 127.0.0.1 – im echten Betrieb sperrt netguard solche Ziele

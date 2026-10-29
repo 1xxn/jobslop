@@ -485,3 +485,55 @@ def test_session_token_is_stable_and_private(settings):
     assert len(first) >= 40 and dashboard_token(settings) == first
     assert login_url(settings, "http://127.0.0.1:8765/") == f"http://127.0.0.1:8765/#login={first}"
     assert (settings.home / "dashboard-token").read_text(encoding="utf-8") == first
+
+
+# --------------------------------------------------------------------------- Geheimnisse
+
+
+def test_imap_password_goes_into_the_os_keyring(settings, config, profile, memory_keyring):
+    """Das App-Passwort liegt im Schlüsselbund, nicht im Klartext in settings.toml – und verlässt den Server nie."""
+    from jobslop.config import imap_password, read_settings_file
+
+    client = _client(settings, config, profile)
+    r = client.put("/api/settings", json={"inbox_user": "max@example.org", "inbox_password": "app-passwort"})
+    assert r.status_code == 200 and r.json()["inbox_password_set"] and r.json()["inbox_password"] == ""
+    on_disk = read_settings_file(settings.home)
+    assert on_disk.get("inbox_password", "") == "" and on_disk["inbox_password_in_keyring"] is True
+    assert "app-passwort" not in settings.settings_path.read_text(encoding="utf-8")
+    assert list(memory_keyring.data.values()) == ["app-passwort"]
+    assert imap_password(client.app.state.ctx.settings) == "app-passwort"
+    client.put("/api/settings", json={"inbox_password_in_keyring": False})  # nicht über die API änderbar
+    assert read_settings_file(settings.home)["inbox_password_in_keyring"] is True
+
+
+def test_imap_password_stays_in_the_file_without_a_keyring(settings, config, profile, monkeypatch):
+    import keyring.core
+
+    class Broken:
+        priority = 1
+
+        def set_password(self, *_a):
+            raise RuntimeError("kein Secret Service")
+
+        def get_password(self, *_a):
+            raise RuntimeError("kein Secret Service")
+
+    monkeypatch.setattr(keyring.core, "_keyring_backend", Broken())
+    client = _client(settings, config, profile)
+    r = client.put("/api/settings", json={"inbox_password": "app-passwort"})
+    assert r.status_code == 200 and r.json()["inbox_password_set"]
+    from jobslop.config import read_settings_file
+
+    assert read_settings_file(settings.home)["inbox_password"] == "app-passwort"
+
+
+def test_plain_imap_password_moves_into_the_keyring(settings, config, profile, memory_keyring):
+    """Eine ältere Version hat das Passwort in settings.toml geschrieben – beim Start zieht es um."""
+    settings.settings_path.write_bytes(b'inbox_user = "max@example.org"\ninbox_password = "alt-passwort"\n')
+    from jobslop.config import imap_password, load_settings, read_settings_file
+
+    loaded = Settings(home=settings.home, **read_settings_file(settings.home))
+    app = create_app(Runtime(settings=loaded, config=config, profile=profile))
+    assert "alt-passwort" not in settings.settings_path.read_text(encoding="utf-8")
+    assert imap_password(app.state.ctx.settings) == "alt-passwort"
+    assert load_settings  # nur importiert: die Funktion bleibt der normale Weg beim Start

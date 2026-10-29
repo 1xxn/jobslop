@@ -37,6 +37,8 @@ dependencies = [
     "pypdf>=6.21.4",
     # LinkedIn, Indeed, Glassdoor (öffentliche Suche) – MIT, https://github.com/speedyapply/JobSpy
     "python-jobspy>=1.4.1,<2",
+    # App-Passwort des Postfachs im Schlüsselbund (Windows, macOS, Secret Service) – MIT
+    "keyring>=25.7",
 ]
 
 [project.urls]

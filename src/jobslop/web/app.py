@@ -45,8 +45,11 @@ from ..config import (
     SearchConfig,
     Settings,
     ensure_not_demo,
+    imap_password,
+    move_imap_password_to_keyring,
     save_settings,
     search_config_from_preset,
+    store_imap_password,
 )
 from ..crawl.sources import BOARD_SOURCES
 from ..db import (
@@ -520,7 +523,8 @@ class Context:
     """Geteilter Zustand des Servers. Profil und Suche werden bei jedem Zugriff frisch geladen."""
 
     def __init__(self, runtime: Runtime) -> None:
-        self.settings: Settings = runtime.settings
+        # ein Klartext-Passwort einer älteren Version wandert beim Start in den Schlüsselbund
+        self.settings: Settings = move_imap_password_to_keyring(runtime.settings)
         self._initial = runtime
         self.runner = Runner(self.settings)
         self.browser_installer = BrowserInstaller()
@@ -1280,7 +1284,7 @@ def create_app(runtime: Runtime) -> FastAPI:
         data = ctx.settings.model_dump(mode="json")
         out = {k: data[k] for k in sorted(EDITABLE_SETTINGS)} | {"home": str(ctx.settings.home)}
         # Das App-Passwort verlässt den Server nicht; leer zurückschicken heißt „unverändert“
-        return out | {"inbox_password": "", "inbox_password_set": bool(ctx.settings.inbox_password)}
+        return out | {"inbox_password": "", "inbox_password_set": bool(imap_password(ctx.settings))}
 
     @app.put("/api/settings")
     def put_settings(body: dict[str, Any]) -> dict[str, Any]:
@@ -1289,7 +1293,10 @@ def create_app(runtime: Runtime) -> FastAPI:
             body.pop("inbox_password", None)
         try:
             changes = SettingsUpdate.model_validate(body).model_dump(exclude_unset=True)
-            ctx.settings = save_settings(ctx.settings, changes)
+            internal: dict[str, Any] = {}
+            if "inbox_password" in changes:  # möglichst in den Schlüsselbund, nicht in settings.toml
+                changes["inbox_password"], internal = store_imap_password(ctx.settings, changes["inbox_password"])
+            ctx.settings = save_settings(ctx.settings, changes, internal=internal)
         except ValidationError as exc:
             raise HTTPException(
                 422, exc.errors(include_url=False, include_context=False, include_input=False)

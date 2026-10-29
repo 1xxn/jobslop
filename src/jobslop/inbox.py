@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from .classify import html_to_text
-from .config import Settings, ensure_not_demo
+from .config import Settings, ensure_not_demo, imap_password
 from .db import Application, ApplicationEvent, InboxMessage, session_scope, utcnow
 from .guard import company_key
 from .llm import LLM
@@ -149,7 +149,8 @@ def _parse(uid: int, raw: bytes) -> Mail:
 
 
 def _connect(settings: Settings) -> imaplib.IMAP4_SSL:
-    if not (settings.inbox_host and settings.inbox_user and settings.inbox_password):
+    password = imap_password(settings)
+    if not (settings.inbox_host and settings.inbox_user and password):
         raise InboxError("nicht eingerichtet – Server, Benutzer und App-Passwort angeben")
     try:
         imap = imaplib.IMAP4_SSL(settings.inbox_host, settings.inbox_port, timeout=30)
@@ -158,7 +159,7 @@ def _connect(settings: Settings) -> imaplib.IMAP4_SSL:
             f"Server {settings.inbox_host}:{settings.inbox_port} nicht erreichbar: {exc}"
         ) from exc
     try:
-        imap.login(settings.inbox_user, settings.inbox_password)
+        imap.login(settings.inbox_user, password)
         typ, _ = imap.select(f'"{settings.inbox_folder}"', readonly=True)  # EXAMINE: nur lesen
         if typ != "OK":
             raise InboxError(f"Ordner „{settings.inbox_folder}“ nicht gefunden")
