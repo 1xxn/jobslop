@@ -77,6 +77,10 @@ now and then – the pinned uv only installs jobslop, `uv self update` brings it
 `frontend/package.json` agree, builds wheel and sdist, writes CycloneDX SBOMs (Python packages from `uv.lock`, npm
 packages of the dashboard), attests build provenance and the SBOM (`gh attestation verify <file> --repo 1xxn/jobslop`)
 and – after you approve the `release` environment in the run – publishes a GitHub release with the changelog section.
+The signed attestation bundles are release files too (`jobslop-vX.Y.Z.intoto.jsonl` for the provenance,
+`jobslop-vX.Y.Z.sbom.intoto.jsonl` for the SBOM), so a download can be checked without the attestation API:
+`gh attestation verify jobslop-X.Y.Z-py3-none-any.whl --repo 1xxn/jobslop --bundle jobslop-vX.Y.Z.intoto.jsonl`.
+The workflow verifies both bundles before it uploads anything.
 Only maintainers can create `v*` tags (tag ruleset).
 
 ## CI
