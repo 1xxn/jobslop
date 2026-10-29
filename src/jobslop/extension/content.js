@@ -211,13 +211,20 @@
     return el;
   }
   const send = (type, extra) => chrome.runtime.sendMessage({ type, ...(extra || {}) });
+  // Nur ein echter Klick zählt: Skripte der Seite können Klicks erzeugen (isTrusted = false) – sonst könnte eine
+  // Bewerbungsseite selbst „Absenden“ drücken oder Antworten in deine Antwortbank schreiben
+  const onClick = (fn) => (event) => {
+    if (event.isTrusted) fn();
+  };
   const button = (text, type, primary, extra) =>
-    h("button", { class: primary ? "b primary" : "b", on: { click: () => send(type, extra) } }, text);
+    h("button", { class: primary ? "b primary" : "b", on: { click: onClick(() => send(type, extra)) } }, text);
 
   function mount() {
     if (host && host.isConnected) return;
     host = document.createElement("jobslop-assistant");
-    root = host.attachShadow({ mode: "open" });
+    // Geschlossen: Skripte der Seite erreichen Panel, Eingabefelder und Knöpfe nicht. Automatisierte Browser (die
+    // Tests mit Playwright, navigator.webdriver) bekommen einen offenen Root, damit sie das Panel bedienen können.
+    root = host.attachShadow({ mode: navigator.webdriver ? "open" : "closed" });
     document.documentElement.append(host);
   }
 
@@ -233,7 +240,7 @@
     const card = h(
       "div",
       { class: "card", role: "dialog", "aria-label": "jobslop" },
-      h("header", {}, h("b", {}, "jobslop"), h("span", { title: job }, job), h("button", { class: "x", title: "Schließen", on: { click: () => send("jobslop:cancel") } }, "×")),
+      h("header", {}, h("b", {}, "jobslop"), h("span", { title: job }, job), h("button", { class: "x", title: "Schließen", on: { click: onClick(() => send("jobslop:cancel")) } }, "×")),
       body,
     );
     switch (view.state) {
@@ -268,7 +275,7 @@
           send("jobslop:answers", {
             answers: inputs.filter(([, c]) => c.value.trim()).map(([q, c]) => ({ question: q.label || q.question, answer: c.value.trim() })),
           });
-        body.append(h("div", { class: "actions" }, h("button", { class: "b primary", on: { click: submit } }, "Antworten & weiter"), button("Abbrechen", "jobslop:cancel")));
+        body.append(h("div", { class: "actions" }, h("button", { class: "b primary", on: { click: onClick(submit) } }, "Antworten & weiter"), button("Abbrechen", "jobslop:cancel")));
         break;
       }
       case "review": {

@@ -368,3 +368,57 @@ def test_fastapi_telemetry_stays_off(settings, config, profile, monkeypatch):
     telemetry = app._telemetry  # FastAPI hat dafür keinen öffentlichen Getter
     assert not any(telemetry[k] for k in ("tracing", "metrics", "logs", "operation_spans", "auto_configure"))
     assert not app._native_telemetry.enabled()
+
+
+# --------------------------------------------------------------------------- Browser-Erweiterung (Server-Seite)
+
+
+def test_extension_answers_only_for_questions_jobslop_asked(settings, config, profile):
+    """Die Antwortbank füllt jede künftige Bewerbung: Die Erweiterung darf dort nur Antworten auf Fragen ablegen,
+    die jobslop im letzten Schritt dieser laufenden Bewerbung gestellt hat."""
+    from jobslop import assist
+    from jobslop.db import Answer, Application, ApplicationEvent
+
+    with session_scope(settings.db_path) as s:
+        job = Job(fingerprint="ext-1", company="Acme", title="SRE", url="https://acme.example/jobs/1")
+        app = Application(job=job, origin="extension", mode="review", status="running")
+        s.add(app)
+        s.flush()
+        s.add(
+            ApplicationEvent(
+                application_id=app.id, kind="plan", message="", data={"asked": ["Visa required?"]}
+            )
+        )
+        app_id = app.id
+    body = assist.AnswersIn(
+        application_id=app_id,
+        answers=[
+            {"question": "Visa required? *", "answer": "No"},
+            {"question": "Gehaltswunsch", "answer": "1 Euro"},  # nie gefragt
+        ],
+    )
+    assert assist.save_answers(settings, body) == 1
+    with session_scope(settings.db_path) as s:
+        assert [a.answer for a in s.execute(select(Answer)).scalars()] == ["No"]
+        s.get(Application, app_id).status = "submitted"
+    assert assist.save_answers(settings, body) == 0  # abgeschlossene Bewerbung: nichts mehr
+
+
+def test_extension_messages_are_bounded(settings, config, profile):
+    from pydantic import ValidationError
+
+    from jobslop import assist
+
+    frame = {"url": "https://acme.example/apply", "fields": [{"id": "0-1"}] * 501}
+    with pytest.raises(ValidationError):
+        assist.StepIn(frames=[assist.FrameIn(index=0, data=frame)])
+    with pytest.raises(ValidationError):
+        assist.AnswersIn(application_id=1, answers=[{"question": "q", "answer": "a"}] * 51)
+    with pytest.raises(ValidationError):
+        assist.FinishIn(application_id=1, status="submitted", message="x" * 10_000)
+    client = _client(settings, config, profile)
+    token = assist.token(settings)
+    r = client.post(
+        "/api/assist/step", json={"frames": [{"index": 0, "data": frame}]}, headers={"X-Jobslop-Token": token}
+    )
+    assert r.status_code == 422

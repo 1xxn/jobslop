@@ -35,6 +35,22 @@ async def _browser(pw, ext, tmp_path):
     return ctx, worker
 
 
+# Was eine bösartige Bewerbungsseite versuchen könnte: das Panel finden und seine Knöpfe per Skript drücken.
+# (In Playwright ist der Shadow Root offen – navigator.webdriver –, im echten Chrome nicht einmal erreichbar.)
+PAGE_CLICKS_SUBMIT = """() => {
+  const root = document.querySelector("jobslop-assistant")?.shadowRoot;
+  for (const b of root ? root.querySelectorAll("button") : []) {
+    if (/Absenden|selbst/.test(b.textContent)) b.click();
+  }
+}"""
+
+PAGE_ANSWERS = """() => {
+  const root = document.querySelector("jobslop-assistant")?.shadowRoot;
+  if (!root) return;
+  for (const input of root.querySelectorAll("input")) input.value = "von der Seite";
+  for (const b of root.querySelectorAll("button")) if (/Antworten/.test(b.textContent)) b.click();
+}"""
+
 START = """async (part) => {
   const tabs = await chrome.tabs.query({});
   await self.jobslopStart(tabs.find((t) => (t.url || "").includes(part)));
@@ -58,6 +74,11 @@ async def test_extension_fills_form_and_submits_only_after_approval(server, site
 
             # Rückfragen erscheinen im Panel (Shadow DOM) – beantworten
             await page.get_by_text("Antworten & weiter").wait_for(timeout=20_000)
+            # Ein Skript der Seite kann keine Antworten in die Antwortbank schreiben
+            await page.evaluate(PAGE_ANSWERS)
+            await page.wait_for_timeout(1_500)
+            with session_scope(settings.db_path) as s:
+                assert not s.execute(select(Answer)).scalars().all()
             answers = {"visa": "No", "salary": "70000", "hear": "Company website"}
             for label in await page.locator("jobslop-assistant label").all():
                 question = (await label.locator("span").first.inner_text()).lower()
@@ -72,6 +93,11 @@ async def test_extension_fills_form_and_submits_only_after_approval(server, site
             # Alles ausgefüllt, aber nichts abgeschickt, bis du freigibst
             await page.get_by_text("Vor dem Absenden prüfen").wait_for(timeout=20_000)
             assert len(site.submissions) == before
+            # Die Seite selbst kann „Absenden“ im Panel nicht drücken (Skript-Klick, isTrusted = false)
+            await page.evaluate(PAGE_CLICKS_SUBMIT)
+            await page.wait_for_timeout(3_000)
+            assert len(site.submissions) == before
+            await page.get_by_text("Vor dem Absenden prüfen").wait_for(timeout=1_000)
             assert await page.input_value("#first_name") == "Max"
             assert await page.is_checked("#visa-no") and await page.is_checked("#privacy")
             assert await page.input_value("#hear-value") == "Company website"
