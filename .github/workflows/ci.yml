@@ -43,11 +43,12 @@ jobs:
       - name: Types (mypy)
         run: uv run mypy
       # Strengste Stufe; online prüft zizmor zusätzlich, ob gepinnte SHAs wirklich zum Repo gehören (impostor
-      # commits) und ob eine verwendete Action bekannte Lücken hat. Das Token ist nur lesend.
+      # commits) und ob eine verwendete Action bekannte Lücken hat. Das Token ist nur lesend. zizmor kommt mit Hash
+      # aus uv.lock (Gruppe „workflows“).
       - name: Workflow security (zizmor)
         env:
           GH_TOKEN: ${{ github.token }}
-        run: uvx zizmor==1.31.1 --persona=auditor --format=github .github/workflows
+        run: uv run --locked --only-group workflows zizmor --persona=auditor --format=github .github/workflows
 
   python:
     name: Python ${{ matrix.python }} · ${{ matrix.os }}
