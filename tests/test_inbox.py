@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from conftest import LOCAL, add_job
+from conftest import LOCAL, add_job, signed_in
 from jobslop import inbox
 from jobslop.db import Application, InboxMessage, session_scope
 from jobslop.inbox import Candidate, Mail, MailVerdict, check_inbox, fetch_mails, related
@@ -152,6 +152,7 @@ def test_inbox_api_applies_and_hides_the_password(settings, config, profile):
         create_app(Runtime(settings=settings, config=config, profile=profile)),
         base_url=LOCAL,
         headers={"X-Jobslop": "1"},
+        cookies=signed_in(settings),
     )
     client.put("/api/settings", json={"inbox_user": "me@example.org", "inbox_password": "geheim"})
     got = client.get("/api/settings").json()
@@ -177,6 +178,7 @@ def test_incomplete_setup_is_a_clear_error(settings, config, profile, missing):
         create_app(Runtime(settings=settings, config=config, profile=profile)),
         base_url=LOCAL,
         headers={"X-Jobslop": "1"},
+        cookies=signed_in(settings),
     )
     r = client.post("/api/inbox/test")
     assert r.status_code == 502 and r.json()["code"] == "api.inbox_failed"

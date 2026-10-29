@@ -2,7 +2,8 @@
 
 Sicherheit: Der Server lauscht nur lokal. Zusätzlich werden fremde Host-Header abgewiesen (DNS-Rebinding)
 und ändernde Anfragen brauchen den Header ``X-Jobslop: 1`` – den kann eine fremde Webseite ohne CORS-Freigabe
-nicht setzen (CSRF-Schutz). Einbetten in fremde Seiten ist verboten (Clickjacking: eine Seite legt das Dashboard
+nicht setzen (CSRF-Schutz). API und Belege verlangen das Sitzungs-Cookie: 127.0.0.1 erreichen auch andere Benutzer
+und Prozesse des Rechners, das Token in ``dashboard-token`` kann nur lesen, wem der jobslop-Ordner gehört. Einbetten in fremde Seiten ist verboten (Clickjacking: eine Seite legt das Dashboard
 unsichtbar über einen Köder und lässt dich „Absenden“ klicken), die Oberfläche lädt nur eigene Skripte (CSP).
 """
 
@@ -15,6 +16,7 @@ import logging
 import mimetypes
 import os
 import re
+import secrets
 from collections import Counter
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -97,6 +99,13 @@ SECURITY_HEADERS = {
 }
 # Antworten mit Profil, Lebenslauf, Bewerbungen: nicht im Browser-Cache ablegen
 NO_STORE_PREFIXES = ("/api/", "/artifacts/")
+# Sitzung: Cookie mit dem Inhalt von JOBSLOP_HOME/dashboard-token. `jobslop` öffnet den Browser mit /#login=<token>,
+# die Oberfläche tauscht das einmal gegen das Cookie (HttpOnly – kein Skript kommt daran). Ohne Cookie gehen nur
+# die Anmeldung, der Lebenszeichen-Abruf der CLI und die Erweiterung (eigenes Token im Header).
+SESSION_COOKIE = "jobslop_session"
+SESSION_MAX_AGE = 400 * 24 * 3600  # das Maximum, das Chrome für Cookies erlaubt
+TOKEN_FILE = "dashboard-token"  # noqa: S105 – Dateiname, nicht das Token
+OPEN_PATHS = ("/api/session", "/api/ping")
 # Nur für HTML: Chromes PDF-Ansicht (Lebenslauf-Vorschau) verträgt object-src 'none' nicht.
 # - style-src 'unsafe-inline' gilt nur für <style>-Elemente: sonner (Toasts) und react-remove-scroll (Dialoge)
 #   legen ihr CSS zur Laufzeit so an. Style-Attribute im Markup sind verboten (style-src-attr 'none'); Reacts
@@ -133,6 +142,22 @@ WINDOWS_RESERVED = {
     *(f"COM{i}" for i in range(10)),
     *(f"LPT{i}" for i in range(10)),
 }
+
+
+def dashboard_token(settings: Settings) -> str:
+    """Geheimnis der Dashboard-Sitzung – einmal erzeugt, liegt im (privaten) jobslop-Ordner."""
+    path = settings.home / TOKEN_FILE
+    if path.is_file() and (value := path.read_text(encoding="utf-8").strip()):
+        return value
+    settings.home.mkdir(parents=True, exist_ok=True)
+    value = secrets.token_urlsafe(32)
+    path.write_bytes(value.encode())
+    return value
+
+
+def login_url(settings: Settings, base: str) -> str:
+    """Adresse, die den Browser anmeldet (das Token steht im Fragment: es geht an kein Protokoll und keinen Server)."""
+    return f"{base.rstrip('/')}/#login={dashboard_token(settings)}"
 
 
 class Problem(HTTPException):
@@ -379,6 +404,10 @@ class PresetRequest(_In):
     cities: list[str] = Field(default_factory=lambda: ["berlin"], max_length=50)
     remote: bool = True
     exclude_leadership: bool = True
+
+
+class SessionIn(_In):
+    token: str = Field(max_length=200)
 
 
 class UrlIn(_In):
@@ -873,23 +902,54 @@ def create_app(runtime: Runtime) -> FastAPI:
         detail = f"Interner Fehler ({error}) – Details im Server-Protokoll"
         return JSONResponse({"detail": detail, "code": "api.internal", "params": {"error": error}}, 500)
 
+    session = dashboard_token(ctx.settings)
+
+    def deny(status: int, detail: str, code: str) -> JSONResponse:
+        response = JSONResponse({"detail": detail, "code": code, "params": {}}, status_code=status)
+        response.headers.update(SECURITY_HEADERS | {"Cache-Control": "no-store"})
+        return response
+
     @app.middleware("http")
     async def local_only(request: Request, call_next):
         host = host_name(request.headers.get("host") or "")
+        path = request.url.path
         if host not in LOCAL_HOSTS and host != ctx.settings.dashboard_host:
-            return JSONResponse({"detail": "Nur lokal erreichbar"}, status_code=403)
+            return deny(403, "Nur lokal erreichbar", "api.forbidden")
         if (
-            request.url.path.startswith("/api/")
+            path.startswith("/api/")
             and request.method not in ("GET", "HEAD", "OPTIONS")
             and request.headers.get("x-jobslop") != "1"
         ):
-            return JSONResponse({"detail": "Fehlender X-Jobslop-Header"}, status_code=403)
+            return deny(403, "Fehlender X-Jobslop-Header", "api.forbidden")
+        if (
+            path.startswith(("/api/", "/artifacts/"))
+            and path not in OPEN_PATHS
+            and not path.startswith("/api/assist/")  # die Erweiterung weist sich mit ihrem Token aus (paired)
+            and not secrets.compare_digest(request.cookies.get(SESSION_COOKIE, ""), session)
+        ):
+            return deny(401, "Nicht angemeldet – jobslop mit dem Befehl `jobslop` öffnen", "api.login")
         response = await call_next(request)
         response.headers.update(SECURITY_HEADERS)
         if request.url.path.startswith(NO_STORE_PREFIXES):
             response.headers["Cache-Control"] = "no-store"
         if response.headers.get("content-type", "").startswith("text/html"):
             response.headers["Content-Security-Policy"] = CSP
+        return response
+
+    # ------------------------------------------------------------------ Sitzung
+    @app.get("/api/ping")
+    def ping() -> dict[str, Any]:
+        """Lebenszeichen für `jobslop` (läuft schon ein Dashboard auf dem Port?) – ohne Daten, ohne Anmeldung."""
+        return {"app": "jobslop", "version": __version__}
+
+    @app.post("/api/session")
+    def login(body: SessionIn) -> JSONResponse:
+        if not secrets.compare_digest(body.token, session):
+            return deny(401, "Anmelde-Link ungültig – jobslop mit dem Befehl `jobslop` öffnen", "api.login")
+        response = JSONResponse({"ok": True})
+        response.set_cookie(
+            SESSION_COOKIE, session, max_age=SESSION_MAX_AGE, path="/", httponly=True, samesite="strict"
+        )
         return response
 
     # ------------------------------------------------------------------ Status & System

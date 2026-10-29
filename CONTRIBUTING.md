@@ -21,6 +21,10 @@ JOBSLOP_HOME=.demo-home uv run jobslop            # PowerShell: $env:JOBSLOP_HOM
 cd frontend && npm run dev                       # hot reload on :5173, proxies the API to :8765
 ```
 
+The API answers only browsers with the session cookie (other local users and processes reach `127.0.0.1` too).
+`jobslop` opens the browser signed in and prints a sign-in link; for the Vite dev server open
+`http://localhost:5173/#login=<token>` once, with the token from `<JOBSLOP_HOME>/dashboard-token`.
+
 ## Checks
 
 ```bash

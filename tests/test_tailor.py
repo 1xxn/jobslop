@@ -185,7 +185,7 @@ def test_tailored_cv_api(settings, config, profile, monkeypatch):
     job_id = add_job(settings, "https://example.com/jobs/7", title="Site Reliability Engineer")
     profile.save(settings.profile_path)
     app = create_app(Runtime(settings=settings, config=config, profile=profile))
-    client = TestClient(app, base_url=LOCAL, headers={"X-Jobslop": "1"})
+    client = TestClient(app, base_url=LOCAL, headers={"X-Jobslop": "1"}, cookies=signed_in(settings))
     assert client.get(f"/api/jobs/{job_id}/cv").json() == {
         "enabled": False,
         "file": None,

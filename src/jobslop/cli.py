@@ -939,6 +939,10 @@ def _running_instance(host: str, port: int) -> bool:
     if _port_free(host, port):
         return False  # niemand lauscht – unter Windows kostete der Verbindungsversuch sonst 1,5 s Wartezeit
     try:
+        r = httpx.get(f"http://{host}:{port}/api/ping", timeout=1.5)
+        if r.status_code == 200:
+            return r.json().get("app") == "jobslop"
+        # ältere Version ohne /api/ping (bis 1.0): Status ohne Anmeldung
         r = httpx.get(f"http://{host}:{port}/api/status", timeout=1.5)
         return r.status_code == 200 and "setup_completed" in r.json()
     except (httpx.HTTPError, ValueError):
@@ -973,7 +977,7 @@ def start(
 
     import uvicorn
 
-    from .web.app import create_app
+    from .web.app import create_app, login_url
 
     settings = get_settings()
     init_home(settings)
@@ -984,16 +988,18 @@ def start(
     if _running_instance(host, port):
         console.print(f"jobslop läuft schon: [bold]{url}[/bold]")
         if open_browser:
-            webbrowser.open(url)
+            webbrowser.open(login_url(r.settings, url))
         return
     while not _port_free(host, port):
         port += 1
     url = f"http://{host}:{port}"
     console.print(f"[bold]jobslop {__version__}[/bold] · Dashboard: [bold]{url}[/bold]  (Strg+C beendet)")
+    # Der Browser öffnet sich angemeldet; der Link meldet auch einen anderen Browser an (nur für dich bestimmt)
+    console.print(f"Anmelde-Link: {escape(login_url(r.settings, url))}", style="dim")
     if not r.settings.setup_completed:
         console.print("Erster Start – die Einrichtung öffnet sich im Browser.")
     if open_browser:
-        threading.Timer(1.2, lambda: webbrowser.open(url)).start()
+        threading.Timer(1.2, lambda: webbrowser.open(login_url(r.settings, url))).start()
     uvicorn.run(create_app(r), host=host, port=port, log_level="warning")
 
 

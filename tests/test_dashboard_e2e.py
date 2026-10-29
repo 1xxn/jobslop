@@ -11,7 +11,7 @@ import pytest
 from conftest import serve
 from jobslop.config import SearchConfig, get_settings
 from jobslop.runtime import Runtime
-from jobslop.web.app import create_app
+from jobslop.web.app import create_app, login_url
 
 pytestmark = pytest.mark.browser
 
@@ -49,6 +49,9 @@ async def test_dashboard_end_to_end(dashboard):
         browser = await pw.chromium.launch(headless=True)
         ctx = await browser.new_context(locale="de-DE", viewport={"width": 1440, "height": 1000})
         page = await ctx.new_page()
+        # angemeldet wie nach `jobslop`: der Anmelde-Link tauscht das Token gegen das Sitzungs-Cookie
+        await page.goto(login_url(Runtime.load(get_settings()).settings, base))
+        await page.wait_for_url(re.compile(r"^[^#]*$"))
         page.on("pageerror", lambda exc: errors.append(str(exc)))
         page.on("console", lambda msg: msg.type == "error" and errors.append(msg.text))
         try:
