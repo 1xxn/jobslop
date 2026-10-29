@@ -809,6 +809,15 @@ def create_app(runtime: Runtime) -> FastAPI:
         redoc_url=None,
         openapi_url=None,
         lifespan=lifespan,
+        # FastAPIs OpenTelemetry-Anbindung aus: auch wenn die Umgebung Exporter einrichtet
+        # (FASTAPI_OTEL_AUTO_CONFIGURE, OTEL_*), gehen keine Spans, Exception-Texte oder Routen mit Personendaten raus
+        telemetry={
+            "tracing": False,
+            "metrics": False,
+            "logs": False,
+            "operation_spans": False,
+            "auto_configure": False,
+        },
     )
     app.state.ctx = ctx
     app.add_middleware(BodyLimit)
