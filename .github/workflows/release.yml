@@ -76,16 +76,41 @@ jobs:
       # Nachweis, dass Wheel und sdist aus genau diesem Tag in diesem Workflow gebaut wurden:
       # gh attestation verify <datei> --repo 1xxn/jobslop
       - name: Attest build provenance
+        id: provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |
             dist/*.whl
             dist/*.tar.gz
       - name: Attest SBOM
+        id: sbom
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/*.whl
           sbom-path: dist/jobslop-${{ github.ref_name }}.python.cdx.json
+
+      # Die signierten Nachweise (Sigstore-Bundle, in-toto-Aussage) auch als Release-Dateien: prüfbar ohne GitHub-API
+      # (gh attestation verify <datei> --repo 1xxn/jobslop --bundle jobslop-<tag>.intoto.jsonl), und OpenSSF
+      # Scorecard erkennt signierte Releases mit Herkunftsnachweis an der Endung .intoto.jsonl
+      - name: Attestation bundles as release files
+        env:
+          PROVENANCE_BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+          SBOM_BUNDLE: ${{ steps.sbom.outputs.bundle-path }}
+        run: |
+          cp "$PROVENANCE_BUNDLE" "dist/jobslop-${GITHUB_REF_NAME}.intoto.jsonl"
+          cp "$SBOM_BUNDLE" "dist/jobslop-${GITHUB_REF_NAME}.sbom.intoto.jsonl"
+      - name: Verify the bundles
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for file in dist/*.whl dist/*.tar.gz; do
+            gh attestation verify "$file" --repo "$GITHUB_REPOSITORY" \
+              --bundle "dist/jobslop-${GITHUB_REF_NAME}.intoto.jsonl" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+          done
+          gh attestation verify dist/*.whl --repo "$GITHUB_REPOSITORY" \
+            --bundle "dist/jobslop-${GITHUB_REF_NAME}.sbom.intoto.jsonl" \
+            --predicate-type https://cyclonedx.org/bom
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
