@@ -12,6 +12,7 @@ and asks before it submits anything.
 
 [![CI](https://github.com/1xxn/jobslop/actions/workflows/ci.yml/badge.svg)](https://github.com/1xxn/jobslop/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/1xxn/jobslop/badge)](https://scorecard.dev/viewer/?uri=github.com/1xxn/jobslop)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16059/badge)](https://www.bestpractices.dev/projects/16059)
 ![Python](https://img.shields.io/badge/python-3.12%2B-3776ab)
 ![License](https://img.shields.io/badge/license-MIT-green)
 

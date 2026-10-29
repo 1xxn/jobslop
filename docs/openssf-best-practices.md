@@ -5,6 +5,8 @@ level **passing**, with the evidence in this repository. OpenSSF Scorecard reads
 bestpractices.dev (check *CII-Best-Practices*: in progress 2, passing 5, silver 7, gold 10). The entry itself is made
 by the maintainer on bestpractices.dev; this file keeps the answers and their sources in one place.
 
+Entry: [bestpractices.dev/projects/16059](https://www.bestpractices.dev/projects/16059) – **passing** since 2026-10-29.
+
 Base URL of the evidence: `https://github.com/1xxn/jobslop/blob/main/`.
 
 ## Basics
