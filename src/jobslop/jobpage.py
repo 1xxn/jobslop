@@ -136,11 +136,16 @@ class _Extracted(BaseModel):
     remote: bool
 
 
-def _walk(node: Any) -> list[dict[str, Any]]:
+_MAX_LD_DEPTH = 20  # JobPostings stecken höchstens in @graph/itemListElement – tiefer sucht niemand
+
+
+def _walk(node: Any, depth: int = 0) -> list[dict[str, Any]]:
     found: list[dict[str, Any]] = []
+    if depth > _MAX_LD_DEPTH:
+        return found
     if isinstance(node, list):
         for item in node:
-            found += _walk(item)
+            found += _walk(item, depth + 1)
     elif isinstance(node, dict):
         kind = node.get("@type")
         kinds = kind if isinstance(kind, list) else [kind]
@@ -148,18 +153,24 @@ def _walk(node: Any) -> list[dict[str, Any]]:
             found.append(node)
         for key in ("@graph", "mainEntity", "itemListElement"):
             if key in node:
-                found += _walk(node[key])
+                found += _walk(node[key], depth + 1)
     return found
 
 
 def _location(posting: dict[str, Any]) -> str:
+    # Fremdes JSON-LD: jobLocation und address kommen als Objekt, Liste, Text oder Unsinn
     locs = posting.get("jobLocation") or []
     locs = locs if isinstance(locs, list) else [locs]
     parts = []
     for loc in locs:
-        addr = (loc or {}).get("address") or {}
+        if isinstance(loc, str):
+            parts.append(loc)
+            continue
+        addr = loc.get("address") if isinstance(loc, dict) else None
         if isinstance(addr, str):
             parts.append(addr)
+            continue
+        if not isinstance(addr, dict):
             continue
         country = addr.get("addressCountry")
         if isinstance(country, dict):
@@ -176,7 +187,7 @@ def parse_html(url: str, html: str) -> FetchedJob:
     for raw in head.ld:
         try:
             data = json.loads(raw.strip())
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, RecursionError):  # „[[[[…“ tiefer als Pythons Rekursionsgrenze
             continue
         postings = _walk(data)
         if not postings:

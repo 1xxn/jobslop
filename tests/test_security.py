@@ -227,7 +227,22 @@ async def test_extension_refuses_pages_in_the_own_network(settings, config, prof
 
 @pytest.mark.parametrize(
     "pattern",
-    ["(a+)+$", "(a|aa)*b", "(x+x+)+y", "(.*a){3}", r"(\w)\1", "a.*b.*c.*d", "(?:senior|lead)+", "x" * 201],
+    [
+        "(a+)+$",
+        "(a|aa)*b",
+        "(x+x+)+y",
+        "(.*a){3}",
+        r"(\w)\1",
+        "a.*b.*c.*d",
+        "(?:senior|lead)+",
+        "x" * 201,
+        # vom Fuzzer gefunden (fuzz/targets.py: title_regex): exponentiell trotz höchstens zwei offener Wiederholungen
+        "(a?){22}a{22}",
+        "a{0,30}" * 8 + "b",
+        "a?" * 20 + "b",
+        "(?:a|aa)" * 30 + "b",
+        r"\s?" * 6 + r"\s*\s*x",
+    ],
 )
 def test_catastrophic_title_regexes_are_rejected(pattern):
     assert regex_problem(pattern)
@@ -242,6 +257,10 @@ def test_catastrophic_title_regexes_are_rejected(pattern):
         r"sales.*manager",
         r"\bsr\.?\s",
         "(?i)intern",
+        "(senior|lead).*manager.*berlin",
+        r"senior\s?.*manager.*",
+        "(ab){3}",
+        r"\d{1,3}k",
     ],
 )
 def test_ordinary_title_regexes_are_allowed(pattern):
@@ -350,6 +369,10 @@ def test_uploads_are_streamed_checked_and_named_safely(settings, config, profile
         ("com1.tar.pdf", "_com1.tar.pdf"),
         ("  .versteckt.pdf. ", "versteckt.pdf"),
         ("", "dokument.pdf"),
+        # vom Fuzzer gefunden (fuzz/targets.py: upload_name)
+        ("CON .pdf", "_CON .pdf"),  # Windows liest das als Gerät CON
+        ("COM" + chr(0xB9) + ".pdf", "_COM" + chr(0xB9) + ".pdf"),  # hochgestellte 1: ebenfalls COM1
+        ("brief.abcdefghi jkl", "brief.abcdefghi"),  # gekürzte Endung endete auf einem Leerzeichen
     ],
 )
 def test_safe_filename(raw, expected):

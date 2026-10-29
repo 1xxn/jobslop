@@ -61,6 +61,29 @@ Tests marked `live` call the real Claude Code and use your subscription; they on
 | UI units and components | `frontend/src/**/*.test.ts(x)` (Vitest) | `npm test` (CI) |
 | Real job sites, read-only | `tests/test_real_sites.py` | `JOBSLOP_NETWORK=1` only; weekly in `sources.yml` |
 | Real Claude Code | `tests/test_claude_code.py::test_live_*` | `JOBSLOP_LIVE=1` only |
+| Fuzz targets over their seed corpus and random mutations | `tests/test_fuzz_targets.py` | CI |
+| Coverage-guided fuzzing (Atheris) | `fuzz/fuzz.py` | `fuzz.yml` (Linux) |
+| UI properties for any input (fast-check) | `frontend/src/**/*.property.test.ts` | `npm test` (CI) |
+
+## Fuzzing
+
+Everything that reads foreign input has a fuzz target in `fuzz/targets.py` (HTML of job descriptions and pages,
+JSON-LD, title-exclusion regexes, upload names, steps of the browser extension). A target checks properties
+that hold for every input, not only that nothing crashes – an accepted regex stays fast against any title, a
+stored file name is one Windows keeps as it is. Atheris runs on Linux x86-64 with Python 3.12–3.14 (WSL on
+Windows):
+
+```bash
+uv sync --group fuzz
+uv run python fuzz/fuzz.py title_regex fuzz/corpus/title_regex -max_total_time=60
+uv run python fuzz/fuzz.py title_regex crash-1234abcd      # replay a finding
+```
+
+`fuzz.yml` fuzzes every target for a minute on pull requests that touch `src/` and for ten minutes every night.
+Its log names only the target, the kind of finding and libFuzzer's seed – never the input, because the logs of a
+public repository are public. To reproduce a nightly finding run the target locally with `-seed=<seed from the
+log>` on a copy of its corpus. A finding becomes a test (the input goes into `fuzz/corpus/<target>/`); if it is
+exploitable, report it privately first (`SECURITY.md`).
 
 ## Releasing
 
@@ -93,6 +116,7 @@ Only maintainers can create `v*` tags (tag ruleset).
 | `secrets.yml` | PRs, `main`, weekly | Gitleaks: credentials in commits (the whole history on schedule) |
 | `scorecard.yml` | `main`, weekly | OpenSSF Scorecard (badge in the README, results under Security → Code scanning) |
 | `sources.yml` | weekly, manual | Read-only smoke test against real job sites – notices when a source changes its format |
+| `fuzz.yml` | PRs touching `src/`, nightly, manual | Atheris fuzzes every target in `fuzz/targets.py` (1 min on PRs, 10 min nightly); not a required check |
 | `release.yml` | tag `v*` | see above |
 
 Every workflow starts without permissions and grants each job only what it needs; checkouts never keep the token.

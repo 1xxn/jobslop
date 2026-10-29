@@ -128,7 +128,8 @@ const SOURCE_BRANDS: Record<string, string> = {
 export function sourceName(source: string, t: (key: MessageKey) => string): string {
   const [kind, rest] = source.split(":", 2);
   const key = kind === "portal" ? rest : kind === "seed" ? "import" : kind;
-  if (key && SOURCE_BRANDS[key]) return SOURCE_BRANDS[key];
+  // hasOwn: „constructor“ oder „toString“ als Quellname träfen sonst Object.prototype (fast-check hat es gefunden)
+  if (key && Object.hasOwn(SOURCE_BRANDS, key)) return SOURCE_BRANDS[key];
   const label = `source.${key}`;
   return hasMessage(label) ? t(label) : source;
 }

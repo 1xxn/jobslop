@@ -61,6 +61,8 @@ dev = [
 # keine Hashes und lädt die Abhängigkeiten der Werkzeuge in beliebiger Version. Dependabot hält sie aktuell.
 audit = ["pip-audit>=2.10.1"]
 workflows = ["zizmor>=1.31.1"]
+# Fuzzing mit Atheris (fuzz/fuzz.py, Workflow „Fuzz“): Räder gibt es nur für Linux x86-64 und Python 3.12–3.14
+fuzz = ["atheris>=3.1; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version < '3.15'"]
 
 [build-system]
 requires = ["hatchling>=1.33"]
@@ -90,6 +92,8 @@ ignore = ["E501", "RUF001", "RUF002", "RUF003", "B008", "S603"]
 "tests/**" = ["S101", "S104", "S105", "S106", "S311", "S607"]
 # Messrahmen und Demo-Daten: erfundene Zufallsdaten, lokale Werkzeuge (npm, ps)
 "scripts/**" = ["S311", "S607"]
+# Fuzz-Ziele: assert ist die geprüfte Eigenschaft (Atheris meldet die AssertionError als Fund)
+"fuzz/**" = ["S101"]
 # httpcore schreibt die Signatur von connect_tcp vor (timeout-Parameter)
 "src/jobslop/netguard.py" = ["ASYNC109"]
 

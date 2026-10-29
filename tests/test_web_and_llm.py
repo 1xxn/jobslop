@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -422,6 +423,27 @@ def test_job_page_parsing_stays_fast_on_hostile_html():
     start = time.perf_counter()
     parse_html("https://x/evil", hostile)
     assert time.perf_counter() - start < 2.0
+
+
+def test_job_page_accepts_any_json_ld():
+    """Vom Fuzzer gefunden (fuzz/targets.py: job_page): fremdes JSON-LD in jeder Form ergibt eine Stelle, keinen
+    Fehler – „Stelle per Link“ und die Browser-Erweiterung lesen JSON-LD beliebiger Seiten."""
+
+    def ld(data: object) -> str:
+        return f'<script type="application/ld+json">{json.dumps(data)}</script>'
+
+    job = parse_html(
+        "https://x/job", ld({"@type": "JobPosting", "title": "SRE", "jobLocation": ["Berlin", None, 3]})
+    )
+    assert (job.title, job.location) == ("SRE", "Berlin")
+    job = parse_html(
+        "https://x/job", ld({"@type": "JobPosting", "title": "SRE", "jobLocation": [{"address": [1]}]})
+    )
+    assert (job.title, job.location) == ("SRE", "")
+    deep = (
+        '<script type="application/ld+json">' + "[" * 5000 + "]" * 5000 + "</script><title>Fallback</title>"
+    )
+    assert parse_html("https://x/job", deep).title == "Fallback"
 
 
 def test_artifacts_never_leave_their_folder(settings, config, profile):

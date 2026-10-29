@@ -1,0 +1,62 @@
+name: Fuzz
+
+# Abdeckungsgesteuertes Fuzzing (Atheris/libFuzzer) der Funktionen, die fremde Eingaben lesen: fuzz/targets.py.
+# Kein Pflicht-Check – ein Fund macht den Lauf rot. Das Log nennt nur Ziel, Art des Funds und den Startwert, nie die
+# Eingabe: Läufe eines öffentlichen Repos sind öffentlich (nachstellen: CONTRIBUTING.md → Fuzzing).
+on:
+  pull_request:
+    paths:
+      - "fuzz/**"
+      - "src/jobslop/**"
+      - "uv.lock"
+      - ".github/workflows/fuzz.yml"
+  schedule:
+    - cron: "7 3 * * *" # täglich 10 Minuten je Ziel
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read # Quellen und Seed-Korpus auschecken
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [html_text, job_page, title_regex, upload_name, extension_step]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Atheris hat Räder für Python 3.12–3.14 (Linux x86-64)
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.14"
+          enable-cache: true
+      - name: Install jobslop and Atheris
+        run: uv sync --locked --no-dev --group fuzz
+      - name: Fuzz
+        env:
+          TARGET: ${{ matrix.target }}
+          SECONDS_PER_TARGET: ${{ github.event_name == 'schedule' && '600' || '60' }}
+        run: |
+          # libFuzzer schreibt neue Eingaben in den ersten Korpus-Ordner – eine Kopie, nicht das Repo
+          cp -r "fuzz/corpus/$TARGET" "$RUNNER_TEMP/corpus"
+          if uv run --no-sync python fuzz/fuzz.py "$TARGET" "$RUNNER_TEMP/corpus" \
+              -max_total_time="$SECONDS_PER_TARGET" -timeout=10 -max_len=16384 \
+              -artifact_prefix="$RUNNER_TEMP/" > "$RUNNER_TEMP/fuzz.log" 2>&1; then
+            grep -E "^(INFO: Seed|#[0-9]+[[:space:]]+DONE|Done [0-9]+ runs)" "$RUNNER_TEMP/fuzz.log" || true
+            exit 0
+          fi
+          # Nur Startwert und Art des Funds – libFuzzer druckt sonst die Eingabe (Bytes und Base64)
+          grep -E "^INFO: Seed|^==[0-9]+== ERROR|^SUMMARY|^[A-Za-z]+(Error|Exception)\b" "$RUNNER_TEMP/fuzz.log" \
+            | cut -c1-200 | head -n 5
+          echo "::error::Fuzzing found a problem in $TARGET – reproduce it locally (CONTRIBUTING.md → Fuzzing)"
+          exit 1
