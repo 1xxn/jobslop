@@ -27,12 +27,27 @@ function QueryProvider({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(
-  <StrictMode>
-    <I18nProvider>
-      <QueryProvider>
-        <App />
-      </QueryProvider>
-    </I18nProvider>
-  </StrictMode>,
+/** Anmelde-Link aus dem Terminal (`/#login=<token>`): einmal gegen das Sitzungs-Cookie tauschen (HttpOnly) und das
+ * Token sofort aus Adresse und Verlauf entfernen. Ohne Link startet die Oberfläche ohne Umweg. */
+async function login(): Promise<void> {
+  const token = /^#login=([\w-]{20,200})$/.exec(window.location.hash)?.[1];
+  if (!token) return;
+  window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  await fetch("/api/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Jobslop": "1" },
+    body: JSON.stringify({ token }),
+  }).catch(() => undefined);
+}
+
+void login().finally(() =>
+  createRoot(document.getElementById("root") as HTMLElement).render(
+    <StrictMode>
+      <I18nProvider>
+        <QueryProvider>
+          <App />
+        </QueryProvider>
+      </I18nProvider>
+    </StrictMode>,
+  ),
 );

@@ -56,6 +56,13 @@ def site():
 LOCAL = "http://127.0.0.1"  # TestClient-Adresse: der Server nimmt nur lokale Host-Header an
 
 
+def signed_in(settings: Settings) -> dict[str, str]:
+    """Sitzungs-Cookie des Dashboards (ohne beantwortet die API nur 401)."""
+    from jobslop.web.app import SESSION_COOKIE, dashboard_token
+
+    return {SESSION_COOKIE: dashboard_token(settings)}
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     # Die Formular-Fixtures liegen auf 127.0.0.1 – im echten Betrieb sperrt netguard solche Ziele

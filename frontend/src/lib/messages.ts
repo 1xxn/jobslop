@@ -1,6 +1,7 @@
 // Oberflächentexte. Deutsch ist die Referenz; Englisch muss dieselben Schlüssel haben (prüft TypeScript).
 const de = {
   "app.offline": "jobslop ist nicht erreichbar. Läuft das Programm noch? Starte es mit „jobslop“.",
+  "app.login": "Dieser Browser ist nicht angemeldet. Öffne jobslop mit dem Befehl „jobslop“ im Terminal – der Browser öffnet sich dann angemeldet. Für einen anderen Browser steht dort ein Anmelde-Link.",
 
   "nav.main": "Hauptnavigation",
   "nav.today": "Heute",
@@ -335,6 +336,8 @@ const de = {
   "be.api.too_large": "Zu groß: Dateien bis 15 MB, Texte bis 50.000 Zeichen.",
   "be.api.document_outside": "Dokumente können nur aus dem jobslop-Ordner kommen – lade die Datei hier hoch.",
   "be.api.cv_running": "Der Lebenslauf für diese Stelle wird gerade erstellt.",
+  "be.api.login": "Nicht angemeldet – öffne jobslop mit dem Befehl „jobslop“.",
+  "be.api.forbidden": "Diese Anfrage nimmt jobslop nicht an.",
   "be.api.roles_missing": "Gib mindestens eine Zielrolle an.",
   "be.api.run_active": "Es läuft schon ein Bewerbungslauf.",
   "be.api.queue_empty": "Als Nächstes ist leer – merk zuerst Stellen vor.",
@@ -779,6 +782,7 @@ export type MessageKey = keyof typeof de;
 
 const en: Record<MessageKey, string> = {
   "app.offline": "Can't reach jobslop. Is it still running? Start it with “jobslop”.",
+  "app.login": "This browser is not signed in. Open jobslop with the command “jobslop” in a terminal – the browser then opens signed in. For another browser, the terminal shows a sign-in link.",
 
   "nav.main": "Main navigation",
   "nav.today": "Today",
@@ -1113,6 +1117,8 @@ const en: Record<MessageKey, string> = {
   "be.api.too_large": "Too large: files up to 15 MB, texts up to 50,000 characters.",
   "be.api.document_outside": "Documents can only come from the jobslop folder – upload the file here.",
   "be.api.cv_running": "The CV for this job is being created right now.",
+  "be.api.login": "Not signed in – open jobslop with the command “jobslop”.",
+  "be.api.forbidden": "jobslop does not accept this request.",
   "be.api.roles_missing": "Add at least one target role.",
   "be.api.run_active": "An application run is already in progress.",
   "be.api.queue_empty": "Nothing is up next – add jobs first.",
