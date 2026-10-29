@@ -18,6 +18,7 @@ from typing import Any
 from .config import Settings
 from .llm import LoginCheck, check_login, find_claude
 from .profile import Profile
+from .runner import system_tool
 
 log = logging.getLogger(__name__)
 
@@ -113,7 +114,8 @@ class BrowserInstaller:
         self._pump_task = asyncio.create_task(self._pump())
 
     async def _pump(self) -> None:
-        assert self.proc and self.proc.stdout
+        if self.proc is None or self.proc.stdout is None:
+            return
         async for raw in self.proc.stdout:
             line = raw.decode("utf-8", errors="replace").rstrip()
             if line:
@@ -141,16 +143,20 @@ def open_terminal(command: list[str], title: str = "jobslop") -> bool:
     try:
         if sys.platform == "win32":
             line = subprocess.list2cmdline(command)
-            subprocess.Popen(["cmd.exe", "/c", "start", title, "cmd.exe", "/k", line])
+            cmd = system_tool("cmd.exe")
+            subprocess.Popen([cmd, "/c", "start", title, cmd, "/k", line])
             return True
         line = shlex.join(command)
         if sys.platform == "darwin":
-            script = f'tell application "Terminal" to do script "{line}"'
-            subprocess.Popen(["osascript", "-e", script, "-e", 'tell application "Terminal" to activate'])
+            quoted = line.replace("\\", "\\\\").replace('"', '\\"')  # AppleScript-Zeichenkette
+            script = f'tell application "Terminal" to do script "{quoted}"'
+            subprocess.Popen(
+                ["/usr/bin/osascript", "-e", script, "-e", 'tell application "Terminal" to activate']
+            )
             return True
         for term in ("x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal", "xterm"):
-            if shutil.which(term):
-                args = [term, "--", *command] if term == "gnome-terminal" else [term, "-e", line]
+            if path := shutil.which(term):
+                args = [path, "--", *command] if term == "gnome-terminal" else [path, "-e", line]
                 subprocess.Popen(args)
                 return True
     except OSError as exc:
@@ -181,10 +187,12 @@ def open_claude_install() -> dict[str, Any]:
 def open_folder(path: Path) -> bool:
     with contextlib.suppress(OSError):
         if sys.platform == "win32":
-            os.startfile(str(path))
+            os.startfile(str(path))  # noqa: S606 – der eigene Ordner im Explorer
             return True
-        subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(path)])
-        return True
+        opener = "/usr/bin/open" if sys.platform == "darwin" else shutil.which("xdg-open")
+        if opener:
+            subprocess.Popen([opener, str(path)])
+            return True
     return False
 
 

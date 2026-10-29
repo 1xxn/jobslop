@@ -108,7 +108,7 @@ async def dismiss_cookie_banners(page: Any, rounds: int = 3) -> list[str]:
             try:
                 # Schon geklickte Beschriftungen ausschließen: Taucht derselbe Button wieder auf, hat er nicht gewirkt.
                 text = await frame.evaluate(_COOKIE_JS, clicked)
-            except Exception:
+            except Exception:  # noqa: S112 – Frame weg oder nicht lesbar (fremde Domain im Aufbau): nächster
                 continue
             if not text:
                 continue

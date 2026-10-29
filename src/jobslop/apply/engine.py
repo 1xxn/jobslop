@@ -24,6 +24,7 @@ from ..db import Answer, Application, ApplicationEvent, Job, session_scope, utcn
 from ..guard import check_job
 from ..hosts import host_of, is_handoff
 from ..llm import LLM, LLMLimitReached
+from ..netguard import BlockedTarget, ensure_public_target
 from ..profile import Profile, normalize_question
 from .coverletter import cover_letter_html, cover_letter_text, render_pdf, write_cover_letter
 from .executor import Executor, Files, click_element, live_page
@@ -122,7 +123,8 @@ class BrowserSession:
             locale="de-DE",
             timezone_id="Europe/Berlin",
             viewport={"width": 1366, "height": 900},
-            accept_downloads=True,
+            # Nichts in jobslop lädt Dateien herunter; was eine fremde Seite anstößt, wird verworfen
+            accept_downloads=False,
         )
         self.context.set_default_timeout(15_000)
         self.context.set_default_navigation_timeout(self.settings.navigation_timeout_ms)
@@ -256,7 +258,8 @@ class ApplyEngine:
             )
             with session_scope(self.settings.db_path) as s:
                 stored = s.get(Application, app_id)
-                assert stored is not None
+                if stored is None:
+                    raise RuntimeError(f"Bewerbung {app_id} fehlt in der Datenbank")
                 app = stored
                 app.status = status
                 app.finished_at = utcnow()
@@ -276,11 +279,20 @@ class ApplyEngine:
             self._event(app_id, "status", f"{status}: {message}")
         return Outcome(job_id, app_id, status, message, str(artdir))
 
+    async def _ensure_public(self, url: str) -> None:
+        if not url.startswith(("https://", "http://")):
+            return  # about:blank, Fehlerseiten des Browsers
+        try:
+            await ensure_public_target(url, self.settings)
+        except BlockedTarget as exc:
+            raise Park("failed", str(exc)) from exc
+
     # ------------------------------------------------------------------ main loop
     async def _run(self, run: _Run, page: Any) -> tuple[str, str, Any]:
         title = f"{run.job.company} – {run.job.title}"
         if not run.job.url.startswith(("https://", "http://")):
             raise Park("failed", f"Keine Web-Adresse: {run.job.url[:80]}")
+        await self._ensure_public(run.job.url)
         self._event(run.app_id, "navigate", run.job.url)
         await page.goto(run.job.url, wait_until="domcontentloaded")
 
@@ -298,6 +310,9 @@ class ApplyEngine:
             if is_handoff(page.url):
                 page = await self._aggregator_handoff(run, page, title)
                 await settle(page)
+            # Eine Weiterleitung oder ein Klick darf den Bewerbungs-Browser nicht ins eigene Netz führen (etwa auf
+            # das Dashboard unter 127.0.0.1 – dort würde der Planer jobslop selbst bedienen)
+            await self._ensure_public(page.url)
             try:
                 state = await self._prepare(run, page)
             except Exception as exc:
@@ -770,7 +785,7 @@ async def run_batch(
         if outcome.application_id is not None:
             attempted += 1
             if attempted < max_count and job_id != job_ids[-1]:
-                await asyncio.sleep(random.uniform(min_delay, min_delay * 1.6))
+                await asyncio.sleep(random.uniform(min_delay, min_delay * 1.6))  # noqa: S311 – Pause, kein Geheimnis
     return outcomes
 
 
@@ -826,7 +841,7 @@ _NOTICE_JS = """(text) => {
 # Antwort-Token der gängigen CAPTCHA-Widgets: steht hier etwas, hat der Mensch die Abfrage gelöst
 _CAPTCHA_TOKEN_JS = """() => [...document.querySelectorAll(
   'textarea[name="g-recaptcha-response"], textarea[name="h-captcha-response"], input[name="cf-turnstile-response"]'
-)].some((e) => e.value)"""
+)].some((e) => e.value)"""  # noqa: S105 – Skript, kein Passwort
 
 
 async def captcha_solved(page: Any) -> bool:

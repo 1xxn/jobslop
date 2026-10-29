@@ -249,7 +249,9 @@ def test_api_errors_carry_codes(settings, config, profile, monkeypatch):
     monkeypatch.setattr("jobslop.web.app.system_report", boom)
     r = TestClient(client.app, base_url=LOCAL, raise_server_exceptions=False).get("/api/system")
     assert r.status_code == 500
-    assert r.json()["code"] == "api.internal" and "RuntimeError: kaputt" in r.json()["detail"]
+    # nur die Art des Fehlers – Exception-Texte können Pfade oder Profildaten enthalten
+    assert r.json()["code"] == "api.internal" and "RuntimeError" in r.json()["detail"]
+    assert "kaputt" not in r.text
 
 
 async def test_aborted_run_leaves_nothing_hanging(settings, config, profile):

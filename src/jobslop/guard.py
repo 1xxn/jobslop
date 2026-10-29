@@ -43,15 +43,88 @@ def company_key(name: str) -> str:
     return _NON_ALNUM_RX.sub(" ", _LEGAL_FORM_RX.sub(" ", name.lower())).strip()
 
 
-def _title_test(pattern: str) -> Callable[[str], bool]:
-    """Titel-Ausschluss als regulärer Ausdruck – ein ungültiger (z. B. „senior (“) gilt als einfacher Text, statt die
-    Status- und Stellenabfragen des Dashboards mit einem Fehler zu blockieren."""
+# Titel-Ausschlüsse laufen bei jedem Status-Abruf gegen Tausende Titel aus fremden Quellen. Ein Ausdruck mit
+# verschachtelten Wiederholungen („(a+)+“, „(x|x)*“) bräuchte für einen präparierten Titel exponentiell lange und
+# legte das Dashboard lahm (ReDoS) – Pythons re kennt kein Zeitlimit. Darum nur einfache Ausdrücke:
+MAX_PATTERN = 200
+MAX_TITLE = 200  # länger ist kein Stellentitel; mehr wird nicht geprüft
+_MAX_OPEN_REPEATS = (
+    2  # „senior.*manager.*berlin“ geht noch, jede weitere offene Wiederholung kostet eine Potenz
+)
+_REPEATS = {"MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT"}
+
+
+def regex_problem(pattern: str) -> str:
+    """Warum ``pattern`` kein zulässiger Titel-Ausschluss ist – leer, wenn er zulässig ist."""
+    import re._parser as sre  # Parser der Standardbibliothek (Python ≥ 3.11)
+
+    if len(pattern) > MAX_PATTERN:
+        return f"höchstens {MAX_PATTERN} Zeichen"
     try:
-        rx = re.compile(pattern, re.I)
-    except re.error:
+        tree = sre.parse(pattern, re.I)
+    except (re.error, OverflowError, RecursionError) as exc:
+        return str(exc)
+    open_repeats = 0
+
+    def walk(items: Any, inside_repeat: bool) -> str:
+        nonlocal open_repeats
+        for op, arg in items:
+            name = str(op)
+            if name in ("GROUPREF", "GROUPREF_EXISTS"):
+                return "keine Rückverweise wie \\1"
+            if name in _REPEATS:
+                _low, high, body = arg
+                if high == sre.MAXREPEAT:
+                    open_repeats += 1
+                if high > 1 and inside_repeat:
+                    return "keine verschachtelten Wiederholungen wie (a+)+"
+                if high > 1 and any(str(o) == "BRANCH" for o, _ in _flat(body)):
+                    return "keine Wiederholung über Alternativen wie (a|b)+"
+                if problem := walk(body, inside_repeat or high > 1):
+                    return problem
+            elif name == "SUBPATTERN":
+                if problem := walk(arg[-1], inside_repeat):
+                    return problem
+            elif name == "BRANCH":
+                for branch in arg[1]:
+                    if problem := walk(branch, inside_repeat):
+                        return problem
+            elif name in ("ASSERT", "ASSERT_NOT", "ATOMIC_GROUP"):
+                if problem := walk(arg[-1], inside_repeat):
+                    return problem
+        return ""
+
+    if problem := walk(tree, False):
+        return problem
+    if open_repeats > _MAX_OPEN_REPEATS:
+        return f"höchstens {_MAX_OPEN_REPEATS} offene Wiederholungen (* oder +)"
+    return ""
+
+
+def _flat(items: Any) -> list[tuple[Any, Any]]:
+    """Alle Knoten eines geparsten Ausdrucks (für die Suche nach Alternativen in einer Wiederholung)."""
+    out: list[tuple[Any, Any]] = []
+    for op, arg in items:
+        out.append((op, arg))
+        name = str(op)
+        if name in _REPEATS:
+            out += _flat(arg[2])
+        elif name in ("SUBPATTERN", "ASSERT", "ASSERT_NOT", "ATOMIC_GROUP"):
+            out += _flat(arg[-1])
+        elif name == "BRANCH":
+            for branch in arg[1]:
+                out += _flat(branch)
+    return out
+
+
+def _title_test(pattern: str) -> Callable[[str], bool]:
+    """Titel-Ausschluss als regulärer Ausdruck. Ein ungültiger (z. B. „senior (“) oder zu aufwendiger Ausdruck
+    (``regex_problem``) gilt als einfacher Text, statt die Status- und Stellenabfragen des Dashboards zu blockieren."""
+    if regex_problem(pattern):
         low = pattern.lower()
-        return lambda title: low in title.lower()
-    return lambda title: rx.search(title) is not None
+        return lambda title: low in title[:MAX_TITLE].lower()
+    rx = re.compile(pattern, re.I)
+    return lambda title: rx.search(title[:MAX_TITLE]) is not None
 
 
 def title_matches(pattern: str, title: str) -> bool:
