@@ -19,15 +19,16 @@ Zwei Stufen:
 from __future__ import annotations
 
 import asyncio
+import functools
 import ipaddress
 import logging
 import socket
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-import httpcore
-import httpx
+if TYPE_CHECKING:
+    import httpx
 
 log = logging.getLogger(__name__)
 
@@ -141,44 +142,52 @@ async def ensure_public_target(url: str, settings: Any) -> None:
 
 
 # --------------------------------------------------------------------------- HTTP-Client nur für öffentliche Ziele
+# httpx/httpcore erst hier laden: die Engine (und damit jeder CLI-Start) importiert dieses Modul, braucht den Client
+# aber nie – das sparte ~250 ms beim Start von `jobslop`.
 
 
-class _PublicOnlyBackend(httpcore.AsyncNetworkBackend):
-    """Löst den Namen selbst auf, prüft jede Adresse und verbindet zu genau der geprüften – eine zweite Auflösung
-    (DNS-Rebinding) gibt es nicht. TLS prüft weiter gegen den Namen (SNI und Zertifikat kommen vom Ursprung)."""
+@functools.cache
+def _backend_class() -> type:
+    import httpcore
 
-    def __init__(self) -> None:
-        self._inner = httpcore.AnyIOBackend()
+    class _PublicOnlyBackend(httpcore.AsyncNetworkBackend):
+        """Löst den Namen selbst auf, prüft jede Adresse und verbindet zu genau der geprüften – eine zweite
+        Auflösung (DNS-Rebinding) gibt es nicht. TLS prüft weiter gegen den Namen (SNI und Zertifikat vom Ursprung)."""
 
-    async def connect_tcp(
-        self,
-        host: str,
-        port: int,
-        timeout: float | None = None,
-        local_address: str | None = None,
-        socket_options: Any = None,
-    ) -> httpcore.AsyncNetworkStream:
-        if not is_public_host(host):
-            raise BlockedTarget(f"{host} liegt im eigenen Rechner oder Netz")
-        infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
-        addresses = _addresses(infos)
-        if not addresses or not all(_public_ip(ip) for ip in addresses):
-            raise BlockedTarget(f"{host} zeigt auf eine Adresse im eigenen Rechner oder Netz")
-        return await self._inner.connect_tcp(
-            str(addresses[0]),
-            port,
-            timeout=timeout,
-            local_address=local_address,
-            socket_options=socket_options,
-        )
+        def __init__(self) -> None:
+            self._inner = httpcore.AnyIOBackend()
 
-    async def connect_unix_socket(
-        self, path: str, timeout: float | None = None, socket_options: Any = None
-    ) -> httpcore.AsyncNetworkStream:
-        raise BlockedTarget("Unix-Sockets sind kein Web-Ziel")
+        async def connect_tcp(
+            self,
+            host: str,
+            port: int,
+            timeout: float | None = None,
+            local_address: str | None = None,
+            socket_options: Any = None,
+        ) -> httpcore.AsyncNetworkStream:
+            if not is_public_host(host):
+                raise BlockedTarget(f"{host} liegt im eigenen Rechner oder Netz")
+            infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
+            addresses = _addresses(infos)
+            if not addresses or not all(_public_ip(ip) for ip in addresses):
+                raise BlockedTarget(f"{host} zeigt auf eine Adresse im eigenen Rechner oder Netz")
+            return await self._inner.connect_tcp(
+                str(addresses[0]),
+                port,
+                timeout=timeout,
+                local_address=local_address,
+                socket_options=socket_options,
+            )
 
-    async def sleep(self, seconds: float) -> None:
-        await self._inner.sleep(seconds)
+        async def connect_unix_socket(
+            self, path: str, timeout: float | None = None, socket_options: Any = None
+        ) -> httpcore.AsyncNetworkStream:
+            raise BlockedTarget("Unix-Sockets sind kein Web-Ziel")
+
+        async def sleep(self, seconds: float) -> None:
+            await self._inner.sleep(seconds)
+
+    return _PublicOnlyBackend
 
 
 def public_client(*, timeout: float = 20.0, max_redirects: int = 5, **kwargs: Any) -> httpx.AsyncClient:
@@ -186,12 +195,15 @@ def public_client(*, timeout: float = 20.0, max_redirects: int = 5, **kwargs: An
 
     ``trust_env=False``: ein Proxy aus der Umgebung würde die Prüfung umgehen (verbunden würde zum Proxy).
     """
+    import httpcore
+    import httpx
+
     transport = httpx.AsyncHTTPTransport(retries=0)
     # httpx reicht kein eigenes Netzwerk-Backend durch; der Pool ist seit httpx 0.18 unverändert ``_pool``
     transport._pool = httpcore.AsyncConnectionPool(
         ssl_context=httpx.create_ssl_context(),
         max_connections=10,
-        network_backend=_PublicOnlyBackend(),
+        network_backend=_backend_class()(),
     )
     return httpx.AsyncClient(
         transport=transport,
