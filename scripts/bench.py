@@ -1380,7 +1380,9 @@ async def frontend_bench(jobs: int, idle_s: int) -> dict[str, Any]:
 
                 async def load(path: str, ready: str, context: Any = None) -> tuple[Any, Any, dict[str, Any]]:
                     if context is None:
-                        context = await browser.new_context(viewport={"width": 1440, "height": 900}, locale="de-DE")
+                        context = await browser.new_context(
+                            viewport={"width": 1440, "height": 900}, locale="de-DE"
+                        )
                         await context.add_cookies(browser_session(home, url))
                     ctx = context
                     await ctx.add_init_script(OBSERVER_JS)
@@ -1531,6 +1533,8 @@ async def frontend_bench(jobs: int, idle_s: int) -> dict[str, Any]:
 
 def memory_bench(jobs: int, minutes: float) -> dict[str, Any]:
     import httpx
+
+    from jobslop.config import Settings
 
     home = temp_home("mem")
     seed_home(home, jobs=jobs)

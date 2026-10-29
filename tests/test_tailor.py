@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from conftest import LOCAL, add_job
+from conftest import LOCAL, add_job, signed_in
 from jobslop.apply.executor import Files
 from jobslop.apply.planner import JobContext
 from jobslop.apply.tailor import (
