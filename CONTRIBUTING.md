@@ -66,16 +66,24 @@ Tests marked `live` call the real Claude Code and use your subscription; they on
 3. Tag and push: `git tag vX.Y.Z && git push origin main vX.Y.Z`.
 
 `.github/workflows/release.yml` re-runs all CI checks, verifies that tag, `pyproject.toml` and
-`frontend/package.json` agree, builds wheel and sdist, attests their build provenance
-(`gh attestation verify <file> --repo 1xxn/jobslop`) and publishes a GitHub release with the changelog section.
+`frontend/package.json` agree, builds wheel and sdist, writes CycloneDX SBOMs (Python packages from `uv.lock`, npm
+packages of the dashboard), attests build provenance and the SBOM (`gh attestation verify <file> --repo 1xxn/jobslop`)
+and – after you approve the `release` environment in the run – publishes a GitHub release with the changelog section.
+Only maintainers can create `v*` tags (tag ruleset).
 
 ## CI
 
 | Workflow | When | What |
 |---|---|---|
-| `ci.yml` | every PR and push to `main` | Ruff, zizmor (workflow security), pytest on Ubuntu and Windows (3.12 and 3.15) and macOS (3.15), Vitest + build check, dependency review on PRs |
+| `ci.yml` | every PR and push to `main` | Ruff, mypy, zizmor (workflow security, strictest persona), pytest on Ubuntu and Windows (3.12 and 3.15) and macOS (3.15), npm registry signatures, Vitest + build check, dependency review on PRs |
+| `audit.yml` | PRs, `main`, daily | Known vulnerabilities in `uv.lock` (pip-audit, OSV – any finding fails) and `package-lock.json` (npm audit, high and critical) |
 | `codeql.yml` | PRs, `main`, weekly | CodeQL for Python, TypeScript/JavaScript and the workflows |
+| `secrets.yml` | PRs, `main`, weekly | Gitleaks: credentials in commits (the whole history on schedule) |
+| `scorecard.yml` | `main`, weekly | OpenSSF Scorecard (badge in the README, results under Security → Code scanning) |
 | `sources.yml` | weekly, manual | Read-only smoke test against real job sites – notices when a source changes its format |
 | `release.yml` | tag `v*` | see above |
 
-Actions are pinned to commit SHAs; Dependabot updates them (and Python/npm packages) with a 14-day cooldown.
+Every workflow starts without permissions and grants each job only what it needs; checkouts never keep the token.
+Actions are pinned to commit SHAs (the repository only accepts pinned actions from GitHub and an allow list);
+Dependabot updates them (and Python/npm packages) with a 14-day cooldown. `npm ci --ignore-scripts`: dependencies
+may not run install scripts.

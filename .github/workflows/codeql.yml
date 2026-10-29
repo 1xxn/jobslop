@@ -10,8 +10,7 @@ on:
     - cron: "17 4 * * 1" # montags, damit neue Abfragen auch ohne Commit greifen
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: codeql-${{ github.ref }}
@@ -23,8 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: read
-      security-events: write
+      contents: read # Quellen auschecken
+      security-events: write # Ergebnisse in Code scanning hochladen
     strategy:
       fail-fast: false
       matrix:
