@@ -52,6 +52,11 @@ MAX_TITLE = 200  # länger ist kein Stellentitel; mehr wird nicht geprüft
 _MAX_OPEN_REPEATS = (
     2  # „senior.*manager.*berlin“ geht noch, jede weitere offene Wiederholung kostet eine Potenz
 )
+# Jede Wiederholung variabler Länge und jede mehrdeutige Alternative vervielfacht die Wege, auf die der Ausdruck
+# einen Titel aufteilen kann (a* bis zu 201, a? 2, a{0,30} 31, a|aa 2). Erlaubt sind zwei offene Wiederholungen und
+# zwei „?“ – gemessen höchstens ~100 ms für den schlimmsten Titel; „a?a?a?…“ oder „a{0,30}a{0,30}…“ dagegen
+# brauchen Minuten (der Fuzzer hat sie gefunden).
+_MAX_SPLITS = 4 * (MAX_TITLE + 1) ** _MAX_OPEN_REPEATS
 _REPEATS = {"MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT"}
 
 
@@ -66,28 +71,29 @@ def regex_problem(pattern: str) -> str:
         tree = sre.parse(pattern, re.I)
     except (re.error, OverflowError, RecursionError) as exc:
         return str(exc)
-    open_repeats = 0
+    splits = 1
 
     def walk(items: Any, inside_repeat: bool) -> str:
-        nonlocal open_repeats
+        nonlocal splits
         for op, arg in items:
             name = str(op)
             if name in ("GROUPREF", "GROUPREF_EXISTS"):
                 return "keine Rückverweise wie \\1"
             if name in _REPEATS:
-                _low, high, body = arg
-                if high == sre.MAXREPEAT:
-                    open_repeats += 1
-                if high > 1 and inside_repeat:
-                    return "keine verschachtelten Wiederholungen wie (a+)+"
+                low, high, body = arg
+                # in einer Wiederholung nur Teile fester Länge: (a+)+ und (a?){20} sind exponentiell, (ab){3} nicht
+                if inside_repeat and low != high:
+                    return "keine verschachtelten Wiederholungen wie (a+)+ oder (a?){5}"
                 if high > 1 and any(str(o) == "BRANCH" for o, _ in _flat(body)):
                     return "keine Wiederholung über Alternativen wie (a|b)+"
+                splits *= min(high, MAX_TITLE) - min(low, MAX_TITLE) + 1
                 if problem := walk(body, inside_repeat or high > 1):
                     return problem
             elif name == "SUBPATTERN":
                 if problem := walk(arg[-1], inside_repeat):
                     return problem
             elif name == "BRANCH":
+                splits *= _branch_ways(arg[1])
                 for branch in arg[1]:
                     if problem := walk(branch, inside_repeat):
                         return problem
@@ -98,9 +104,23 @@ def regex_problem(pattern: str) -> str:
 
     if problem := walk(tree, False):
         return problem
-    if open_repeats > _MAX_OPEN_REPEATS:
-        return f"höchstens {_MAX_OPEN_REPEATS} offene Wiederholungen (* oder +)"
+    if splits > _MAX_SPLITS:
+        return (
+            f"zu viele Wiederholungen (höchstens {_MAX_OPEN_REPEATS} wie * oder +; ? und {{m,n}} zählen mit)"
+        )
     return ""
+
+
+def _branch_ways(branches: list[Any]) -> int:
+    """Wie viele Wege eine Alternative an einer Stelle hat: reine Wörter, von denen keines mit einem anderen beginnt
+    („senior|lead“), passen höchstens auf eine Art – sonst („a|aa“, „\\d+|x“) jede Alternative für sich."""
+    words = []
+    for branch in branches:
+        if not all(str(op) == "LITERAL" for op, _ in branch):
+            return len(branches)
+        words.append("".join(chr(code) for _, code in branch).lower())
+    ambiguous = len(set(words)) < len(words) or any(a != b and b.startswith(a) for a in words for b in words)
+    return len(branches) if ambiguous else 1
 
 
 def _flat(items: Any) -> list[tuple[Any, Any]]:

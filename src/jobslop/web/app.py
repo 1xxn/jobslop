@@ -17,6 +17,7 @@ import mimetypes
 import os
 import re
 import secrets
+import unicodedata
 from collections import Counter
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -510,9 +511,11 @@ def safe_filename(raw: str | None, default: str = "dokument.pdf") -> str:
     stem, dot, suffix = name.rpartition(".")
     if not dot:
         stem, suffix = name, ""
-    if stem.split(".")[0].upper() in WINDOWS_RESERVED:
+    # Windows liest Gerätenamen ohne Leerzeichen dahinter und mit hochgestellten Ziffern: „CON .pdf“, „COM¹.pdf“
+    if unicodedata.normalize("NFKC", stem.split(".")[0].rstrip(" ")).upper() in WINDOWS_RESERVED:
         stem = f"_{stem}"
-    name = f"{stem[:120]}.{suffix[:10]}" if suffix else stem[:120]
+    # nach dem Kürzen nochmals: Windows entfernt Punkte und Leerzeichen am Ende stillschweigend
+    name = (f"{stem[:120]}.{suffix[:10]}" if suffix else stem[:120]).strip(" .")
     return name or default
 
 

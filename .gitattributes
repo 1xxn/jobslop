@@ -5,3 +5,5 @@
 *.webp binary
 *.woff2 binary
 *.ico binary
+# Seed-Korpus der Fuzz-Ziele: Bytes genau so, wie sie sind (keine Zeilenende-Umwandlung)
+fuzz/corpus/** binary

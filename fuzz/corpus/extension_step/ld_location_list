@@ -1,0 +1,1 @@
+{"frames": [{"index": 0, "data": {"url": "https://jobs.example.com/2", "title": "x"}}], "ld_json": ["{\"@type\": \"JobPosting\", \"title\": \"SRE\", \"jobLocation\": [\"Berlin\"]}"]}
