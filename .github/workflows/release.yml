@@ -1,13 +1,13 @@
 name: Release
 
-# Ein Tag wie v1.1.0 auf main: alle CI-Prüfungen laufen erneut, dann werden Wheel und sdist gebaut und als
-# GitHub-Release mit dem passenden Abschnitt aus CHANGELOG.md veröffentlicht. Ablauf: CONTRIBUTING.md → Releasing.
+# Ein Tag wie v1.1.0 auf main: alle CI-Prüfungen laufen erneut, dann werden Wheel und sdist gebaut, mit
+# Herkunftsnachweis und SBOM attestiert und – nach Freigabe im Environment „release“ – als GitHub-Release mit dem
+# passenden Abschnitt aus CHANGELOG.md veröffentlicht. Ablauf: CONTRIBUTING.md → Releasing.
 on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: release-${{ github.ref }}
@@ -15,16 +15,20 @@ concurrency:
 
 jobs:
   checks:
+    name: Checks
     uses: ./.github/workflows/ci.yml # zizmor: ignore[self-repository] – „$/“ erst seit 07/2026, Release-Pfad bleibt beim erprobten Weg
+    permissions:
+      contents: read # die aufgerufenen CI-Jobs checken nur aus
 
-  release:
+  build:
+    name: Build and attest
     needs: checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: write
-      id-token: write # Build-Herkunft (Sigstore) für die Attestierung
-      attestations: write
+      contents: read # Quellen auschecken
+      id-token: write # Sigstore-Signatur für die Attestierungen
+      attestations: write # Attestierungen am Repo speichern
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -47,27 +51,66 @@ jobs:
       - name: Release notes from CHANGELOG.md
         run: |
           version="${GITHUB_REF_NAME#v}"
+          mkdir -p release
           awk -v v="$version" '
             $0 ~ "^## " v "( |$)" { found = 1; next }
             found && /^## / { exit }
             found { print }
-          ' CHANGELOG.md > notes.md
-          if [ ! -s notes.md ]; then
+          ' CHANGELOG.md > release/notes.md
+          if [ ! -s release/notes.md ]; then
             echo "::error::CHANGELOG.md has no section '## $version'"
             exit 1
           fi
 
       - name: Build wheel and sdist
-        run: uv build
+        run: uv build --out-dir dist
+
+      # Stückliste: Python-Pakete aus uv.lock (ohne Entwicklungswerkzeuge) und die npm-Pakete der gebauten Oberfläche
+      - name: SBOM (CycloneDX)
+        run: |
+          uv export --frozen --no-dev --format cyclonedx1.5 --preview-features sbom-export \
+            --output-file "dist/jobslop-${GITHUB_REF_NAME}.python.cdx.json"
+          (cd frontend && npm sbom --package-lock-only --omit dev --sbom-format cyclonedx) \
+            > "dist/jobslop-${GITHUB_REF_NAME}.dashboard.cdx.json"
 
       # Nachweis, dass Wheel und sdist aus genau diesem Tag in diesem Workflow gebaut wurden:
-      # gh attestation verify dist/<datei> --repo 1xxn/jobslop
+      # gh attestation verify <datei> --repo 1xxn/jobslop
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: dist/*
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+      - name: Attest SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/*.whl
+          sbom-path: dist/jobslop-${{ github.ref_name }}.python.cdx.json
 
-      - name: Publish GitHub release
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: |
+            dist/
+            release/notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Veröffentlichen braucht die Freigabe im Environment „release“ (Settings → Environments)
+    environment: release
+    permissions:
+      contents: write # Release anlegen und Dateien anhängen
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+      - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "jobslop $GITHUB_REF_NAME" --notes-file notes.md --verify-tag
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "jobslop $GITHUB_REF_NAME" --notes-file release/notes.md --verify-tag
