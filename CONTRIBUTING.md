@@ -45,7 +45,10 @@ Tests marked `live` call the real Claude Code and use your subscription; they on
   mode; LinkedIn/Indeed only through the opt-in extension; never solve or bypass CAPTCHAs or other bot checks.
 - Real-site smoke tests (`JOBSLOP_NETWORK=1 uv run pytest tests/test_real_sites.py`) only read pages – keep it
   that way: no filling, no submitting against real employers.
+- New functionality and every bug fix come with tests (pytest or Vitest) that fail without the change; pull
+  requests without them are not merged.
 - New form quirks belong in a fixture under `tests/fixtures/site/` plus a browser test.
+- Bugs and ideas: open an issue. Security problems: report them privately (`SECURITY.md`).
 - UI text lives in `frontend/src/lib/messages.ts` – German and English, the type checker enforces both.
 - No personal data in commits, fixtures or screenshots. Use `scripts/demo_data.py`.
 - Code comments are mostly German; English is welcome too.
