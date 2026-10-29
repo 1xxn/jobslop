@@ -21,8 +21,13 @@ from jobslop.assist import StepIn, _fetched_from_page
 from jobslop.classify import html_to_text
 from jobslop.guard import MAX_TITLE, regex_problem
 from jobslop.jobpage import FetchedJob, parse_html
-from jobslop.netguard import is_public_url
+from jobslop.netguard import is_public_host, is_public_url
 from jobslop.web.app import WINDOWS_RESERVED, safe_filename
+
+try:  # WHATWG-URL-Parser (wie Chromium) als Gegenprobe – nur in der Gruppe „fuzz“ (Linux)
+    import ada_url
+except ImportError:
+    ada_url = None
 
 _SLOW_S = (
     0.5  # ein zulässiger Ausschluss braucht für einen Titel Millisekunden; Sekunden heißt Rückverfolgung
@@ -34,6 +39,21 @@ _TEXT_FIELDS = ("url", "title", "company", "location", "description", "posted", 
 
 def _text(data: bytes) -> str:
     return data.decode("utf-8", "replace")
+
+
+def url(data: bytes) -> None:
+    """netguard.is_public_url: was als öffentlich gilt, ist es auch für den Browser (WHATWG URL wie in Chromium)."""
+    link = _text(data)
+    if not is_public_url(link) or ada_url is None:
+        return
+    try:
+        parsed = ada_url.URL(link)
+    except ValueError:
+        return  # öffnet kein Browser
+    assert parsed.protocol in ("http:", "https:"), "öffentlich, aber für den Browser keine Web-Adresse"
+    assert is_public_host(parsed.hostname.strip("[]")), (
+        "öffentlich, aber der Browser öffnet einen lokalen Host"
+    )
 
 
 def html_text(data: bytes) -> None:
@@ -109,6 +129,7 @@ def extension_step(data: bytes) -> None:
 
 
 TARGETS: dict[str, Callable[[bytes], None]] = {
+    "url": url,
     "html_text": html_text,
     "job_page": job_page,
     "title_regex": title_regex,

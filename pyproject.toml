@@ -62,7 +62,11 @@ dev = [
 audit = ["pip-audit>=2.10.1"]
 workflows = ["zizmor>=1.31.1"]
 # Fuzzing mit Atheris (fuzz/fuzz.py, Workflow „Fuzz“): Räder gibt es nur für Linux x86-64 und Python 3.12–3.14
-fuzz = ["atheris>=3.1; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version < '3.15'"]
+# ada-url: WHATWG-URL-Parser wie in Chromium und Node – die Gegenprobe für netguard
+fuzz = [
+    "atheris>=3.1; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version < '3.15'",
+    "ada-url>=1.29; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version < '3.15'",
+]
 
 [build-system]
 requires = ["hatchling>=1.33"]
