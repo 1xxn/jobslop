@@ -749,7 +749,9 @@ class BodyLimit:
         self.app = app
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
-        if scope["type"] != "http":
+        # Abrufe ohne Körper (Status-Polling alle 3 s, Listen) laufen ohne Hülle durch: Starlette liest bei ihnen
+        # keinen Körper, und jede Hülle pro Anfrage kostet bei großen Datenbanken messbar (mehr Müllsammlung)
+        if scope["type"] != "http" or scope["method"] in ("GET", "HEAD", "OPTIONS"):
             await self.app(scope, receive, send)
             return
         limit = MAX_UPLOAD + 64 * 1024 if scope["path"] in UPLOAD_PATHS else MAX_BODY
