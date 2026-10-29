@@ -1295,7 +1295,9 @@ def create_app(runtime: Runtime) -> FastAPI:
             changes = SettingsUpdate.model_validate(body).model_dump(exclude_unset=True)
             internal: dict[str, Any] = {}
             if "inbox_password" in changes:  # möglichst in den Schlüsselbund, nicht in settings.toml
-                changes["inbox_password"], internal = store_imap_password(ctx.settings, changes["inbox_password"])
+                changes["inbox_password"], internal = store_imap_password(
+                    ctx.settings, changes["inbox_password"]
+                )
             ctx.settings = save_settings(ctx.settings, changes, internal=internal)
         except ValidationError as exc:
             raise HTTPException(

@@ -10,6 +10,7 @@ Das Token der Browser-Erweiterung bleibt eine Datei: die Erweiterung liest es au
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from pathlib import Path
 
@@ -32,13 +33,13 @@ def store(home: Path, name: str, secret: str) -> bool:
         if secret:
             keyring.set_password(SERVICE, _account(home, name), secret)
         else:
-            try:
+            with contextlib.suppress(PasswordDeleteError):  # war nicht da
                 keyring.delete_password(SERVICE, _account(home, name))
-            except PasswordDeleteError:
-                pass  # war nicht da
         return True
     except Exception as exc:  # kein Backend, gesperrter Schlüsselbund, D-Bus fehlt …
-        log.info("Kein Schlüsselbund verfügbar (%s) – das Passwort bleibt in settings.toml", type(exc).__name__)
+        log.info(
+            "Kein Schlüsselbund verfügbar (%s) – das Passwort bleibt in settings.toml", type(exc).__name__
+        )
         return False
 
 
