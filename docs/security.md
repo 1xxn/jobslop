@@ -150,6 +150,18 @@ after the fix.
 | C2 | Medium | Repository | All actions allowed, SHA pinning not enforced, fork PRs of returning contributors ran without approval, no private vulnerability reporting, no tag protection, classic branch protection | Compromised action, malicious fork PR | Allow list + enforced SHA pinning, approval for all outside contributors, PVR on, `v*` tag ruleset, `release` environment, `main` ruleset (rebase-only) | Settings via `gh api` (#25) | Fixed |
 | C3 | Low | History | Personal name in commit metadata and a file name; 2 false-positive secret patterns | Public repository | History rewritten to one identity (`1xxn`), old Actions runs deleted; Gitleaks over the full history clean (`.gitleaks.toml` documents the two false positives) | `secrets.yml` | Fixed |
 
+## OpenSSF Scorecard
+
+Fixed: Pinned-Dependencies (the install scripts pin the uv installer by version and SHA-256). Left open on purpose:
+
+- **Code-Review / Branch-Protection (reviews)** – a single-maintainer project cannot require a second approval
+  without blocking every change; all other branch rules are in place (ruleset, 14 required checks, no bypass).
+- **CII-Best-Practices** – needs a registration at bestpractices.dev.
+- **Fuzzing** – parsers of untrusted input are covered by targeted tests (25 address forms, ReDoS patterns, size
+  caps), not by a fuzzer.
+- **Maintained** – resolves itself once the repository is older than 90 days.
+- **Pinned-Dependencies (Claude Code installer)** – Anthropic's official installer has no versioned URL.
+
 ## Residual risks
 
 - Same-user malware can read `JOBSLOP_HOME`, the browser profile and Claude's login – the OS account is the only real
