@@ -37,7 +37,7 @@ import { useCrawl, useDebounced, useMediaQuery, useRoleNames, useStatus } from "
 import { useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
 import type { JobDetail as JobFull, JobSummary, JobView } from "@/lib/types";
-import { cn, formatRelative } from "@/lib/utils";
+import { cn, formatRelative, webUrl } from "@/lib/utils";
 import { useReportError } from "@/lib/backendText";
 
 const VIEWS: { id: JobView; label: MessageKey }[] = [
