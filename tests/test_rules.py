@@ -448,3 +448,10 @@ def test_required_fields_count_only_in_the_submit_form():
     state.buttons = [{"id": "0-17", "text": "Apply", "kind": "submit", "form": "0:form0"}]
     assert missing_in_form(state, "0-17") == []
     assert [f["id"] for f in missing_in_form(state, "")] == ["0-6"]  # ohne Formular-Bezug: alle wie bisher
+
+
+def test_html_to_text_survives_unknown_marked_sections():
+    """Vom Fuzz-Test gefunden: html.parser in Python 3.12 brach bei „<![CTA[“ und „<![ x“ mit AssertionError ab –
+    fremde Stellenbeschreibungen und Mails dürfen das Lesen nicht abbrechen."""
+    text = html_to_text("<![CTA[x]]>after <p>Aufgaben</p><![ x> Ende")
+    assert text.split() == ["after", "Aufgaben", "Ende"]

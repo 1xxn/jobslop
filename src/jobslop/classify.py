@@ -242,6 +242,15 @@ class _TextExtractor(HTMLParser):
         if not self._skip:
             self.parts.append(data)
 
+    def parse_marked_section(self, i: int, report: bool = True) -> int:
+        # Python 3.12 bricht bei unbekannten Abschnitten wie „<![CTA[“ oder „<![ x“ mit AssertionError ab (der
+        # Fuzz-Test fand es); Browser lesen sie als Kommentar bis zum nächsten „>“
+        try:
+            return super().parse_marked_section(i, report)
+        except AssertionError:
+            end = self.rawdata.find(">", i)
+            return end + 1 if end != -1 else -1
+
 
 MAX_HTML_INPUT = 2_000_000  # Zeichen: Stellenbeschreibungen und Mails sind weit kleiner
 
