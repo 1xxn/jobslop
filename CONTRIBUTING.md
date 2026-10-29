@@ -106,7 +106,9 @@ and – after you approve the `release` environment in the run – publishes a G
 The signed attestation bundles are release files too (`jobslop-vX.Y.Z.intoto.jsonl` for the provenance,
 `jobslop-vX.Y.Z.sbom.intoto.jsonl` for the SBOM), so a download can be checked without the attestation API:
 `gh attestation verify jobslop-X.Y.Z-py3-none-any.whl --repo 1xxn/jobslop --bundle jobslop-vX.Y.Z.intoto.jsonl`.
-The workflow verifies both bundles before it uploads anything.
+The workflow verifies both bundles before it uploads anything. Finally it publishes wheel and sdist to
+[PyPI](https://pypi.org/project/jobslop/) with Trusted Publishing (environment `pypi`, no token; PyPI trusts
+`release.yml` of this repository) including PEP 740 attestations. The install scripts install the latest release.
 Only maintainers can create `v*` tags (tag ruleset).
 
 ## CI

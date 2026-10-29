@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 – First release
 
 ### New
 - Many more jobs: the German Federal Employment Agency (official job search, every industry, without temp
@@ -75,6 +75,19 @@
 - CI/CD: workflows without default permissions, zizmor in its strictest mode, daily vulnerability audits of both
   lockfiles, npm registry signatures, OpenSSF Scorecard, Gitleaks, releases only from protected tags after approval,
   with build provenance and SBOM attestations. Private vulnerability reporting is enabled (see `SECURITY.md`).
+- Links from job sources and pages are checked the way the browser reads them (backslashes, `%xx` in the host,
+  full-width and other look-alike characters): such a link could send the application browser once to an
+  address in your own network, and a numeric address with a negative part stopped every crawl
+  (GHSA-5qj6-373q-g79m).
+- Fuzzing of everything that reads foreign input (Atheris, nightly and on pull requests; fast-check in the
+  dashboard). It found and this release fixes: title exclusions that still backtracked for minutes
+  (`(a?){22}a{22}`, many `{0,30}`), atomic groups `(?>…)` that made adding an exclusion fail, job pages with
+  unusual JSON-LD that could not be imported, job descriptions with unusual markup that broke reading them on
+  Python 3.12, links that only a browser could read, upload names that Windows reads as devices (`CON .pdf`,
+  `COM¹.pdf`) and source names like `constructor` in the dashboard.
+- The install scripts install the latest release instead of the current development state. Releases carry
+  signed provenance and SBOM bundles (`.intoto.jsonl`) and are published to PyPI with Trusted Publishing.
+- The CI's own tools (zizmor, pip-audit) are installed from the lockfile with hashes.
 
 ### Performance
 - With thousands of jobs the dashboard stays fast: indexes for the job state and first-seen date (added to existing

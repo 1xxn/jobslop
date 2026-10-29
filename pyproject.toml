@@ -1,6 +1,6 @@
 [project]
 name = "jobslop"
-version = "1.0.0"
+version = "1.1.0"
 description = "Local, AI-driven job application autopilot: finds jobs, ranks them against your profile and fills out application forms in a real browser – powered by your own Claude subscription."
 readme = "README.md"
 license = "MIT"

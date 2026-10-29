@@ -9,7 +9,7 @@ browser on your behalf. The threat model, the controls and the findings of the l
 | Version | Supported |
 |---|---|
 | `main` and the latest release | ✅ security fixes |
-| older releases | ❌ – update with `uv tool upgrade jobslop` (or re-run the install script) |
+| older releases | ❌ – update by re-running the install script (or `uv tool upgrade jobslop` for an install from PyPI) |
 
 ## Reporting a vulnerability
 
