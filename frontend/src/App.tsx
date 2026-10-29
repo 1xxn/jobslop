@@ -5,6 +5,7 @@ import { AppShell } from "./components/layout/AppShell";
 import { Logo } from "./components/domain";
 import { TooltipProvider } from "./components/ui/overlays";
 import { Button, Spinner } from "./components/ui/primitives";
+import { ApiError } from "./lib/api";
 import { useErrorText } from "./lib/backendText";
 import { useStatus } from "./lib/hooks";
 import { useI18n } from "./lib/i18n";
@@ -34,16 +35,18 @@ function FullPageSpinner() {
 
 /** Leitet beim ersten Start in die Einrichtung. */
 function SetupGate({ children }: { children: ReactNode }) {
-  const { data, isLoading, isError } = useStatus();
+  const { data, isLoading, isError, error } = useStatus();
   const location = useLocation();
   const { t } = useI18n();
   if (isLoading) return <FullPageSpinner />;
   if (isError) {
+    // 401: Browser ohne Sitzungs-Cookie (neues Profil, Cookies gelöscht) – angemeldet öffnet ihn der Befehl `jobslop`
+    const login = error instanceof ApiError && error.status === 401;
     return (
       <div className="grid min-h-dvh place-items-center p-6 text-center">
-        <div>
+        <div className="max-w-prose">
           <Logo />
-          <p className="mt-4 text-ink-2">{t("app.offline")}</p>
+          <p className="mt-4 text-ink-2">{t(login ? "app.login" : "app.offline")}</p>
         </div>
       </div>
     );

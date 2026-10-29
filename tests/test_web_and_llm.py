@@ -11,7 +11,7 @@ import respx
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from conftest import LOCAL
+from conftest import LOCAL, signed_in
 from jobslop.apply.engine import ApplyEngine
 from jobslop.apply.extract import PageState
 from jobslop.apply.planner import JobContext, LLMPlanner, PagePlan, PlanInput
@@ -33,7 +33,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 def _client(settings, config, profile) -> TestClient:
     import_jobs(settings.db_path, FIXTURES / "jobs_import.json", config)
     app = create_app(Runtime(settings=settings, config=config, profile=profile))
-    return TestClient(app, base_url=LOCAL, headers={"X-Jobslop": "1"})
+    return TestClient(app, base_url=LOCAL, headers={"X-Jobslop": "1"}, cookies=signed_in(settings))
 
 
 def test_api_rejects_foreign_sites(settings, config, profile):
@@ -253,7 +253,9 @@ def test_api_errors_carry_codes(settings, config, profile, monkeypatch):
         raise RuntimeError("kaputt")
 
     monkeypatch.setattr("jobslop.web.app.system_report", boom)
-    r = TestClient(client.app, base_url=LOCAL, raise_server_exceptions=False).get("/api/system")
+    r = TestClient(client.app, base_url=LOCAL, raise_server_exceptions=False, cookies=client.cookies).get(
+        "/api/system"
+    )
     assert r.status_code == 500
     # nur die Art des Fehlers – Exception-Texte können Pfade oder Profildaten enthalten
     assert r.json()["code"] == "api.internal" and "RuntimeError" in r.json()["detail"]

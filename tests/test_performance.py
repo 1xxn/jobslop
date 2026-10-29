@@ -13,7 +13,7 @@ import respx
 from fastapi.testclient import TestClient
 from sqlalchemy import event, select
 
-from conftest import LOCAL
+from conftest import LOCAL, signed_in
 from jobslop.cli import _port_free, _running_instance
 from jobslop.crawl import pipeline
 from jobslop.db import Application, InboxMessage, Job, get_engine, session_scope, utcnow
@@ -73,7 +73,7 @@ def _seed(settings, jobs: int, *, apps_per_job: int = 1, replies: int = 0) -> in
 
 def _client(settings, config, profile) -> TestClient:
     app = create_app(Runtime(settings=settings, config=config, profile=profile))
-    return TestClient(app, base_url=LOCAL, headers={"X-Jobslop": "1"})
+    return TestClient(app, base_url=LOCAL, headers={"X-Jobslop": "1"}, cookies=signed_in(settings))
 
 
 def test_endpoints_need_the_same_queries_for_more_rows(settings, config, profile):

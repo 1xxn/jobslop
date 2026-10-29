@@ -28,7 +28,15 @@ PAGES = [
 
 
 async def shoot(
-    url: str, out: Path, *, schemes: tuple[str, ...], lang: str, width: int, height: int, only: set[str]
+    url: str,
+    out: Path,
+    *,
+    token: str,
+    schemes: tuple[str, ...],
+    lang: str,
+    width: int,
+    height: int,
+    only: set[str],
 ) -> None:
     async with async_playwright() as pw:
         browser = await pw.chromium.launch()
@@ -43,6 +51,8 @@ async def shoot(
                 f"localStorage.setItem('jobslop.lang', '{lang}'); localStorage.setItem('jobslop.theme', 'system');"
             )
             page = await ctx.new_page()
+            # Anmelden wie nach `jobslop` (Token aus dem Demo-Ordner)
+            await page.goto(f"{url}/#login={token}", wait_until="networkidle")
             for name, path in PAGES:
                 if only and name not in only:
                     continue
@@ -58,6 +68,7 @@ async def shoot(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://127.0.0.1:8799")
+    parser.add_argument("--home", type=Path, default=Path(".demo-home"), help="Demo-Ordner (Anmelde-Token)")
     parser.add_argument("--out", type=Path, default=Path("docs/screenshots"))
     parser.add_argument("--lang", default="de")
     parser.add_argument("--width", type=int, default=1440)
@@ -70,6 +81,7 @@ def main() -> None:
         shoot(
             args.url,
             args.out,
+            token=(args.home / "dashboard-token").read_text(encoding="utf-8").strip(),
             schemes=tuple(args.scheme or ["light", "dark"]),
             lang=args.lang,
             width=args.width,

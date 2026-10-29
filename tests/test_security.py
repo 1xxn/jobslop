@@ -17,7 +17,7 @@ import respx
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from conftest import LOCAL
+from conftest import LOCAL, signed_in
 from jobslop import netguard
 from jobslop.config import Settings, is_source_checkout, load_settings, private_windows_folder
 from jobslop.db import Exclusion, Job, session_scope
@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _client(settings, config, profile) -> TestClient:
     app = create_app(Runtime(settings=settings, config=config, profile=profile))
-    return TestClient(app, base_url=LOCAL, headers={"X-Jobslop": "1"})
+    return TestClient(app, base_url=LOCAL, headers={"X-Jobslop": "1"}, cookies=signed_in(settings))
 
 
 # --------------------------------------------------------------------------- SSRF: nur öffentliche Ziele
@@ -429,3 +429,59 @@ def test_extension_messages_are_bounded(settings, config, profile):
         "/api/assist/step", json={"frames": [{"index": 0, "data": frame}]}, headers={"X-Jobslop-Token": token}
     )
     assert r.status_code == 422
+
+
+# --------------------------------------------------------------------------- Sitzung des Dashboards
+
+
+def test_api_needs_the_session_cookie(settings, config, profile):
+    """127.0.0.1 erreichen auch andere Benutzer und Prozesse des Rechners: ohne das Token aus dem jobslop-Ordner
+    gibt die API nichts heraus und nimmt nichts an."""
+    from jobslop.web.app import SESSION_COOKIE, dashboard_token
+
+    app = create_app(Runtime(settings=settings, config=config, profile=profile))
+    stranger = TestClient(app, base_url=LOCAL, headers={"X-Jobslop": "1"})
+    for method, path in [
+        ("GET", "/api/status"),
+        ("GET", "/api/profile"),
+        ("GET", "/api/answers"),
+        ("GET", "/api/export.csv"),
+        ("GET", "/artifacts/1/step-01-before.jpg"),
+        ("POST", "/api/crawl"),
+        ("PUT", "/api/settings"),
+    ]:
+        r = stranger.request(method, path, json={})
+        assert r.status_code == 401 and r.json()["code"] == "api.login", path
+        assert r.headers["cache-control"] == "no-store"
+    wrong = TestClient(app, base_url=LOCAL, cookies={SESSION_COOKIE: "geraten"})
+    assert wrong.get("/api/status").status_code == 401
+    # offen: Lebenszeichen für die CLI (ohne Daten), die gebaute Oberfläche, die Anmeldung
+    assert stranger.get("/api/ping").json()["app"] == "jobslop"
+    assert stranger.get("/").status_code in (200, 503)
+    assert stranger.post("/api/session", json={"token": "geraten"}).status_code == 401
+
+    login = stranger.post("/api/session", json={"token": dashboard_token(settings)})
+    assert login.status_code == 200
+    cookie = login.headers["set-cookie"]
+    assert "httponly" in cookie.lower() and "samesite=strict" in cookie.lower() and "path=/" in cookie.lower()
+    assert stranger.get("/api/status").status_code == 200  # TestClient übernimmt das Cookie
+
+
+def test_extension_keeps_its_own_token(settings, config, profile):
+    """Die Erweiterung braucht kein Dashboard-Cookie – aber ihr eigenes Token."""
+    from jobslop import assist
+
+    app = create_app(Runtime(settings=settings, config=config, profile=profile))
+    client = TestClient(app, base_url=LOCAL)
+    assert client.get("/api/assist/status").status_code == 401
+    ok = client.get("/api/assist/status", headers={"X-Jobslop-Token": assist.token(settings)})
+    assert ok.status_code == 200
+
+
+def test_session_token_is_stable_and_private(settings):
+    from jobslop.web.app import dashboard_token, login_url
+
+    first = dashboard_token(settings)
+    assert len(first) >= 40 and dashboard_token(settings) == first
+    assert login_url(settings, "http://127.0.0.1:8765/") == f"http://127.0.0.1:8765/#login={first}"
+    assert (settings.home / "dashboard-token").read_text(encoding="utf-8") == first

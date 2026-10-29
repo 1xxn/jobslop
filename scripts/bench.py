@@ -102,6 +102,19 @@ def table(title: str, header: list[str], rows: list[list[Any]]) -> None:
         print(" | ".join(str(c).ljust(w) for c, w in zip(row, widths, strict=True)))
 
 
+def session_cookie(settings: Any) -> dict[str, str]:
+    """Sitzungs-Cookie des Dashboards (wie nach dem Anmelde-Link von `jobslop`)."""
+    from jobslop.web.app import SESSION_COOKIE, dashboard_token
+
+    return {SESSION_COOKIE: dashboard_token(settings)}
+
+
+def browser_session(home: Path, url: str) -> list[dict[str, Any]]:
+    from jobslop.config import Settings
+
+    return [{"name": k, "value": v, "url": url} for k, v in session_cookie(Settings(home=home)).items()]
+
+
 def free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -641,7 +654,7 @@ def _api_app(home: Path) -> tuple[Any, Any]:
     settings = Settings(home=home)
     app = create_app(Runtime.load(settings))
     # ohne „with“: kein Lebenszyklus, also keine Hintergrundprüfung, die mitten in die Messung fragt
-    return TestClient(app, base_url=LOCAL), settings
+    return TestClient(app, base_url=LOCAL, cookies=session_cookie(settings)), settings
 
 
 def _api_size(size: int, repeat: int, results: dict[str, Any]) -> None:
@@ -1264,7 +1277,8 @@ def dashboard(home: Path) -> Iterator[tuple[str, subprocess.Popen[bytes], float]
     try:
         while True:
             with contextlib.suppress(httpx.HTTPError):
-                if httpx.get(f"{url}/api/status", timeout=2).status_code == 200:
+                # /api/ping: antwortet ohne Anmeldung (ältere Stände ohne Sitzung: /api/status)
+                if httpx.get(f"{url}/api/ping", timeout=2).status_code == 200:
                     break
             if proc.poll() is not None or time.perf_counter() - t0 > 90:
                 raise SystemExit(
@@ -1365,9 +1379,10 @@ async def frontend_bench(jobs: int, idle_s: int) -> dict[str, Any]:
                 browser = await pw.chromium.launch(headless=True)
 
                 async def load(path: str, ready: str, context: Any = None) -> tuple[Any, Any, dict[str, Any]]:
-                    ctx = context or await browser.new_context(
-                        viewport={"width": 1440, "height": 900}, locale="de-DE"
-                    )
+                    if context is None:
+                        context = await browser.new_context(viewport={"width": 1440, "height": 900}, locale="de-DE")
+                        await context.add_cookies(browser_session(home, url))
+                    ctx = context
                     await ctx.add_init_script(OBSERVER_JS)
                     page = await ctx.new_page()
                     requests: list[Any] = []
@@ -1521,7 +1536,10 @@ def memory_bench(jobs: int, minutes: float) -> dict[str, Any]:
     seed_home(home, jobs=jobs)
     samples: list[tuple[float, float, float, int]] = []
     try:
-        with dashboard(home) as (url, proc, _ready), httpx.Client(base_url=url, timeout=30) as client:
+        with (
+            dashboard(home) as (url, proc, _ready),
+            httpx.Client(base_url=url, timeout=30, cookies=session_cookie(Settings(home=home))) as client,
+        ):
             ids = [j["id"] for j in client.get("/api/jobs?view=all&status=all&limit=500").json()["items"]]
             rnd = random.Random(1)
             requests = 0
