@@ -1285,7 +1285,14 @@ def dashboard(home: Path) -> Iterator[tuple[str, subprocess.Popen[bytes], float]
                     f"Dashboard startet nicht:\n{(home / 'bench-server.log').read_text()[-2000:]}"
                 )
             time.sleep(0.02)
-        yield url, proc, time.perf_counter() - t0
+        ready = time.perf_counter() - t0
+        # Wie früher die Bereitschaftsprobe über /api/status: der erste Status-Abruf (SQL-Kompilierung, erste
+        # Zählung) ist danach warm – sonst zählte die erste Seite der Oberflächen-Messung ihn mit
+        from jobslop.config import Settings
+
+        with contextlib.suppress(httpx.HTTPError):
+            httpx.get(f"{url}/api/status", timeout=10, cookies=session_cookie(Settings(home=home)))
+        yield url, proc, ready
     finally:
         kill_tree(proc)
         log.close()
