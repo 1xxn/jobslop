@@ -49,9 +49,10 @@ from .guard import already_applied
 from .hosts import host_of, is_handoff
 from .jobpage import FetchedJob, add_fetched_job, company_from_url, parse_html
 from .llm import LLM, LLMLimitReached
+from .netguard import BlockedTarget, ensure_public_target
 from .runtime import Runtime
 
-TOKEN_FILE = "extension-token"
+TOKEN_FILE = "extension-token"  # noqa: S105 – Dateiname, nicht das Token
 MAX_STEPS = 30  # Sicherheitsnetz gegen Endlosschleifen pro Bewerbung
 
 
@@ -98,9 +99,8 @@ def install(settings: Settings, server: str = "") -> Path:
         f"self.jobslopExtract = {extract};\n",
         encoding="utf-8",
     )
-    host = settings.dashboard_host if settings.dashboard_host not in ("0.0.0.0", "::") else "127.0.0.1"
     config = {
-        "server": server.rstrip("/") or f"http://{host}:{settings.dashboard_port}",
+        "server": server.rstrip("/") or f"http://{settings.dashboard_host}:{settings.dashboard_port}",
         "token": token(settings),
         "version": __version__,
         # CAPTCHA-Frames liest und bedient die Erweiterung nie – dieselbe Liste wie die Engine
@@ -225,7 +225,8 @@ def _open_application(
         )
     with session_scope(settings.db_path) as s:
         job = s.get(Job, job_id)
-        assert job is not None
+        if job is None:
+            raise RuntimeError(f"Stelle {job_id} fehlt in der Datenbank")
         if done := already_applied(s, job):
             return 0, JobContext.from_job(job), Path(), done.reason
         app = next(
@@ -330,6 +331,10 @@ async def step(rt: Runtime, body: StepIn, llm: LLM | None = None) -> dict[str, A
     state = state_from_frames({f.index: f.data for f in body.frames})
     if not state.url:
         return {"blocked": "Die Seite ließ sich nicht lesen – neu laden und noch einmal versuchen."}
+    try:
+        await ensure_public_target(state.url, settings)
+    except BlockedTarget as exc:
+        return {"blocked": str(exc)}
     if is_handoff(state.url):
         if not settings.extension_portals:
             return {

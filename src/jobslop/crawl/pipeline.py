@@ -19,6 +19,7 @@ from ..db import CrawlRun, Job, JobSnapshot, session_scope, utcnow
 from ..guard import company_key
 from ..hosts import is_browser_only
 from ..llm import LLM, LLMLimitReached
+from ..netguard import is_public_url
 from ..profile import Profile
 from .base import RawPosting, make_client
 from .boards import discover, known_board_sources
@@ -127,6 +128,11 @@ async def run_crawl(
         with_board: set[str] = set()  # Firmen, deren eigenes Board ohnehin abgefragt wird
         off_location: list[tuple[Any, RawPosting]] = []  # Board-Stellen, die nur am Ortsfilter scheitern
 
+        def web_target(url: str) -> bool:
+            if settings.allow_private_targets:
+                return url.startswith(WEB_SCHEMES)
+            return is_public_url(url)
+
         def take(src: Any, result: list[RawPosting] | BaseException) -> None:
             if isinstance(result, BaseException):
                 report.errors.append(f"{src.name}: {type(result).__name__}: {result}")
@@ -137,10 +143,15 @@ async def run_crawl(
             report.fetched += len(result)
             for posting in result:
                 listed.add(fingerprint(posting.source, posting.external_id))
-                if not posting.url.startswith(WEB_SCHEMES):
-                    # Fremde Daten: „javascript:“ oder „file:“ gehört weder ins Dashboard noch in den Browser
-                    log.warning("%s: Stelle ohne Web-Adresse übersprungen: %.80s", src.name, posting.url)
+                if not web_target(posting.url):
+                    # Fremde Daten: „javascript:“ oder „file:“ gehört weder ins Dashboard noch in den Browser, eine
+                    # Adresse im eigenen Netz (127.0.0.1 = das Dashboard selbst) nicht in den Bewerbungs-Browser
+                    log.warning(
+                        "%s: Stelle ohne öffentliche Web-Adresse übersprungen: %.80s", src.name, posting.url
+                    )
                     continue
+                if posting.apply_url and not web_target(posting.apply_url):
+                    posting.apply_url = ""
                 if not _is_aggregator(posting.source):
                     with_board.add(company_key(posting.company))
                 allowed, _why = title_allowed(posting.title, config)
@@ -213,7 +224,8 @@ async def run_crawl(
     touched: list[int] = []
     with session_scope(settings.db_path) as s:
         crawl_row = s.get(CrawlRun, run_id)
-        assert crawl_row is not None
+        if crawl_row is None:
+            raise RuntimeError(f"Crawl-Lauf {run_id} fehlt in der Datenbank")
         run = crawl_row
         seen_ids: set[int] = set()
         for _src, posting, where in kept:

@@ -19,6 +19,12 @@ from .config import ApplyMode, Settings, ensure_not_demo
 from .db import utcnow
 
 
+def system_tool(name: str) -> str:
+    """Windows-Werkzeug aus System32 mit vollem Pfad: Windows sucht ein Programm ohne Pfad zuerst im aktuellen
+    Ordner – ein dort abgelegtes taskkill.exe liefe sonst an seiner Stelle."""
+    return os.path.join(os.environ.get("SYSTEMROOT", r"C:\Windows"), "System32", name)
+
+
 def process_group() -> dict[str, Any]:
     """Popen-Argumente: Kindprozess in eigener Prozessgruppe, damit „Stopp“ den ganzen Baum beenden kann."""
     if sys.platform == "win32":
@@ -31,7 +37,7 @@ def kill_tree(proc: subprocess.Popen[Any], timeout: float = 10) -> None:
     zurück, die das Browserprofil sperren – der nächste Lauf startet dann nicht."""
     if sys.platform == "win32":
         subprocess.run(
-            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+            [system_tool("taskkill.exe"), "/PID", str(proc.pid), "/T", "/F"],
             capture_output=True,
             check=False,
             creationflags=subprocess.CREATE_NO_WINDOW,

@@ -220,7 +220,8 @@ class PersonioSource:
 
     async def fetch(self, client: httpx.AsyncClient) -> list[RawPosting]:
         xml = await get_text(client, f"https://{self.slug}.jobs.personio.de/xml?language=de")
-        root = ET.fromstring(xml)
+        # expat (≥ 2.4) begrenzt Entity-Expansion („Billion Laughs“), ElementTree lädt keine externen Entities
+        root = ET.fromstring(xml)  # noqa: S314
         out = []
         for pos in root.findall("position"):
             pid = (pos.findtext("id") or "").strip()
@@ -845,7 +846,7 @@ class GenericPageSource:
         self.complete = False
         import hashlib
 
-        self.name = f"generic:{page.company.lower()}:{hashlib.sha1(page.url.encode()).hexdigest()[:8]}"
+        self.name = f"generic:{page.company.lower()}:{hashlib.sha1(page.url.encode(), usedforsecurity=False).hexdigest()[:8]}"
 
     async def fetch(self, client: httpx.AsyncClient) -> list[RawPosting]:
         if self.llm is None:

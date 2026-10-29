@@ -1,7 +1,9 @@
 """Einstellungen und Suchkonfiguration.
 
 - Laufzeit-Einstellungen (``Settings``): Standardwerte < ``~/.jobslop/settings.toml`` (vom Dashboard gepflegt)
-  < ``.env`` < Umgebungsvariablen mit Präfix ``JOBSLOP_``.
+  < ``.env`` < Umgebungsvariablen mit Präfix ``JOBSLOP_``. Gelesen wird ``~/.jobslop/.env`` und – nur in einem
+  jobslop-Quellordner – ``.env`` im aktuellen Ordner: eine fremde ``.env`` (etwa in einem heruntergeladenen Repo)
+  könnte sonst ``JOBSLOP_CLAUDE_BIN`` auf ein beliebiges Programm setzen.
 - Suchkonfiguration (``SearchConfig``): ``~/.jobslop/search.toml`` – Zielrollen, Filter, Quellen, Limits.
 """
 
@@ -15,7 +17,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import tomli_w
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .presets import COMMON_EXCLUDES, LEADERSHIP_EXCLUDES, preset
@@ -31,7 +33,8 @@ LEGACY_ENV_PREFIX = "JOBPILOT_"
 class Settings(BaseSettings):
     """Globale Einstellungen. Im Dashboard unter Einstellungen editierbar."""
 
-    model_config = SettingsConfigDict(env_prefix=ENV_PREFIX, env_file=".env", extra="ignore")
+    # .env-Dateien liest load_settings selbst (nur aus sicheren Ordnern) – nicht pydantic aus dem aktuellen Ordner
+    model_config = SettingsConfigDict(env_prefix=ENV_PREFIX, env_file=None, extra="ignore")
 
     home: Path = Field(default_factory=lambda: Path.home() / ".jobslop")
     # Claude Code (Abo-Login). Modelle als Alias: sonnet | opus | haiku – oder ein voller Modellname.
@@ -49,7 +52,7 @@ class Settings(BaseSettings):
     max_steps_per_application: int = 14
     navigation_timeout_ms: int = 45_000
     user_wait_timeout_s: int = 900
-    dashboard_host: str = "127.0.0.1"
+    dashboard_host: str = "127.0.0.1"  # nur Loopback – siehe _loopback_only
     dashboard_port: int = 8765
     # Autopilot: läuft, solange das Dashboard offen ist (oder per `jobslop autopilot` aus dem OS-Planer)
     autopilot_enabled: bool = False
@@ -78,6 +81,18 @@ class Settings(BaseSettings):
     extension_portal_daily_limit: int = 15
     # Demo-Ordner (scripts/demo_data.py): nichts darf echt crawlen, bewerben oder Nachrichten verschicken
     demo: bool = False
+    # Nur Umgebung (Tests, Entwicklung): Bewerbungs-Browser, Erweiterung und „Stelle per Link“ dürfen Adressen im
+    # eigenen Rechner/Netz öffnen. Sonst sperrt netguard sie (das Dashboard selbst liegt auf 127.0.0.1).
+    allow_private_targets: bool = False
+
+    @field_validator("dashboard_host")
+    @classmethod
+    def _loopback_only(cls, value: str) -> str:
+        """Das Dashboard hat kein Login – im Netz erreichbar wäre es für jeden, der den Host-Header fälscht."""
+        if value.strip().lower().strip("[]") in ("127.0.0.1", "localhost", "::1"):
+            return value.strip()
+        log.warning("dashboard_host=%s ignoriert: das Dashboard lauscht nur auf 127.0.0.1", value)
+        return "127.0.0.1"
 
     @property
     def db_path(self) -> Path:
@@ -116,6 +131,48 @@ class Settings(BaseSettings):
                 self.home.chmod(0o700)
             except OSError as exc:
                 log.warning("Rechte für %s nicht gesetzt: %s", self.home, exc)
+        elif os.name == "nt" and not self.home.resolve().is_relative_to(Path.home().resolve()):
+            # Im Benutzerprofil (Standard ~/.jobslop) erbt der Ordner dessen Rechte: nur du, SYSTEM, Administratoren
+            private_windows_folder(self.home)
+
+
+def private_windows_folder(folder: Path) -> bool:
+    """Windows: Vererbung kappen, Zugriff nur für dich, SYSTEM und Administratoren (wie im Benutzerprofil). Für
+    einen JOBSLOP_HOME außerhalb des Profils (z. B. D:\\jobslop), wo oft alle Benutzer lesen dürfen. Einmal pro
+    Ordner (Markierung ``.private``); icacls ohne Shell, Fehler nur im Protokoll."""
+    import subprocess
+
+    from .runner import system_tool
+
+    marker = folder / ".private"
+    if marker.exists():
+        return True
+    user = f"{os.environ.get('USERDOMAIN', '')}\\{os.environ.get('USERNAME', '')}".lstrip("\\")
+    try:
+        result = subprocess.run(
+            [
+                system_tool("icacls.exe"),
+                str(folder),
+                "/inheritance:r",
+                "/grant:r",
+                f"{user}:(OI)(CI)F",
+                "*S-1-5-18:(OI)(CI)F",  # SYSTEM
+                "*S-1-5-32-544:(OI)(CI)F",  # Administratoren
+                "/q",
+            ],
+            capture_output=True,
+            timeout=120,
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log.warning("Rechte für %s nicht gesetzt: %s", folder, exc)
+        return False
+    if result.returncode != 0:
+        log.warning("Rechte für %s nicht gesetzt (icacls %s)", folder, result.returncode)
+        return False
+    marker.write_bytes(b"")
+    return True
 
 
 class DemoModeError(RuntimeError):
@@ -231,9 +288,19 @@ def read_settings_file(home: Path) -> dict[str, Any]:
     return {k: v for k, v in data.items() if k in Settings.model_fields}
 
 
+def is_source_checkout(folder: Path) -> bool:
+    """Ist ``folder`` ein jobslop-Quellordner (Entwicklung)? Nur dort gilt eine ``.env`` im aktuellen Ordner."""
+    try:
+        data = tomllib.loads((folder / "pyproject.toml").read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    return data.get("project", {}).get("name") == "jobslop"
+
+
 def load_settings() -> Settings:
     """Einstellungen frisch laden: settings.toml, überlagert von .env und Umgebung."""
-    load_env_files(Path.cwd() / ".env")
+    if is_source_checkout(Path.cwd()):
+        load_env_files(Path.cwd() / ".env")
     _adopt_legacy_env()
     migrate_legacy_home()
     base = Settings()

@@ -1081,7 +1081,9 @@ async def engine_bench(latency: float, rounds: int) -> dict[str, Any]:
     results: dict[str, Any] = {}
     home = temp_home("engine")
     try:
-        settings = Settings(home=home, headless=True, vision="never", max_steps_per_application=12)
+        settings = Settings(
+            home=home, headless=True, vision="never", max_steps_per_application=12, allow_private_targets=True
+        )
         settings.ensure_dirs()
         config = default_search_config()
         profile = Profile.load(PROFILE)

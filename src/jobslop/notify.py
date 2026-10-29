@@ -23,29 +23,34 @@ async def notify(
         log.info("Demo-Modus – Benachrichtigung nicht gesendet: %s", title)
         return 0
     sent = 0
-    async with httpx.AsyncClient(timeout=10) as client:
-        if settings.notify_ntfy_url:
+    # Ziele stellst du selbst ein – auch im eigenen Netz (Home Assistant, eigener ntfy-Server); nur http(s)
+    ntfy = settings.notify_ntfy_url if _web(settings.notify_ntfy_url) else ""
+    webhook = settings.notify_webhook_url if _web(settings.notify_webhook_url) else ""
+    async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
+        if ntfy:
             headers = {"Title": _ascii(title), "Priority": priority, "Tags": "briefcase"}
             if url:
                 headers["Click"] = url
             try:
-                r = await client.post(
-                    settings.notify_ntfy_url, content=message.encode("utf-8"), headers=headers
-                )
+                r = await client.post(ntfy, content=message.encode("utf-8"), headers=headers)
                 r.raise_for_status()
                 sent += 1
             except httpx.HTTPError as exc:
                 log.warning("ntfy-Benachrichtigung fehlgeschlagen: %s", exc)
-        if settings.notify_webhook_url:
+        if webhook:
             text = f"**{title}**\n{message}" + (f"\n{url}" if url else "")
             payload = {"content": text, "text": text, "title": title, "message": message, "url": url}
             try:
-                r = await client.post(settings.notify_webhook_url, json=payload)
+                r = await client.post(webhook, json=payload)
                 r.raise_for_status()
                 sent += 1
             except httpx.HTTPError as exc:
                 log.warning("Webhook-Benachrichtigung fehlgeschlagen: %s", exc)
     return sent
+
+
+def _web(url: str) -> bool:
+    return url.strip().lower().startswith(("https://", "http://"))
 
 
 def _ascii(text: str) -> str:
