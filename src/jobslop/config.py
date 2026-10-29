@@ -71,7 +71,9 @@ class Settings(BaseSettings):
     inbox_host: str = ""  # z. B. imap.gmail.com, outlook.office365.com, imap.web.de
     inbox_port: int = 993
     inbox_user: str = ""
-    inbox_password: str = ""  # leer, wenn es im Schlüsselbund liegt (inbox_password_in_keyring) – imap_password()
+    inbox_password: str = (
+        ""  # leer, wenn es im Schlüsselbund liegt (inbox_password_in_keyring) – imap_password()
+    )
     inbox_password_in_keyring: bool = False  # nur jobslop selbst setzt das (nicht über die API)
     inbox_folder: str = "INBOX"
     inbox_interval_min: int = 30
