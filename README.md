@@ -164,7 +164,8 @@ Configuration reference: [docs/configuration.md](docs/configuration.md).
 ## Privacy & responsibility
 
 - **Local first.** Database, profile, CV, screenshots – everything lives in `~/.jobslop` on your machine.
-  The dashboard only listens on `127.0.0.1` and rejects requests from other sites.
+  The dashboard only listens on `127.0.0.1`, rejects requests from other sites and answers only your signed-in
+  browser. Threat model and controls: [docs/security.md](docs/security.md).
 - **Your data leaves your computer** only towards Claude (through your own subscription) and into the forms
   of the applications you start.
 - **You are responsible for what is sent in your name.** Start with *dry run* or *with approval*.
