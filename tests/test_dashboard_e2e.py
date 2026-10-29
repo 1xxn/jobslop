@@ -49,9 +49,14 @@ async def test_dashboard_end_to_end(dashboard):
         browser = await pw.chromium.launch(headless=True)
         ctx = await browser.new_context(locale="de-DE", viewport={"width": 1440, "height": 1000})
         page = await ctx.new_page()
-        # angemeldet wie nach `jobslop`: der Anmelde-Link tauscht das Token gegen das Sitzungs-Cookie
+        # Ohne Sitzungs-Cookie: nur der Hinweis, wie man sich anmeldet
+        await page.goto(base)
+        await page.get_by_text("Dieser Browser ist nicht angemeldet").wait_for()
+        # Anmelde-Link im selben Tab (wie nach `jobslop`): tauscht das Token gegen das Cookie, entfernt es aus der URL
         await page.goto(login_url(Runtime.load(get_settings()).settings, base))
         await page.wait_for_url(re.compile(r"^[^#]*$"))
+        await page.get_by_text("Dieser Browser ist nicht angemeldet").wait_for(state="detached")
+        assert "jobslop_session" not in await page.evaluate("document.cookie")  # HttpOnly
         page.on("pageerror", lambda exc: errors.append(str(exc)))
         page.on("console", lambda msg: msg.type == "error" and errors.append(msg.text))
         try:
