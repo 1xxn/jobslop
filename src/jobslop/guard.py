@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -54,6 +55,7 @@ _MAX_OPEN_REPEATS = (
 _REPEATS = {"MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT"}
 
 
+@functools.lru_cache(maxsize=512)
 def regex_problem(pattern: str) -> str:
     """Warum ``pattern`` kein zulässiger Titel-Ausschluss ist – leer, wenn er zulässig ist."""
     import re._parser as sre  # Parser der Standardbibliothek (Python ≥ 3.11)
@@ -117,6 +119,8 @@ def _flat(items: Any) -> list[tuple[Any, Any]]:
     return out
 
 
+# Pro Muster einmal prüfen und kompilieren: Status-, Listen- und Detail-Abrufe fragen dieselben Regeln immer wieder
+@functools.lru_cache(maxsize=512)
 def _title_test(pattern: str) -> Callable[[str], bool]:
     """Titel-Ausschluss als regulärer Ausdruck. Ein ungültiger (z. B. „senior (“) oder zu aufwendiger Ausdruck
     (``regex_problem``) gilt als einfacher Text, statt die Status- und Stellenabfragen des Dashboards zu blockieren."""
