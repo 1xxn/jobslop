@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from conftest import LOCAL, add_job, signed_in
 from jobslop import inbox
+from jobslop.config import imap_password
 from jobslop.db import Application, InboxMessage, session_scope
 from jobslop.inbox import Candidate, Mail, MailVerdict, check_inbox, fetch_mails, related
 from jobslop.runtime import Runtime
@@ -160,7 +161,9 @@ def test_inbox_api_applies_and_hides_the_password(settings, config, profile):
     client.put(
         "/api/settings", json={"inbox_password": "", "inbox_folder": "Bewerbungen"}
     )  # leer = unverändert
-    assert client.app.state.ctx.settings.inbox_password == "geheim"
+    # „leer = unverändert“; das Passwort liegt im Schlüsselbund, nicht im Klartext in den Einstellungen
+    assert imap_password(client.app.state.ctx.settings) == "geheim"
+    assert client.app.state.ctx.settings.inbox_password == ""
     status = client.get("/api/status").json()
     assert status["counts"]["replies"] == 1 and status["replies"][0]["company"] == "Acme Cloud GmbH"
     reply = status["replies"][0]["id"]
