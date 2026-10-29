@@ -1,0 +1,43 @@
+name: Audit
+
+# Bekannte Sicherheitslücken in den festgeschriebenen Abhängigkeiten (uv.lock, frontend/package-lock.json). Läuft
+# auch ohne Commit jeden Morgen: eine neu veröffentlichte Lücke in einem längst eingebauten Paket wird so sichtbar,
+# Dependabot liefert dann den Update-PR.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  audit:
+    name: Vulnerability audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read # Lockfiles lesen
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.15"
+      # Jede bekannte Lücke (OSV-Datenbank) macht den Lauf rot – nicht erst ab „hoch“: für Python liefern viele
+      # Einträge keine Schwere. Eine begründete Ausnahme kommt als --ignore-vuln <ID> mit Kommentar hierher.
+      - name: Python packages (pip-audit on uv.lock)
+        run: |
+          uv export --frozen --no-emit-project --format requirements-txt --output-file "$RUNNER_TEMP/requirements.txt"
+          uvx pip-audit==2.10.1 --vulnerability-service osv --disable-pip --no-deps --require-hashes --strict \
+            --requirement "$RUNNER_TEMP/requirements.txt"
+      - name: npm packages (npm audit, high and critical)
+        working-directory: frontend
+        run: npm audit --audit-level=high
