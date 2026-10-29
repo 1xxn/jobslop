@@ -81,6 +81,11 @@ def _client(settings, config, profile) -> TestClient:
         "http://x.local\u00adhost/",  # weiches Trennzeichen fällt weg
         "\x00http://127.0.0.1/",
         "http://127.0.0.1%00.example.com/",
+        # Zahlenteile, die int() annimmt, Browser aber nicht: früher eine Ausnahme statt einer Antwort
+        "http://-1.0.0.1/",
+        "http://0x-1.0.0.1/",
+        "http://+127.0.0.1/",
+        "http://1_27.0.0.1/",
     ],
 )
 def test_private_and_odd_targets_are_not_public(url):
