@@ -380,7 +380,14 @@ def test_extension_answers_only_for_questions_jobslop_asked(settings, config, pr
     from jobslop.db import Answer, Application, ApplicationEvent
 
     with session_scope(settings.db_path) as s:
-        job = Job(fingerprint="ext-1", company="Acme", title="SRE", url="https://acme.example/jobs/1")
+        job = Job(
+            fingerprint="ext-1",
+            match_key="acme|sre",
+            source="extension",
+            company="Acme",
+            title="SRE",
+            url="https://acme.example/jobs/1",
+        )
         app = Application(job=job, origin="extension", mode="review", status="running")
         s.add(app)
         s.flush()
