@@ -98,7 +98,7 @@ def regex_problem(pattern: str) -> str:
                     if problem := walk(branch, inside_repeat):
                         return problem
             elif name in ("ASSERT", "ASSERT_NOT", "ATOMIC_GROUP"):
-                if problem := walk(arg[-1], inside_repeat):
+                if problem := walk(_body(op, arg), inside_repeat):
                     return problem
         return ""
 
@@ -123,6 +123,12 @@ def _branch_ways(branches: list[Any]) -> int:
     return len(branches) if ambiguous else 1
 
 
+def _body(op: Any, arg: Any) -> Any:
+    """Inhalt einer Gruppe: (?>…) trägt ihn direkt, (…), (?=…) und (?!…) als letztes Element (der Fuzzer fand
+    „(?>a)“ – vorher ein TypeError und HTTP 500 beim Anlegen des Ausschlusses)."""
+    return arg if str(op) == "ATOMIC_GROUP" else arg[-1]
+
+
 def _flat(items: Any) -> list[tuple[Any, Any]]:
     """Alle Knoten eines geparsten Ausdrucks (für die Suche nach Alternativen in einer Wiederholung)."""
     out: list[tuple[Any, Any]] = []
@@ -132,7 +138,7 @@ def _flat(items: Any) -> list[tuple[Any, Any]]:
         if name in _REPEATS:
             out += _flat(arg[2])
         elif name in ("SUBPATTERN", "ASSERT", "ASSERT_NOT", "ATOMIC_GROUP"):
-            out += _flat(arg[-1])
+            out += _flat(_body(op, arg))
         elif name == "BRANCH":
             for branch in arg[1]:
                 out += _flat(branch)

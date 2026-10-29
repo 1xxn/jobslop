@@ -261,6 +261,7 @@ def test_catastrophic_title_regexes_are_rejected(pattern):
         r"senior\s?.*manager.*",
         "(ab){3}",
         r"\d{1,3}k",
+        r"(?>senior|lead)\s+engineer",  # atomare Gruppe: vorher TypeError
     ],
 )
 def test_ordinary_title_regexes_are_allowed(pattern):
@@ -373,6 +374,7 @@ def test_uploads_are_streamed_checked_and_named_safely(settings, config, profile
         ("CON .pdf", "_CON .pdf"),  # Windows liest das als Gerät CON
         ("COM" + chr(0xB9) + ".pdf", "_COM" + chr(0xB9) + ".pdf"),  # hochgestellte 1: ebenfalls COM1
         ("brief.abcdefghi jkl", "brief.abcdefghi"),  # gekürzte Endung endete auf einem Leerzeichen
+        ("x.abcdefghijklmnop." + " " * 10 + "z", "x.abcdefghij"),  # stabil: zweiter Durchlauf gleich
     ],
 )
 def test_safe_filename(raw, expected):
