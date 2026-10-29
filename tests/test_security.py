@@ -243,6 +243,7 @@ async def test_extension_refuses_pages_in_the_own_network(settings, config, prof
         "a{0,30}" * 8 + "b",
         "a?" * 20 + "b",
         "(?:a|aa)" * 30 + "b",
+        "(?<=senior.*)manager",  # Lookbehind variabler Länge: parst, übersetzt aber nicht
         r"\s?" * 6 + r"\s*\s*x",
     ],
 )
