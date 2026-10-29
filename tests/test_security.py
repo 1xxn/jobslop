@@ -66,6 +66,21 @@ def _client(settings, config, profile) -> TestClient:
         "ftp://example.com/",
         "http://256.1.1.1/",
         "",
+        # So liest sie Chromium (WHATWG URL, Hosts nach UTS 46) – urlsplit allein sähe example.com bzw. einen
+        # öffentlichen Namen
+        "http://127.0.0.1:8765\\@example.com/",
+        "http:\\\\127.0.0.1\\",
+        "http://127.0.0%2e1/",
+        "http://x.localhos%74/",
+        "http://x.ⓛocalhost:8765/",
+        "http://foo.ｌｏｃａｌｈｏｓｔ/",
+        "http://１２７.０.０.１/",
+        "http://127.0.0.1．/",
+        "http://127。0。0。1/",
+        "http://127.0.0.⒈/",
+        "http://x.local\u00adhost/",  # weiches Trennzeichen fällt weg
+        "\x00http://127.0.0.1/",
+        "http://127.0.0.1%00.example.com/",
     ],
 )
 def test_private_and_odd_targets_are_not_public(url):
@@ -79,6 +94,10 @@ def test_private_and_odd_targets_are_not_public(url):
         "http://8.8.8.8/",
         "https://[2606:4700::1111]/",
         "https://jobs.example.de/x",
+        "https://bücher.example/jobs",
+        "https://jobs.example.com/a\\b?next=\\@127.0.0.1",  # Backslash nach dem Host: Pfad und Query
+        "https://jobs.example.com/%41",
+        "https://user:pw@127.0.0.1@jobs.example.com/",  # Benutzerdaten bis zum letzten „@“
     ],
 )
 def test_public_targets_pass(url):
@@ -104,6 +123,22 @@ async def test_names_that_resolve_into_the_own_network_are_blocked(monkeypatch):
     await ensure_public_target("https://jobs.evil.example/apply", Settings(allow_private_targets=True))
     _resolve_to(monkeypatch, "93.184.215.14")
     await ensure_public_target("https://jobs.example.org/apply", Settings())
+
+
+async def test_dns_check_resolves_the_name_the_browser_opens(monkeypatch):
+    """Aufgelöst wird der Host, den Chromium öffnet – nicht der, den urlsplit liest."""
+    asked: list[str] = []
+
+    async def fake_getaddrinfo(_loop, host, port, *_args, **_kw):
+        asked.append(host)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.215.14", port or 0))]
+
+    monkeypatch.setattr(netguard.asyncio.get_running_loop().__class__, "getaddrinfo", fake_getaddrinfo)
+    netguard._dns_cache.clear()
+    await ensure_public_target("https://jobs.ｅｘａｍｐｌｅ.org/apply", Settings())
+    with pytest.raises(BlockedTarget):
+        await ensure_public_target("http://127.0.0.1:8765\\@jobs.example.org/", Settings())
+    assert asked == ["jobs.example.org"]
 
 
 async def test_public_client_checks_every_connection(monkeypatch, site):

@@ -9,6 +9,9 @@ Zwei Stufen:
 - ``is_public_url`` prüft nur die Schreibweise (kein DNS, Mikrosekunden – der Crawl prüft damit Tausende Links):
   http(s), keine IP aus privaten/lokalen Netzen, kein ``localhost``, keine Namen ohne Punkt (``http://router``)
   und keine Zahlenformen, die Browser als IPv4 lesen (``http://2130706433``, ``http://127.1``, ``http://0x7f.1``).
+  Geprüft wird die Adresse so, wie Chromium sie liest (WHATWG URL, Hosts nach UTS 46) – nicht, wie ``urlsplit`` sie
+  liest: für Chromium ist ``http://127.0.0.1\\@example.com`` die 127.0.0.1, ebenso ``http://127.0.0%2e1`` und
+  ``http://127.0.0.1．``, und ``http://x.ⓛocalhost`` ist ein localhost-Name.
 - ``ensure_public_target`` löst den Namen zusätzlich auf (Engine und Erweiterung vor jedem Schritt) und
   ``public_client`` prüft bei jedem Verbindungsaufbau genau die Adresse, zu der verbunden wird – auch nach
   Weiterleitungen und ohne Lücke für DNS-Rebinding.
@@ -22,10 +25,12 @@ import asyncio
 import functools
 import ipaddress
 import logging
+import re
 import socket
 import time
+import unicodedata
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 if TYPE_CHECKING:
     import httpx
@@ -36,6 +41,17 @@ WEB_SCHEMES = ("http", "https")
 _LOCAL_SUFFIXES = (".localhost", ".local", ".internal", ".home.arpa", ".lan", ".intranet")
 _DNS_TTL_S = 60.0
 _dns_cache: dict[str, tuple[float, bool]] = {}
+
+_plain_host = re.compile(r"[a-z0-9.-]*").fullmatch
+# UTS 46: unsichtbare Zeichen fallen weg (dazu alle der Kategorie Cf), ideografische Punkte trennen wie „.“
+_INVISIBLE = frozenset(
+    "\u034f\u17b4\u17b5\u180b\u180c\u180d\u180f"
+    + "".join(map(chr, range(0xFE00, 0xFE10)))
+    + "".join(map(chr, range(0xE0100, 0xE01F0)))
+)
+_DOTS = str.maketrans({"\u3002": ".", "\uff0e": ".", "\uff61": "."})
+# „forbidden domain code points“: einen Host mit diesen Zeichen öffnet kein Browser
+_FORBIDDEN_IN_HOSTS = frozenset("".join(map(chr, range(0x21))) + "#%/:<>?@[\\]^|\x7f")
 
 
 class BlockedTarget(ValueError):
@@ -83,9 +99,42 @@ def _browser_ipv4(host: str) -> ipaddress.IPv4Address | bool | None:
     return ipaddress.IPv4Address(address)
 
 
+def _browser_host(host: str) -> str | None:
+    """Host, wie Browser ihn lesen (WHATWG URL, UTS 46) – None, wenn ihn kein Browser öffnet.
+
+    Browser dekodieren ``%xx`` im Host und bilden Vollbreite-, eingekreiste und andere Kompatibilitätszeichen auf
+    ASCII ab (``１２７.０.０.１``, ``ⓛocalhost``); fremde Schriften bleiben Namen, über die DNS entscheidet.
+    """
+    if _plain_host(host):
+        return host  # der Normalfall (der Crawl prüft Tausende Links): nichts zu dekodieren oder abzubilden
+    host = host.strip().lower()
+    if ":" in host:
+        return host  # IPv6-Literal (urlsplit liefert es ohne Klammern): kein Dekodieren, keine Abbildung
+    host = unquote(host)
+    if not host.isascii():
+        visible = "".join(c for c in host if c not in _INVISIBLE and unicodedata.category(c) != "Cf")
+        host = unicodedata.normalize("NFKC", visible).translate(_DOTS).lower()
+    if not _FORBIDDEN_IN_HOSTS.isdisjoint(host):
+        return None
+    return host
+
+
+def _browser_url(url: str) -> str:
+    """Adresse, wie Browser sie lesen, bevor sie den Host suchen: in http(s)-Adressen ist „\\“ ein „/“.
+
+    Ein Backslash beendet den Host wie ein „/“ – ``urlsplit`` liest ``http://127.0.0.1\\@example.com`` dagegen als
+    example.com mit Benutzername. Steuerzeichen am Anfang sowie Tab und Zeilenumbrüche entfernt ``urlsplit`` selbst
+    wie ein Browser (seit Python 3.11.4); bleiben welche im Host, gilt er nicht als öffentlich.
+    """
+    return url.strip().replace("\\", "/")
+
+
 def is_public_host(host: str) -> bool:
     """Name oder IP-Literal, ohne DNS: kann das ein öffentlicher Server sein?"""
-    host = host.strip().lower().rstrip(".")
+    mapped = _browser_host(host)
+    if mapped is None:
+        return False
+    host = mapped.rstrip(".")
     if not host or host == "localhost" or host.endswith(_LOCAL_SUFFIXES):
         return False
     if ":" in host:  # IPv6-Literal (urlsplit liefert es ohne Klammern)
@@ -102,9 +151,9 @@ def is_public_host(host: str) -> bool:
 
 
 def is_public_url(url: str) -> bool:
-    """http(s)-Adresse, deren Host öffentlich sein kann – ohne DNS-Abfrage."""
+    """http(s)-Adresse, deren Host öffentlich sein kann – ohne DNS-Abfrage, gelesen wie im Browser."""
     try:
-        parts = urlsplit(url.strip())
+        parts = urlsplit(_browser_url(url))
         host = parts.hostname or ""
     except ValueError:
         return False
@@ -134,7 +183,8 @@ async def ensure_public_target(url: str, settings: Any) -> None:
         return
     if not is_public_url(url):
         raise BlockedTarget(f"Adresse im eigenen Rechner oder Netz – jobslop öffnet sie nicht: {url[:120]}")
-    host = (urlsplit(url).hostname or "").lower()
+    # Aufgelöst wird der Name, den auch der Browser auflöst (nach is_public_url gibt es ihn immer)
+    host = _browser_host(urlsplit(_browser_url(url)).hostname or "") or ""
     if not await _resolves_public(host):
         raise BlockedTarget(
             f"{host} zeigt auf eine Adresse im eigenen Rechner oder Netz – jobslop öffnet sie nicht"
