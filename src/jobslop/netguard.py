@@ -43,6 +43,9 @@ _DNS_TTL_S = 60.0
 _dns_cache: dict[str, tuple[float, bool]] = {}
 
 _plain_host = re.compile(r"[a-z0-9.-]*").fullmatch
+_hex_digits = re.compile(r"[0-9a-fA-F]*").fullmatch
+_octal_digits = re.compile(r"[0-7]+").fullmatch
+_decimal_digits = re.compile(r"[0-9]+").fullmatch
 # UTS 46: unsichtbare Zeichen fallen weg (dazu alle der Kategorie Cf), ideografische Punkte trennen wie „.“
 _INVISIBLE = frozenset(
     "\u034f\u17b4\u17b5\u180b\u180c\u180d\u180f"
@@ -68,15 +71,14 @@ def _public_ip(ip: IpAddress) -> bool:
 
 
 def _ipv4_number(part: str) -> int | None:
-    """Ein Teil einer IPv4-Adresse, wie Browser ihn lesen (WHATWG URL): dezimal, 0x… hexadezimal, 0… oktal."""
-    try:
-        if part.startswith(("0x", "0X")):
-            return int(part[2:] or "0", 16)
-        if len(part) > 1 and part.startswith("0"):
-            return int(part, 8)
-        return int(part, 10)
-    except ValueError:
-        return None
+    """Ein Teil einer IPv4-Adresse, wie Browser ihn lesen (WHATWG URL): dezimal, 0x… hexadezimal, 0… oktal – nur
+    ASCII-Ziffern. ``int()`` nähme auch „-1“, „+1“, „1_0“ oder „١“; ein negativer Teil ergab eine negative Adresse und
+    damit eine Ausnahme statt einer Antwort."""
+    if part[:2] in ("0x", "0X"):
+        return int(part[2:] or "0", 16) if _hex_digits(part[2:]) else None
+    if len(part) > 1 and part.startswith("0"):
+        return int(part, 8) if _octal_digits(part) else None
+    return int(part) if _decimal_digits(part) else None
 
 
 def _browser_ipv4(host: str) -> ipaddress.IPv4Address | bool | None:
@@ -154,10 +156,9 @@ def is_public_url(url: str) -> bool:
     """http(s)-Adresse, deren Host öffentlich sein kann – ohne DNS-Abfrage, gelesen wie im Browser."""
     try:
         parts = urlsplit(_browser_url(url))
-        host = parts.hostname or ""
-    except ValueError:
+        return parts.scheme.lower() in WEB_SCHEMES and is_public_host(parts.hostname or "")
+    except ValueError:  # auch ipaddress-Fehler: was sich nicht lesen lässt, ist nicht öffentlich
         return False
-    return parts.scheme.lower() in WEB_SCHEMES and is_public_host(host)
 
 
 def _addresses(infos: list[Any]) -> list[IpAddress]:
