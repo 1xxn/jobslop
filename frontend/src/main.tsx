@@ -40,6 +40,11 @@ async function login(): Promise<void> {
   }).catch(() => undefined);
 }
 
+// Derselbe Tab mit einem neuen Anmelde-Link: nur das Fragment ändert sich, die Seite lädt nicht neu
+window.addEventListener("hashchange", () => {
+  if (window.location.hash.startsWith("#login=")) void login().finally(() => window.location.reload());
+});
+
 void login().finally(() =>
   createRoot(document.getElementById("root") as HTMLElement).render(
     <StrictMode>
