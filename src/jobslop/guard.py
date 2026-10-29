@@ -69,6 +69,9 @@ def regex_problem(pattern: str) -> str:
         return f"höchstens {MAX_PATTERN} Zeichen"
     try:
         tree = sre.parse(pattern, re.I)
+        # Manches liest der Parser, aber erst das Übersetzen lehnt es ab (Lookbehind variabler Länge wie „(?<=a+)“) –
+        # gespeichert ließe so ein Ausschluss jeden Status-Abruf scheitern (der Fuzzer hat es gefunden)
+        re.compile(pattern, re.I)
     except (re.error, OverflowError, RecursionError) as exc:
         return str(exc)
     splits = 1
