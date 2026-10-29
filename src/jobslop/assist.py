@@ -427,7 +427,8 @@ async def step(rt: Runtime, body: StepIn, llm: LLM | None = None) -> dict[str, A
             notes.append(problem)
     ops = [compile_action(state, a, files) for a in plan.actions if a.action != "skip"]
     questions = [
-        q.model_dump() | {"label": (state.field(q.field_id) or {}).get("label", "")} for q in plan.open_questions
+        q.model_dump() | {"label": (state.field(q.field_id) or {}).get("label", "")}
+        for q in plan.open_questions
     ]
     log_event(
         settings.db_path,
@@ -508,7 +509,11 @@ def save_answers(settings: Settings, body: AnswersIn) -> int:
             .order_by(ApplicationEvent.id.desc())
             .limit(1)
         ).first()
-        asked = {normalize_question(q) for q in ((last_plan.data or {}).get("asked") or [])} if last_plan else set()
+        asked = (
+            {normalize_question(q) for q in ((last_plan.data or {}).get("asked") or [])}
+            if last_plan
+            else set()
+        )
         saved = 0
         for item in body.answers:
             question, answer = item.question.strip(), item.answer.strip()
