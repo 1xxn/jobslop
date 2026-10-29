@@ -18,6 +18,7 @@ src/jobslop/
 ├── runner.py         Application runs as a separate process
 ├── notify.py         ntfy / webhook notifications
 ├── jobpage.py        "Add job by link" (schema.org JobPosting → meta tags → Claude)
+├── netguard.py       Only public web addresses for links from job sources, pages and "add job by link" (SSRF)
 ├── importer.py       JSON job import
 ├── system.py         Setup checks (Claude login, Chromium, profile), helpers
 └── web/app.py        FastAPI: JSON API under /api + the built SPA
@@ -127,8 +128,12 @@ extension reads every frame with `extract.js`, posts it to `/api/assist/step` (t
 server builds a `PageState`, plans with the normal planner, applies `guard_submit_clicks` and compiles each action
 into a concrete instruction (option already resolved, files as placeholders that the extension downloads). The
 extension fills, reports results, shows questions in an in-page panel and stops before the final submit until the
-user clicks “Submit”. CAPTCHA frames are never read or touched. LinkedIn/Indeed pages are refused unless
-`extension_portals` is on, with a daily submission limit.
+user clicks “Submit”. The panel sits in a closed shadow root and only reacts to trusted clicks; the service worker
+accepts panel messages only from the top frame of its tab; the server validates every message (`FrameData`,
+`AnswersIn` …) and stores answers only for questions it asked in the last step. Frames come from
+`chrome.webNavigation`, so CAPTCHA frames never receive a script. Pages whose host resolves into the own network are
+refused (`netguard`). LinkedIn/Indeed pages are refused unless `extension_portals` is on, with a daily submission
+limit.
 
 ## Replies from the inbox (`inbox.py`)
 
@@ -142,14 +147,21 @@ dismiss it. The app password stays in `settings.toml` and is never sent back by 
 
 ## Dashboard
 
-FastAPI serves a JSON API and the pre-built React app. Security for a local server:
+FastAPI serves a JSON API and the pre-built React app. Security for a local server (threat model and findings:
+[security.md](security.md)):
 
-- binds to `127.0.0.1` only,
+- binds to `127.0.0.1` only (`dashboard_host` is loopback-only),
 - rejects unknown `Host` headers (DNS rebinding),
 - requires `X-Jobslop: 1` on every mutating request (a foreign website cannot set it without a CORS preflight).
 - forbids framing (`X-Frame-Options: DENY`, `frame-ancestors 'none'`) and serves the UI with a Content-Security-Policy
-  that allows only its own scripts (`script-src 'self'`; the theme script is `public/theme.js`, not inline),
-- sends `nosniff` and `Referrer-Policy: no-referrer` on every response.
+  that allows only its own scripts (`script-src 'self'`; the theme script is `public/theme.js`, not inline), enforces
+  Trusted Types and forbids inline style attributes,
+- sends `nosniff`, `Referrer-Policy: no-referrer`, `Cross-Origin-Resource-Policy: same-origin` and a restrictive
+  `Permissions-Policy` on every response and `Cache-Control: no-store` for `/api/*` and `/artifacts/*`,
+- validates every request: Pydantic models with `extra="forbid"` and length/range limits, a body-size middleware
+  (`BodyLimit`: 1 MB JSON, 4 MB extension steps, 15 MB uploads), streamed PDF uploads with a magic-byte check and
+  safe file names; document paths set through the API stay inside `JOBSLOP_HOME`; unexpected errors only return the
+  exception type.
 
 Application runs are separate processes (`runner.py`) so a hanging page never blocks the UI. Prompts (questions,
 approvals, handoffs) are rows in the database that both sides poll. The autopilot scheduler runs inside the

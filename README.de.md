@@ -104,7 +104,8 @@ Mehr dazu: [docs/architecture.md](docs/architecture.md) · Einstellungen: [docs/
 ## Datenschutz & Verantwortung
 
 - **Alles lokal.** Datenbank, Profil, Lebenslauf, Screenshots liegen in `~/.jobslop`. Das Dashboard lauscht nur auf
-  `127.0.0.1` und weist Anfragen fremder Webseiten ab.
+  `127.0.0.1`, weist Anfragen fremder Webseiten ab und antwortet nur deinem angemeldeten Browser.
+  Bedrohungsmodell und Schutzmaßnahmen: [docs/security.md](docs/security.md) (englisch).
 - **Deine Daten verlassen den Rechner** nur in Richtung Claude (über dein Abo) und in die Formulare der
   Bewerbungen, die du startest.
 - **Du bist verantwortlich für das, was in deinem Namen verschickt wird.** Starte mit *Testlauf* oder *Mit Freigabe*.
