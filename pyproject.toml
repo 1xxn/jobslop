@@ -57,6 +57,10 @@ dev = [
     "respx>=0.23",
     "ruff>=0.17.3",
 ]
+# Werkzeuge der CI – aus uv.lock mit Hashes (`uv run --only-group …`), nicht per `uvx paket==version`: das prüft
+# keine Hashes und lädt die Abhängigkeiten der Werkzeuge in beliebiger Version. Dependabot hält sie aktuell.
+audit = ["pip-audit>=2.10.1"]
+workflows = ["zizmor>=1.31.1"]
 
 [build-system]
 requires = ["hatchling>=1.33"]
