@@ -21,6 +21,7 @@ from jobslop.assist import StepIn, _fetched_from_page
 from jobslop.classify import html_to_text
 from jobslop.guard import MAX_TITLE, regex_problem
 from jobslop.jobpage import FetchedJob, parse_html
+from jobslop.netguard import is_public_url
 from jobslop.web.app import WINDOWS_RESERVED, safe_filename
 
 _SLOW_S = (
@@ -100,6 +101,8 @@ def extension_step(data: bytes) -> None:
     except ValidationError:
         return
     state = state_from_frames({frame.index: frame.data.model_dump() for frame in body.frames})
+    if not is_public_url(state.url):
+        return  # assist.step lehnt die Seite vorher ab (ensure_public_target)
     fetched = _fetched_from_page(state, body.ld_json)
     assert isinstance(fetched, FetchedJob), "keine Stelle"
     assert fetched.title and isinstance(fetched.title, str), "Stelle ohne Titel"

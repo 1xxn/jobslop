@@ -506,8 +506,19 @@ def bounded(value: Any, depth: int = 0) -> None:
 
 def safe_filename(raw: str | None, default: str = "dokument.pdf") -> str:
     """Dateiname aus einem Upload: nur der letzte Teil, harmlose Zeichen (kein „:“ für alternative Datenströme unter
-    Windows), keine führenden/abschließenden Punkte, keine reservierten Windows-Namen (CON, NUL, COM1 …)."""
-    name = re.sub(r"[^\w.\- ]", "_", Path((raw or "").replace("\\", "/")).name).strip(" .")
+    Windows), keine führenden/abschließenden Punkte, keine reservierten Windows-Namen (CON, NUL, COM1 …).
+
+    So oft, bis sich nichts mehr ändert: fällt eine gekürzte Endung aus Leerzeichen weg, wird der Teil davor zur
+    Endung und muss selbst gekürzt werden (der Fuzzer hat es gefunden) – das Ergebnis ist stabil.
+    """
+    name = _safe_name_step(Path((raw or "").replace("\\", "/")).name)
+    while (again := _safe_name_step(name)) != name:
+        name = again
+    return name or default
+
+
+def _safe_name_step(name: str) -> str:
+    name = re.sub(r"[^\w.\- ]", "_", name).strip(" .")
     stem, dot, suffix = name.rpartition(".")
     if not dot:
         stem, suffix = name, ""
@@ -515,8 +526,7 @@ def safe_filename(raw: str | None, default: str = "dokument.pdf") -> str:
     if unicodedata.normalize("NFKC", stem.split(".")[0].rstrip(" ")).upper() in WINDOWS_RESERVED:
         stem = f"_{stem}"
     # nach dem Kürzen nochmals: Windows entfernt Punkte und Leerzeichen am Ende stillschweigend
-    name = (f"{stem[:120]}.{suffix[:10]}" if suffix else stem[:120]).strip(" .")
-    return name or default
+    return (f"{stem[:120]}.{suffix[:10]}" if suffix else stem[:120]).strip(" .")
 
 
 # --------------------------------------------------------------------------- App
