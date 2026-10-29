@@ -94,4 +94,6 @@ Only maintainers can create `v*` tags (tag ruleset).
 Every workflow starts without permissions and grants each job only what it needs; checkouts never keep the token.
 Actions are pinned to commit SHAs (the repository only accepts pinned actions from GitHub and an allow list);
 Dependabot updates them (and Python/npm packages) with a 14-day cooldown. `npm ci --ignore-scripts`: dependencies
-may not run install scripts.
+may not run install scripts. The Python tools of the CI (zizmor, pip-audit) are dependency groups in `pyproject.toml`
+(`workflows`, `audit`) and run from `uv.lock` with hashes (`uv run --only-group workflows zizmor …`), never as
+`uvx tool==version`.
