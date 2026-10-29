@@ -101,8 +101,11 @@ after the user's click. Never touches CAPTCHA frames; LinkedIn/Indeed only with 
 `tests/test_extension.py` loads it into Playwright's Chromium (`channel="chromium"`) against a live uvicorn.
 
 **Dashboard** (`web/app.py`): FastAPI JSON API under `/api` plus the prebuilt SPA from `web/dist`. Security model
-for a local server: bind to 127.0.0.1, reject unknown `Host` headers (DNS rebinding), and require `X-Jobslop: 1`
-on every mutating request (CSRF). Apply runs are separate processes managed by `runner.Runner`; the autopilot
+for a local server: bind to 127.0.0.1, reject unknown `Host` headers (DNS rebinding), require `X-Jobslop: 1`
+on every mutating request (CSRF) and the session cookie on `/api/*` + `/artifacts/*` (token in
+`JOBSLOP_HOME/dashboard-token`, `jobslop` opens `/#login=<token>`; tests use `conftest.signed_in`). Request models
+reject unknown fields, `BodyLimit` caps bodies, links from foreign sources must pass `netguard` (public addresses
+only). Threat model and findings: `docs/security.md`. Apply runs are separate processes managed by `runner.Runner`; the autopilot
 `Scheduler` (`autopilot.py`) runs in the server's lifespan.
 
 **Frontend** (`frontend/src`): React 19 + TS + Vite + Tailwind 4 + Radix + TanStack Query + React Router.
@@ -124,4 +127,6 @@ and show as translated toasts via the shared mutation error handler (no per-muta
   `ApplyEngine._submit` or the extension's approval (`planner.is_final_submit` + `planner.guard_submit_clicks`). Engine and
   extension share field resolution (`executor.text_value/select_index/chosen_options`, `Files.from_profile`) and
   cover-letter handling (`engine.ensure_cover_letter`) – change them once, not per caller.
-- Ruff: line length 110, rules `E F W I UP B SIM ASYNC RUF`.
+- Ruff: line length 110, rules `E F W I UP B SIM ASYNC RUF S` (flake8-bandit: justify every `noqa: S…`).
+- One identity everywhere: commits as `1xxn <98491048+1xxn@users.noreply.github.com>`; never a real name, CV file
+  name or personal path in code, docs or fixtures (use Max Mustermann). `main` merges are rebase-only.

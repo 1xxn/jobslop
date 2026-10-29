@@ -51,6 +51,30 @@
 - On Linux and macOS the jobslop folder (profile, CV, inbox password, extension token, browser logins) is readable
   only by you.
 - A stopped run or a closing dashboard no longer leaves Claude running in the background (it used up your quota).
+- Hardening review with a written threat model (`docs/security.md`): assets, trust boundaries, attackers, controls and
+  every finding with its fix and test.
+- jobslop only opens public web addresses for links from job sources, pages or "add job by link": nothing in your own
+  computer or network (the dashboard itself, the router, cloud metadata addresses), checked again after every redirect
+  and before every step of the application browser and the extension.
+- The browser extension's panel only reacts to your own clicks and lives in a closed shadow root; answers go into the
+  answer bank only for questions jobslop asked; CAPTCHA frames never receive any script; it asks for fewer
+  permissions (web pages only, no local files).
+- The dashboard API answers only your browser: `jobslop` opens it signed in (session cookie); other users and
+  processes on the same computer no longer get your data.
+- Your mailbox app password is kept in the system keyring (Windows Credential Manager, macOS Keychain, Secret
+  Service) instead of `settings.toml`; an existing one moves there on the next start.
+- The dashboard API validates every request strictly (unknown fields, lengths, ranges, body size), streams uploads
+  and only accepts real PDFs, keeps document paths inside the jobslop folder and no longer returns error details.
+- Title exclusions can no longer freeze the dashboard with a regular expression that backtracks catastrophically.
+- Settings that reach other programs (Claude model and effort, IMAP folder, notification addresses) are checked.
+- A `.env` file in a foreign folder can no longer choose the Claude program; the dashboard only listens on
+  127.0.0.1; on Windows a jobslop folder outside your user profile is made private; Windows tools are started from
+  System32 by full path.
+- Stricter browser policies for the dashboard (Trusted Types, no inline style attributes, Permissions-Policy,
+  Cross-Origin-Resource-Policy) and no caching of API responses with personal data.
+- CI/CD: workflows without default permissions, zizmor in its strictest mode, daily vulnerability audits of both
+  lockfiles, npm registry signatures, OpenSSF Scorecard, Gitleaks, releases only from protected tags after approval,
+  with build provenance and SBOM attestations. Private vulnerability reporting is enabled (see `SECURITY.md`).
 
 ### Performance
 - With thousands of jobs the dashboard stays fast: indexes for the job state and first-seen date (added to existing
