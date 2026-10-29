@@ -73,7 +73,10 @@ Chromium, and the job portals' own security.
 
 **Outbound requests (SSRF)** – `netguard.py`
 - Job and apply URLs from sources must be public http(s) addresses (no loopback/private/link-local IPs, no
-  `localhost`, no single-label names, no numeric IPv4 forms browsers accept such as `http://2130706433`).
+  `localhost`, no single-label names, no numeric IPv4 forms browsers accept such as `http://2130706433`). Links are
+  read the way Chromium reads them (WHATWG URL, hosts mapped with UTS 46: backslashes, `%xx` in the host, full-width
+  and enclosed characters, ideographic full stops); an address that cannot be read is not public. A fuzz target
+  compares the check with a WHATWG parser (ada-url).
 - "Add job by link" connects only to public addresses: every connection, including redirects, resolves the name once,
   checks every address and connects to exactly that address (no DNS-rebinding gap); 3 MB and 30 s limits.
 - The application engine and the extension refuse pages whose host resolves into your own network – otherwise a
@@ -82,9 +85,10 @@ Chromium, and the job portals' own security.
 
 **Untrusted content**
 - HTML parsing without regexes on page input; input capped (`html_to_text` 2 M characters, pages 3 MB, mails 150 KB).
-- Title-regex exclusions run on every status poll against thousands of foreign titles: nested quantifiers,
-  repetitions over alternatives, back-references and more than two open repetitions are rejected; titles are matched
-  on their first 200 characters.
+- Title-regex exclusions run on every status poll against thousands of foreign titles: variable repetitions inside
+  repetitions (`(a+)+`, `(a?){20}`), repetitions over alternatives and back-references are rejected, and the number
+  of ways a pattern can split a title is bounded (two open repetitions plus two optional parts – at most ~100 ms for
+  the worst title); titles are matched on their first 200 characters.
 - Prompt injection: Claude gets no tools except `Read` limited to its own work folder (`--tools`, `--allowedTools
   Read(./**)`, `--permission-mode dontAsk`, no MCP, no slash commands, no settings sources); the final submit always
   goes through `ApplyEngine._submit` / the extension's approval (`planner.is_final_submit`,
@@ -115,18 +119,23 @@ Chromium, and the job portals' own security.
 - Workflows start with no permissions, each job gets the minimum; `persist-credentials: false`; no
   `pull_request_target`; zizmor (strictest persona, online) without findings; Actions pinned to SHAs, SHA pinning
   enforced and only GitHub-owned plus three allowed actions may run; fork PR workflows need approval.
-- `main` is protected by a ruleset (pull request, 12 required checks incl. both OS matrices and CodeQL, up to date,
+- `main` is protected by a ruleset (pull request, 14 required checks incl. all OS matrices and CodeQL, up to date,
   no force push or deletion, no bypass – admins included); merges are rebase-only, so commits keep their authors.
   Private vulnerability reporting is on (`SECURITY.md`).
-- Supply chain: Dependabot with a 14-day cooldown, dependency review on PRs, daily pip-audit/npm audit, npm registry
-  signatures, `npm ci --ignore-scripts`, CodeQL, OpenSSF Scorecard, Gitleaks.
+- Supply chain: Dependabot with a 14-day cooldown, dependency review on PRs, daily pip-audit/npm audit (all
+  dependency groups), npm registry signatures, `npm ci --ignore-scripts`, CodeQL, OpenSSF Scorecard, Gitleaks; the
+  CI's own Python tools (zizmor, pip-audit) run from `uv.lock` with hashes, not as `uvx tool==version`.
+- Fuzzing: Atheris fuzzes every parser of foreign input (`fuzz/targets.py`) on pull requests and nightly
+  (`fuzz.yml`); the log names the kind of finding and the seed, never the input. fast-check property tests cover
+  the dashboard's link, date and source helpers.
 - Releases: only maintainers create `v*` tags; publishing waits for approval in the `release` environment; wheel and
-  sdist carry build provenance and an SBOM attestation.
+  sdist carry build provenance and an SBOM attestation, attached to the release as signed bundles (`.intoto.jsonl`)
+  and verified by the workflow before anything is uploaded.
 
 ## Findings of the 2026-10 review
 
 Severity: impact × exploitability for a single-user desktop app. Advisories were reported privately and published
-after the fix.
+after the fix. F-rows were found by fuzzing (milestone "Scorecard & Security").
 
 | # | Severity | Area | Finding | Exploitability | Fix | Test | Status |
 |---|---|---|---|---|---|---|---|
@@ -134,6 +143,7 @@ after the fix.
 | A2 | Medium | Add by link, engine, extension | "Add job by link" followed redirects to loopback/private/metadata addresses and read unbounded bodies (incl. the dashboard's own API); job URLs from sources could send the application browser or the extension to local addresses – the dashboard UI itself | You paste an attacker's link, or apply to a crafted posting | `netguard`: public addresses only, checked per connection after DNS (no rebinding gap) and before every step; 3 MB/30 s caps | `test_private_and_odd_targets_are_not_public` (25 cases), `test_public_client_checks_every_connection`, `test_add_job_by_link_refuses_local_targets`, `test_crawl_drops_postings_on_private_addresses`, `test_extension_refuses_pages_in_the_own_network` | Fixed (#26), advisory GHSA-2q5v-3pmx-4xp2 |
 | A3 | Medium | Dashboard API | No authentication: any local user or process could read profile, CV, answers and start applications; the profile API accepted any document path (e.g. `~/.ssh/id_rsa` as CV, then uploaded to a job site) | Another user or process on the same machine | Session cookie (token in the private folder), document paths only inside `JOBSLOP_HOME`, private ACL on Windows outside the profile | `test_api_needs_the_session_cookie`, `test_profile_rejects_unknown_fields_and_outside_documents`, `test_windows_folder_outside_the_profile_is_private` | Fixed (#26, #28), advisory GHSA-wqhm-h864-m4m4 |
 | A4 | Low | Configuration | A `.env` in the working directory could set the Claude binary (code execution) or a non-loopback bind address (API on the network) | You start jobslop inside a folder someone else controls | `.env` from the working directory only in a jobslop source checkout; loopback-only bind | `test_dotenv_in_a_foreign_folder_is_ignored`, `test_dashboard_only_binds_to_loopback` | Fixed (#26), advisory GHSA-gp2c-j9rf-2w4q |
+| A5 | Medium | Crawl, engine | The address check read links with `urlsplit`, Chromium with the WHATWG URL standard: `http://127.0.0.1:8765\@example.com/`, `%2e` in the host or look-alike characters (`x.ⓛocalhost`) passed as public and the application browser opened one page in your own network; a numeric host with a negative part (`http://-1.0.0.1/`) raised an exception that aborted every crawl | A crafted posting in any crawled source (apply, autopilot) | Hosts read like the browser does, IPv4 numbers with ASCII digits only, unreadable addresses not public; WHATWG differential fuzz target | `test_private_and_odd_targets_are_not_public`, `test_dns_check_resolves_the_name_the_browser_opens`, fuzz target `url` | Fixed (#45), advisory GHSA-5qj6-373q-g79m |
 | H1 | Low | Exclusions | Title-regex exclusions run against thousands of foreign titles on every status poll – a backtracking-prone rule could freeze the dashboard (ReDoS) | Needs a vulnerable rule of yours plus crafted titles | Nested/alternating repetitions, back-references, > 2 open repetitions rejected; titles matched on 200 characters; old unsafe rules act as plain text | `test_catastrophic_title_regexes_are_rejected`, `test_bad_regex_cannot_stall_the_status_poll` | Fixed (#26) |
 | H2 | Low | API errors | `api.internal` returned the exception text (paths, profile values, page content) | Local reader of API responses | Only the exception type; details in the server log; 422 without input echo | `test_api_errors_carry_codes` | Fixed (#26) |
 | H3 | Low | Uploads, bodies | Uploads were read completely before the size check; no body limit; file names only partly sanitised | Local process | Body-size middleware, streamed uploads with `%PDF-` check, safe names (no `:` streams, no device names) | `test_uploads_are_streamed_checked_and_named_safely`, `test_safe_filename`, `test_request_bodies_and_lists_are_bounded` | Fixed (#26) |
@@ -149,18 +159,42 @@ after the fix.
 | C1 | Medium | CI/CD | Workflow-level `contents: read` for every job, zizmor offline/default persona, no vulnerability audit of the lockfiles, `npm ci` with install scripts, release built and published in one job with `contents: write` | Compromised dependency or action | `permissions: {}` + minimal per job, zizmor online/auditor (0 findings), daily pip-audit/npm audit, registry signatures, `--ignore-scripts`, Scorecard, Gitleaks, split release job behind the `release` environment, SBOM + provenance attestations | CI | Fixed (#25) |
 | C2 | Medium | Repository | All actions allowed, SHA pinning not enforced, fork PRs of returning contributors ran without approval, no private vulnerability reporting, no tag protection, classic branch protection | Compromised action, malicious fork PR | Allow list + enforced SHA pinning, approval for all outside contributors, PVR on, `v*` tag ruleset, `release` environment, `main` ruleset (rebase-only) | Settings via `gh api` (#25) | Fixed |
 | C3 | Low | History | Personal name in commit metadata and a file name; 2 false-positive secret patterns | Public repository | History rewritten to one identity (`1xxn`), old Actions runs deleted; Gitleaks over the full history clean (`.gitleaks.toml` documents the two false positives) | `secrets.yml` | Fixed |
+| F1 | Low | Exclusions | The ReDoS check accepted optional parts inside repetitions (`(a?){22}a{22}`) and many bounded repetitions (`a{0,30}` eight times) – minutes of backtracking for one title; atomic groups `(?>…)` raised a TypeError (HTTP 500) | Needs such a rule of yours plus crafted titles | Variable repetitions inside repetitions rejected; ways to split a title bounded; atomic groups read correctly | `test_catastrophic_title_regexes_are_rejected`, fuzz target `title_regex` | Fixed (#44) |
+| F2 | Low | Add by link, extension | JSON-LD with `jobLocation`/`address` as text or list, or nested deeper than Python's recursion limit, raised an error instead of giving a job | A page you import or apply on | Tolerant JSON-LD reading, depth limit | `test_job_page_accepts_any_json_ld`, fuzz target `job_page` | Fixed (#44) |
+| F3 | Low | Uploads | `CON .pdf` and `COM¹.pdf` are Windows device names; a truncated extension could end in a space (Windows drops it silently), and a second pass could change a name | Your own upload | Device names checked the way Windows reads them; cleaning runs to a fixed point | `test_safe_filename`, fuzz target `upload_name` | Fixed (#44) |
+| F4 | Info | Dashboard frontend | `sourceName("constructor")` returned a function (lookup through `Object.prototype`) | Source names come from jobslop itself | `Object.hasOwn` | fast-check `utils.property.test.ts` | Fixed (#44) |
 
 ## OpenSSF Scorecard
 
-Fixed: Pinned-Dependencies (the install scripts pin the uv installer by version and SHA-256). Left open on purpose:
+Public run (`api.securityscorecards.dev`, Scorecard v5.6.0): 6.8 before the milestone "Scorecard & Security"
+(2026-10-29). Checks with `-1` are not counted in the total.
 
-- **Code-Review / Branch-Protection (reviews)** – a single-maintainer project cannot require a second approval
-  without blocking every change; all other branch rules are in place (ruleset, 14 required checks, no bypass).
-- **CII-Best-Practices** – needs a registration at bestpractices.dev.
-- **Fuzzing** – parsers of untrusted input are covered by targeted tests (25 address forms, ReDoS patterns, size
-  caps), not by a fuzzer.
-- **Maintained** – resolves itself once the repository is older than 90 days.
-- **Pinned-Dependencies (Claude Code installer)** – Anthropic's official installer has no versioned URL.
+| Check | Before | After | Status and decision |
+|---|---|---|---|
+| Binary-Artifacts | 10 | 10 | – |
+| Branch-Protection | 4 | 4 | Highest score without required approvals: tier 2 of 5 needs at least one required review. **Decision:** no required reviews while there is one maintainer – it would block every pull request, and a bot or second account approving pull requests would only fake a review. Everything else is on (ruleset, 14 required checks, up to date, no bypass, no force push or deletion). |
+| CI-Tests | 10 | 10 | – |
+| CII-Best-Practices | 0 | 5 | Passing level on bestpractices.dev; answers and evidence in `docs/openssf-best-practices.md`. Silver needs a second person with access, gold two unassociated contributors. |
+| Code-Review | 0 | 0 | Counts changesets approved by someone other than the author – none with one maintainer (same decision as Branch-Protection). |
+| Contributors | 0 | 0 | Counts contributors from at least three organisations or companies (public profile data) – not applicable to a single anonymous maintainer. |
+| Dangerous-Workflow | 10 | 10 | – |
+| Dependency-Update-Tool | 10 | 10 | – |
+| Fuzzing | 0 | 10 | Atheris targets in `fuzz/` (Scorecard detects `import atheris`), `fuzz.yml`, fast-check in the dashboard. |
+| License | 10 | 10 | – |
+| Maintained | 0 | 0 | The repository is younger than 90 days; activity counts from 2027-01-24. |
+| Packaging | -1 | 10 | Wheel and sdist go to PyPI with Trusted Publishing (`pypa/gh-action-pypi-publish` in `release.yml`); Scorecard needs a successful run of that workflow. |
+| Pinned-Dependencies | 9 | 9 | Everything is pinned (actions by SHA, uv installer by version and SHA-256, npm by lockfile, CI tools by hash in `uv.lock`) except Anthropic's Claude Code installer in `install.sh`. **Decision:** keep it – there is no versioned URL, the installer verifies the Claude Code binary itself, and moving the call elsewhere would only hide it from Scorecard. |
+| SAST | 10 | 10 | – |
+| Security-Policy | 10 | 10 | – |
+| Signed-Releases | -1 | 10 | Every release carries the provenance as `.intoto.jsonl` (10 per release). |
+| Token-Permissions | 10 | 10 | `contents: write` only in the publish job behind the `release` environment. |
+| Vulnerabilities | 10 | 10 | – |
+| Webhooks | – | – | Not part of the public run (needs an admin token); the repository has no webhooks. |
+
+Not available for this repository (user-owned, no GitHub Secret Protection licence): secret scanning for generic
+(non-provider) patterns and validity checks – Gitleaks covers generic patterns in CI. GitHub Code Quality is a paid
+product since July 2026; CodeQL, Ruff and mypy cover its ground. Code scanning alerts of the Scorecard tool for the
+two decisions above are dismissed as "won't fix" with the reason; the others close when their check passes.
 
 ## Residual risks
 
