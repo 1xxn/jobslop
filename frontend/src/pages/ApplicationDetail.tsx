@@ -12,7 +12,7 @@ import { api, ApiError, artifactUrl } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { hasMessage, type MessageKey } from "@/lib/messages";
 import type { ApplicationDetail as Detail } from "@/lib/types";
-import { cn, formatDate, formatDateTime, groupByDay, parseDate } from "@/lib/utils";
+import { cn, formatDate, formatDateTime, groupByDay, parseDate, webUrl } from "@/lib/utils";
 
 // Stände, die du nach dem Absenden selbst pflegst (wie im Board)
 const PIPELINE = ["submitted", "manual", "interview", "offer", "rejected"];
@@ -73,7 +73,7 @@ export function ApplicationDetailPage() {
               {a.final_url && (
                 <>
                   {" · "}
-                  <a href={a.final_url} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
+                  <a href={webUrl(a.final_url)} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
                     {t("detail.final_url")} ↗
                   </a>
                 </>

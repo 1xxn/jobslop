@@ -70,10 +70,16 @@ def test_dashboard_cannot_be_framed_and_loads_only_own_scripts(settings, config,
     assert api.headers["x-frame-options"] == "DENY"
     assert api.headers["x-content-type-options"] == "nosniff"
     assert api.headers["referrer-policy"] == "no-referrer"
+    # Personendaten nicht im Browser-Cache, nicht von fremden Seiten einbindbar, keine Gerätezugriffe
+    assert api.headers["cache-control"] == "no-store"
+    assert api.headers["cross-origin-resource-policy"] == "same-origin"
+    assert "camera=()" in api.headers["permissions-policy"]
     page = client.get("/")
+    assert "no-store" not in page.headers.get("cache-control", "")  # die Oberfläche selbst darf in den Cache
     if page.headers["content-type"].startswith("text/html"):
         csp = page.headers["content-security-policy"]
         assert "frame-ancestors 'none'" in csp and "script-src 'self';" in csp
+        assert "require-trusted-types-for 'script'" in csp and "style-src-attr 'none'" in csp
     if (DIST / "index.html").is_file():
         # Kein Inline-Skript in der gebauten Oberfläche – die CSP würde es blockieren
         html = (DIST / "index.html").read_text(encoding="utf-8")

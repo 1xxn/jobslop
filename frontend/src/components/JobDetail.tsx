@@ -8,7 +8,7 @@ import { useBackendText, useReportError } from "@/lib/backendText";
 import { useI18n } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/messages";
 import type { JobDetail as Job } from "@/lib/types";
-import { cn, formatDate, formatRelative, hostOf, sourceName } from "@/lib/utils";
+import { cn, formatDate, formatRelative, hostOf, sourceName, webUrl } from "@/lib/utils";
 import { ApplyDialog } from "./actions";
 import { LoadError, SCORE_MAX, StatusLabel } from "./domain";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "./ui/overlays";
@@ -200,7 +200,7 @@ export function JobDetail({
             .filter(Boolean)
             .join(" · ")}
           {" · "}
-          <a href={job.url} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
+          <a href={webUrl(job.url)} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
             {t("job.open_posting")} ↗
           </a>
         </p>
