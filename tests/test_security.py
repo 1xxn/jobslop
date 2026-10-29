@@ -86,6 +86,8 @@ def _client(settings, config, profile) -> TestClient:
         "http://0x-1.0.0.1/",
         "http://+127.0.0.1/",
         "http://1_27.0.0.1/",
+        # gilt im Browser als jobs.example.com, Python selbst kann sie nicht lesen (host_of im Crawl brach ab)
+        "https://jobs.example.com\\[x/1",
     ],
 )
 def test_private_and_odd_targets_are_not_public(url):

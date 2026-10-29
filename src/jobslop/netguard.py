@@ -155,6 +155,9 @@ def is_public_host(host: str) -> bool:
 def is_public_url(url: str) -> bool:
     """http(s)-Adresse, deren Host öffentlich sein kann – ohne DNS-Abfrage, gelesen wie im Browser."""
     try:
+        # Auch Python selbst muss die Adresse lesen können: Crawl, Warteschlange und Erweiterung lesen später die
+        # Original-Adresse (host_of, company_from_url) – „https://x.example\[“ ginge im Browser, dort aber nicht
+        urlsplit(url.strip())
         parts = urlsplit(_browser_url(url))
         return parts.scheme.lower() in WEB_SCHEMES and is_public_host(parts.hostname or "")
     except ValueError:  # auch ipaddress-Fehler: was sich nicht lesen lässt, ist nicht öffentlich
