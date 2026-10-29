@@ -4,7 +4,8 @@
 # Installs uv if needed, offers Claude Code, installs the `jobslop` command and its browser, then starts jobslop.
 set -eu
 
-REPO="${JOBSLOP_REPO:-git+https://github.com/1xxn/jobslop}"
+# The latest release (tag v*, only maintainers can create one) – not whatever is on main right now
+REPO="${JOBSLOP_REPO:-}"
 # uv as a fixed release whose installer is checked against its SHA-256 before it runs (from the GitHub release page
 # of astral-sh/uv) – not whatever a mutable URL serves at that moment. Bump both together.
 UV_VERSION="0.13.6"
@@ -44,6 +45,15 @@ else
 fi
 
 step "Installing jobslop"
+if [ -z "$REPO" ]; then
+  tag="$(curl -fsSL https://api.github.com/repos/1xxn/jobslop/releases/latest 2>/dev/null \
+    | sed -n 's/.*"tag_name": *"\(v[0-9][0-9.]*\)".*/\1/p' | head -n 1)"
+  if [ -z "$tag" ]; then
+    echo "No release found – installing the development version (main)."
+    tag=main
+  fi
+  REPO="git+https://github.com/1xxn/jobslop@$tag"
+fi
 uv tool install --force "$REPO"
 uv tool update-shell >/dev/null 2>&1 || true
 

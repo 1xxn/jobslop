@@ -2,7 +2,7 @@ name: Release
 
 # Ein Tag wie v1.1.0 auf main: alle CI-Prüfungen laufen erneut, dann werden Wheel und sdist gebaut, mit
 # Herkunftsnachweis und SBOM attestiert und – nach Freigabe im Environment „release“ – als GitHub-Release mit dem
-# passenden Abschnitt aus CHANGELOG.md veröffentlicht. Ablauf: CONTRIBUTING.md → Releasing.
+# passenden Abschnitt aus CHANGELOG.md veröffentlicht, danach auf PyPI. Ablauf: CONTRIBUTING.md → Releasing.
 on:
   push:
     tags: ["v*"]
@@ -139,3 +139,28 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: gh release create "$GITHUB_REF_NAME" dist/* --title "jobslop $GITHUB_REF_NAME" --notes-file release/notes.md --verify-tag
+
+  pypi:
+    name: Publish to PyPI
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Trusted Publishing: PyPI vertraut genau diesem Workflow im Environment „pypi“ – kein Token im Repo. Die
+    # Action legt zusätzlich PEP-740-Attestierungen an (auf PyPI sichtbar).
+    environment:
+      name: pypi
+      url: https://pypi.org/project/jobslop/
+    permissions:
+      id-token: write # OIDC-Token für PyPI und die Attestierungen
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+      # Nur Wheel und sdist – genau die Dateien, die oben attestiert und verifiziert wurden
+      - name: Wheel and sdist
+        run: |
+          mkdir pypi
+          cp dist/*.whl dist/*.tar.gz pypi/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: pypi/

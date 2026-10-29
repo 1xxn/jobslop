@@ -3,7 +3,8 @@
 # Installiert uv (falls nötig), bietet Claude Code an, installiert jobslop als Befehl und den Browser, startet jobslop.
 
 $ErrorActionPreference = "Stop"
-$Repo = if ($env:JOBSLOP_REPO) { $env:JOBSLOP_REPO } else { "git+https://github.com/1xxn/jobslop" }
+# Neuestes Release (Tag v*, nur Maintainer können ihn setzen) – nicht, was gerade auf main liegt
+$Repo = $env:JOBSLOP_REPO
 # uv als feste Version, deren Installer vor dem Ausführen per SHA-256 geprüft wird (Release-Seite von astral-sh/uv) –
 # nicht, was eine veränderliche Adresse gerade liefert. Beides zusammen anheben.
 $UvVersion = "0.13.6"
@@ -48,6 +49,15 @@ if (Get-Command claude -ErrorAction SilentlyContinue) {
 }
 
 Step "jobslop installieren"
+if (-not $Repo) {
+    $tag = $null
+    try { $tag = (Invoke-RestMethod https://api.github.com/repos/1xxn/jobslop/releases/latest).tag_name } catch { }
+    if ($tag -notmatch "^v[0-9][0-9.]*$") {
+        Write-Host "Kein Release gefunden – installiere den Entwicklungsstand (main)." -ForegroundColor Yellow
+        $tag = "main"
+    }
+    $Repo = "git+https://github.com/1xxn/jobslop@$tag"
+}
 uv tool install --force $Repo
 uv tool update-shell | Out-Null
 Refresh-Path
