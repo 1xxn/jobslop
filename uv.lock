@@ -14,6 +14,23 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "ada-url"
+version = "4.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cffi" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/98/4e/f62ef579f693298f62a4657a0429823444025f342161d53f5c1f7bd629c6/ada_url-4.0.0.tar.gz", hash = "sha256:9f399ec867349800a4c2d3aa8df8c533c340494b04d34b1f082b97d9a8b76a07", size = 265328, upload-time = "2026-07-28T19:29:53.846Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/23/7c/144b315890c7c6bc6367bcd9101bd29f4343bc2a93a944bc5815dafbf48a/ada_url-4.0.0-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:da1510328ffbb5a505815f322061137527946a3698bbb70dc53ec086b8086e21", size = 1861921, upload-time = "2026-07-28T19:29:23.129Z" },
+    { url = "https://files.pythonhosted.org/packages/dc/22/6a5d890f541266f5b7c345947c633bdb686a856c734502131161c52e3ccc/ada_url-4.0.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:4608f6aa98fc736a4edd751dd017c9f146b8d3d86e08d86bfc0df5cb7f3eae8b", size = 2877324, upload-time = "2026-07-28T19:29:26.276Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/67/525a42ce8f4de030423c497b1a70261921f0347070cb3b22f9ae6ce6a14a/ada_url-4.0.0-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:bdb9e57c9f2d2c4c29dc2b49eeb7c370a8c9550fcd95a44d8434444e236537a2", size = 1861928, upload-time = "2026-07-28T19:29:35.193Z" },
+    { url = "https://files.pythonhosted.org/packages/02/66/a673c258d4aa76b888758d5a468f231bb12686dc3c10ee51c2e5c2dffd7e/ada_url-4.0.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:6f13b0cff78ad3ff48c4179f2eafaa0231be1ca1a4f52d841565a69dd3c7ceeb", size = 2877325, upload-time = "2026-07-28T19:29:38.637Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/11/d09f9563c844ca03a57000fd186ab4c478dd5e8c47f3ca968ac589edc9b9/ada_url-4.0.0-cp314-cp314-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:ae36e49770036978ae9a3c31f24b69a1020d83dcc53b9a134a1ba5cafb85bd28", size = 1861736, upload-time = "2026-07-28T19:29:47.915Z" },
+    { url = "https://files.pythonhosted.org/packages/12/4e/daa6b344240c9ea7776d211f2875731638d607c32a7f6b66cd3fdec7f2b6/ada_url-4.0.0-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:f24ac26a6e1c8cb00abfa84426e5419cbe619439d55ba1266db4c67b5af066ad", size = 2877652, upload-time = "2026-07-28T19:29:50.926Z" },
+]
+
+[[package]]
 name = "annotated-doc"
 version = "0.0.5"
 source = { registry = "https://pypi.org/simple" }
@@ -789,6 +806,7 @@ dev = [
     { name = "ruff" },
 ]
 fuzz = [
+    { name = "ada-url", marker = "python_full_version < '3.15' and platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "atheris", marker = "python_full_version < '3.15' and platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 workflows = [
@@ -826,7 +844,10 @@ dev = [
     { name = "respx", specifier = ">=0.23" },
     { name = "ruff", specifier = ">=0.17.3" },
 ]
-fuzz = [{ name = "atheris", marker = "python_full_version < '3.15' and platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=3.1" }]
+fuzz = [
+    { name = "ada-url", marker = "python_full_version < '3.15' and platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=1.29" },
+    { name = "atheris", marker = "python_full_version < '3.15' and platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=3.1" },
+]
 workflows = [{ name = "zizmor", specifier = ">=1.31.1" }]
 
 [[package]]

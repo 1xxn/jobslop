@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [html_text, job_page, title_regex, upload_name, extension_step]
+        target: [url, html_text, job_page, title_regex, upload_name, extension_step]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
