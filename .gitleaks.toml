@@ -1,0 +1,12 @@
+# Gitleaks (Workflow „Secrets“): Standardregeln plus begründete Ausnahmen. Neue Ausnahmen nur mit Begründung.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Bekannte Fehlalarme"
+regexes = [
+  # Googles öffentlicher reCAPTCHA-v2-Testschlüssel (developers.google.com/recaptcha/docs/faq) in einer Test-Fixture
+  '''6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI''',
+]
+# „Arbeitsagentur“ hat genau die Länge, die die Regel für LinkedIn-Client-IDs nach dem Wort „LinkedIn“ erwartet
+stopwords = ["arbeitsagentur"]
